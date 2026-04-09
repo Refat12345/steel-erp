@@ -1,0 +1,208 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────
+
+enum ContractStatus {
+  active
+  suspended
+  closed
+}
+
+enum OverrideType {
+  grant
+  revoke
+}
+
+enum AuditAction {
+  create
+  update
+  status_change
+  upload
+  delete
+}
+
+// ─── Authentication & Permissions ─────────────────────────────────
+
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String   @map("password_hash")
+  fullName     String   @map("full_name")
+  roleCode     String   @map("role_code")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  createdById  Int?     @map("created_by_id")
+
+  role                Role                      @relation(fields: [roleCode], references: [code])
+  creator             User?                     @relation("UserCreator", fields: [createdById], references: [id])
+  createdUsers        User[]                    @relation("UserCreator")
+  permissionOverrides UserPermissionOverride[]
+
+  customersCreated     Customer[]                @relation("CustomerCreator")
+  customersUpdated     Customer[]                @relation("CustomerUpdater")
+  contractsCreated     MasterContract[]          @relation("ContractCreator")
+  contractsUpdated     MasterContract[]          @relation("ContractUpdater")
+  attachmentsUploaded  ContractAttachment[]      @relation("AttachmentUploader")
+  permOverridesGranted UserPermissionOverride[]  @relation("OverrideGranter")
+  auditLogs            AuditLog[]                @relation("AuditLogUser")
+
+  @@map("users")
+}
+
+model Role {
+  code        String @id
+  displayName String @map("display_name")
+
+  users              User[]
+  defaultPermissions RoleDefaultPermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  code        String @id
+  displayName String @map("display_name")
+  module      String
+  description String @default("")
+
+  roleDefaults RoleDefaultPermission[]
+  overrides    UserPermissionOverride[]
+
+  @@map("permissions")
+}
+
+model RoleDefaultPermission {
+  roleCode       String @map("role_code")
+  permissionCode String @map("permission_code")
+
+  role       Role       @relation(fields: [roleCode], references: [code])
+  permission Permission @relation(fields: [permissionCode], references: [code])
+
+  @@id([roleCode, permissionCode])
+  @@map("role_default_permissions")
+}
+
+model UserPermissionOverride {
+  id             Int          @id @default(autoincrement())
+  userId         Int          @map("user_id")
+  permissionCode String       @map("permission_code")
+  overrideType   OverrideType @map("override_type")
+  grantedById    Int          @map("granted_by_id")
+  grantedAt      DateTime     @default(now()) @map("granted_at")
+
+  user       User       @relation(fields: [userId], references: [id])
+  permission Permission @relation(fields: [permissionCode], references: [code])
+  granter    User       @relation("OverrideGranter", fields: [grantedById], references: [id])
+
+  @@unique([userId, permissionCode])
+  @@map("user_permission_overrides")
+}
+
+// ─── Customers & Contracts ────────────────────────────────────────
+
+model Customer {
+  id                     Int      @id @default(autoincrement())
+  code                   String   @unique // auto-generated: C-0001
+  fullName               String   @map("full_name")
+  fatherName             String   @map("father_name")
+  nationalId             String   @unique @map("national_id")
+  phonePrimary           String   @map("phone_primary")
+  phoneSecondary         String?  @map("phone_secondary")
+  companyAddress         String   @map("company_address")
+  commercialRegistration String?  @map("commercial_registration")
+  notes                  String?
+  isActive               Boolean  @default(true) @map("is_active")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+  createdById            Int      @map("created_by_id")
+  updatedById            Int?     @map("updated_by_id")
+
+  creator   User  @relation("CustomerCreator", fields: [createdById], references: [id])
+  updater   User? @relation("CustomerUpdater", fields: [updatedById], references: [id])
+  contracts MasterContract[]
+
+  @@index([phonePrimary])
+  @@index([createdAt])
+  @@map("customers")
+}
+
+model MasterContract {
+  contractNumber String         @id @map("contract_number") // YY-CC
+  customerId     Int            @map("customer_id")
+  attachmentPath String         @map("attachment_path") // mandatory signed-contract scan
+  status         ContractStatus @default(active)
+  notes          String?
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  createdById    Int            @map("created_by_id")
+  updatedById    Int?           @map("updated_by_id")
+
+  customer    Customer             @relation(fields: [customerId], references: [id])
+  creator     User                 @relation("ContractCreator", fields: [createdById], references: [id])
+  updater     User?                @relation("ContractUpdater", fields: [updatedById], references: [id])
+  attachments ContractAttachment[]
+
+  @@unique([customerId, contractNumber])
+  @@index([customerId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("master_contracts")
+}
+
+model ContractAttachment {
+  id             Int      @id @default(autoincrement())
+  contractNumber String   @map("contract_number")
+  filePath       String   @map("file_path")
+  fileName       String   @map("file_name")
+  fileSize       Int      @map("file_size") // bytes
+  uploadedAt     DateTime @default(now()) @map("uploaded_at")
+  uploadedById   Int      @map("uploaded_by_id")
+
+  contract MasterContract @relation(fields: [contractNumber], references: [contractNumber])
+  uploader User           @relation("AttachmentUploader", fields: [uploadedById], references: [id])
+
+  @@index([contractNumber])
+  @@map("contract_attachments")
+}
+
+// ─── Audit ────────────────────────────────────────────────────────
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  userId     Int      @map("user_id")
+  action     AuditAction
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  details    Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User @relation("AuditLogUser", fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ─── Lookup Tables ────────────────────────────────────────────────
+
+model SizeLookup {
+  id                 Int     @id @default(autoincrement())
+  code               String  @unique
+  displayName        String  @map("display_name")
+  isSpecialRatio     Boolean @default(false) @map("is_special_ratio")
+  subjectToTolerance Boolean @default(true) @map("subject_to_tolerance")
+  isBundleType       Boolean @default(true) @map("is_bundle_type")
+  isActive           Boolean @default(true) @map("is_active")
+  sortOrder          Int     @default(0) @map("sort_order")
+
+  @@map("size_lookup")
+}
