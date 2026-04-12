@@ -1,0 +1,22 @@
+import {
+  getApiSession,
+  unauthorized,
+  forbidden,
+  ok,
+  hasPermission,
+  handleServiceError,
+} from "@/lib/api-utils";
+import { listActiveSizes } from "@/lib/services/size-lookup.service";
+
+export async function GET() {
+  const session = await getApiSession();
+  if (!session) return unauthorized();
+  if (!hasPermission(session, "salesorder.view")) return forbidden();
+
+  try {
+    const rows = await listActiveSizes();
+    return ok(rows);
+  } catch (e) {
+    return handleServiceError(e);
+  }
+}

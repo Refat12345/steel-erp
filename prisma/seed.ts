@@ -12,6 +12,11 @@ const DEMO_NATIONAL_IDS = [
   "DEMO-SEED-003",
   "DEMO-SEED-004",
   "DEMO-SEED-005",
+  "DEMO-SEED-006",
+  "DEMO-SEED-007",
+  "DEMO-SEED-008",
+  "DEMO-SEED-009",
+  "DEMO-SEED-010",
 ] as const;
 
 async function main() {
@@ -159,9 +164,14 @@ async function main() {
     { code: "20mm", displayName: "20 مم", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 7 },
     { code: "22mm", displayName: "22 مم", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 8 },
     { code: "25mm", displayName: "25 مم", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 9 },
-    { code: "shortbar", displayName: "توالف (Shortbar)", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 10 },
+    { code: "shortbar_1_4m", displayName: "توالف 1–4 م", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 10 },
+    { code: "shortbar_4_12m", displayName: "توالف 4–12 م", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 11 },
+    { code: "scrap", displayName: "خردة (Scrap)", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 12 },
     { code: "6mm", displayName: "6 مم", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: false, sortOrder: 0 },
   ];
+
+  // Remove legacy "shortbar" if it exists (replaced by shortbar_1_4m / shortbar_4_12m)
+  await prisma.sizeLookup.deleteMany({ where: { code: "shortbar" } });
 
   for (const size of sizes) {
     await prisma.sizeLookup.upsert({
@@ -202,6 +212,38 @@ async function main() {
   });
   console.log("  ✓ Admin user seeded (username: admin, password: admin123)");
 
+  // ─── Demo users per role (dev / QA) ───────────────────────────
+  const demoUserPassword = hashSync("demo123", 10);
+  const demoUsers: Array<{
+    username: string;
+    fullName: string;
+    roleCode: "finance" | "logistics" | "scale_operator";
+  }> = [
+    { username: "finance", fullName: "موظف المالية (تجريبي)", roleCode: "finance" },
+    { username: "logistics", fullName: "موظف اللوجستيك (تجريبي)", roleCode: "logistics" },
+    { username: "scale", fullName: "عامل القبان (تجريبي)", roleCode: "scale_operator" },
+  ];
+  for (const u of demoUsers) {
+    await prisma.user.upsert({
+      where: { username: u.username },
+      update: {
+        passwordHash: demoUserPassword,
+        fullName: u.fullName,
+        roleCode: u.roleCode,
+        isActive: true,
+      },
+      create: {
+        username: u.username,
+        passwordHash: demoUserPassword,
+        fullName: u.fullName,
+        roleCode: u.roleCode,
+        isActive: true,
+        createdById: systemUser.id,
+      },
+    });
+  }
+  console.log("  * Role demo users (password for all: demo123): finance, logistics, scale");
+
   // ─── Demo customers & contracts (Slice 1 UI) ──────────────────
   const uploadsDir = path.join(process.cwd(), "uploads");
   await mkdir(uploadsDir, { recursive: true });
@@ -224,12 +266,33 @@ async function main() {
     });
     const demoContractNumbers = demoContracts.map((c) => c.contractNumber);
     if (demoContractNumbers.length > 0) {
+      // Delete sales order items first, then sales orders, then contract attachments, then contracts
+      const demoSOs = await prisma.salesOrder.findMany({
+        where: { contractNumber: { in: demoContractNumbers } },
+        select: { orderNumber: true },
+      });
+      const demoSONumbers = demoSOs.map((s) => s.orderNumber);
+      if (demoSONumbers.length > 0) {
+        await prisma.paymentAllocation.deleteMany({ where: { orderNumber: { in: demoSONumbers } } });
+        await prisma.paymentSlice.deleteMany({ where: { orderNumber: { in: demoSONumbers } } });
+        await prisma.orderItem.deleteMany({ where: { orderNumber: { in: demoSONumbers } } });
+        await prisma.salesOrder.deleteMany({ where: { orderNumber: { in: demoSONumbers } } });
+      }
       await prisma.contractAttachment.deleteMany({
         where: { contractNumber: { in: demoContractNumbers } },
       });
       await prisma.masterContract.deleteMany({
         where: { contractNumber: { in: demoContractNumbers } },
       });
+    }
+    const demoPayments = await prisma.payment.findMany({
+      where: { customerId: { in: demoCustomerIds } },
+      select: { id: true },
+    });
+    const demoPaymentIds = demoPayments.map((p) => p.id);
+    if (demoPaymentIds.length > 0) {
+      await prisma.paymentAllocation.deleteMany({ where: { paymentId: { in: demoPaymentIds } } });
+      await prisma.payment.deleteMany({ where: { id: { in: demoPaymentIds } } });
     }
     await prisma.customer.deleteMany({
       where: { id: { in: demoCustomerIds } },
@@ -301,6 +364,66 @@ async function main() {
       notes: "عميل تجريبي معطّل — لا يظهر في قائمة إنشاء عقد جديد (نشط فقط).",
       isActive: false,
     },
+    {
+      code: "C-DEMO-06",
+      fullName: "سامر عبد الرحمن الناصر",
+      fatherName: "عبد الرحمن",
+      nationalId: "DEMO-SEED-006",
+      phonePrimary: "0933444555",
+      phoneSecondary: null,
+      companyAddress: "درعا — الشهباء",
+      commercialRegistration: null,
+      notes: "عميل تجريبي — عقد نشط (مجموعة البيانات الموسّعة).",
+      isActive: true,
+    },
+    {
+      code: "C-DEMO-07",
+      fullName: "مؤسسة الأمان للإنشاءات",
+      fatherName: "طارق",
+      nationalId: "DEMO-SEED-007",
+      phonePrimary: "021-556677",
+      phoneSecondary: null,
+      companyAddress: "ريف دمشق — عدرا",
+      commercialRegistration: "CR-200220",
+      notes: "عميل تجريبي — شركة.",
+      isActive: true,
+    },
+    {
+      code: "C-DEMO-08",
+      fullName: "ليلى حسن المصري",
+      fatherName: "حسن",
+      nationalId: "DEMO-SEED-008",
+      phonePrimary: "0944555666",
+      phoneSecondary: "0944555667",
+      companyAddress: "إدلب — معرة النعمان",
+      commercialRegistration: null,
+      notes: "عميل تجريبي — عقد معلّق.",
+      isActive: true,
+    },
+    {
+      code: "C-DEMO-09",
+      fullName: "عمر ديب الخطيب",
+      fatherName: "ديب",
+      nationalId: "DEMO-SEED-009",
+      phonePrimary: "0955111222",
+      phoneSecondary: null,
+      companyAddress: "السويداء — شهبا",
+      commercialRegistration: null,
+      notes: "عميل تجريبي — عدة أوامر بيع.",
+      isActive: true,
+    },
+    {
+      code: "C-DEMO-10",
+      fullName: "ورشة الحدادة الحديثة",
+      fatherName: "بسام",
+      nationalId: "DEMO-SEED-010",
+      phonePrimary: "033-889900",
+      phoneSecondary: null,
+      companyAddress: "دمشق — كفر سوسة",
+      commercialRegistration: "CR-303030",
+      notes: "عميل تجريبي — أمر ملغى للعرض.",
+      isActive: true,
+    },
   ];
 
   const createdCustomers: { id: number; nationalId: string }[] = [];
@@ -363,8 +486,37 @@ async function main() {
       status: "active",
       notes: "عقد نشط — عميل اللاذقية.",
     },
+    {
+      contractNumber: `${yy}-94`,
+      customerNationalId: "DEMO-SEED-006",
+      status: "active",
+      notes: "عقد تجريبي موسّع — درعا.",
+    },
+    {
+      contractNumber: `${yy}-95`,
+      customerNationalId: "DEMO-SEED-007",
+      status: "active",
+      notes: "عقد تجريبي موسّع — مؤسسة الأمان.",
+    },
+    {
+      contractNumber: `${yy}-96`,
+      customerNationalId: "DEMO-SEED-008",
+      status: "suspended",
+      notes: "عقد معلّق — بيانات موسّعة.",
+    },
+    {
+      contractNumber: `${yy}-97`,
+      customerNationalId: "DEMO-SEED-009",
+      status: "active",
+      notes: "عقد نشط — السويداء.",
+    },
+    {
+      contractNumber: `${yy}-98`,
+      customerNationalId: "DEMO-SEED-010",
+      status: "active",
+      notes: "عقد نشط — ورشة الحدادة.",
+    },
   ];
-
   for (const ct of contractsSeed) {
     const customerId = byNid(ct.customerNationalId);
     await prisma.masterContract.create({
@@ -391,6 +543,324 @@ async function main() {
   console.log(
     `  ✓ Demo customers & contracts seeded (${customersData.length} customers, ${contractsSeed.length} contracts)`
   );
+
+  // ─── Demo Sales Orders (Slice 2) ──────────────────────────────
+  const sizeLookup = await prisma.sizeLookup.findMany();
+  const sizeByCode = (code: string) => sizeLookup.find((s) => s.code === code)!;
+
+  const rebarPrices: Array<{ code: string; price: number }> = [
+    { code: "8mm", price: 620 },
+    { code: "10mm", price: 610 },
+    { code: "12mm", price: 590 },
+    { code: "14mm", price: 590 },
+    { code: "16mm", price: 590 },
+    { code: "18mm", price: 590 },
+    { code: "20mm", price: 590 },
+    { code: "22mm", price: 590 },
+    { code: "25mm", price: 590 },
+  ];
+
+  const seedRebarOrderItems = async (orderNumber: string) => {
+    for (const rp of rebarPrices) {
+      const size = sizeByCode(rp.code);
+      if (size) {
+        await prisma.orderItem.create({
+          data: {
+            orderNumber,
+            sizeId: size.id,
+            pricePerTon: rp.price,
+          },
+        });
+      }
+    }
+  };
+
+  const activeContractNumber = `${yy}-90`; // DEMO-SEED-001
+
+  const so1Number = `${activeContractNumber}-001`;
+  await prisma.salesOrder.create({
+    data: {
+      orderNumber: so1Number,
+      contractNumber: activeContractNumber,
+      kind: "REBAR",
+      grade: "FIRST",
+      settlementMode: "CREDIT",
+      paymentDeadlineDays: 28,
+      totalQtyTons: 500,
+      toleranceType: "percentage",
+      toleranceValue: 5,
+      specialRatioPct: 10,
+      orderDate: new Date(),
+      deliveryDate: new Date(Date.now() + 90 * 86400000),
+      status: "approved",
+      notes: "أمر بيع تجريبي — مبروم نخب أول، آجل 28 يوم.",
+      createdById: systemUser.id,
+    },
+  });
+  await seedRebarOrderItems(so1Number);
+
+  const so2Number = `${activeContractNumber}-002`;
+  await prisma.salesOrder.create({
+    data: {
+      orderNumber: so2Number,
+      contractNumber: activeContractNumber,
+      kind: "SCRAP",
+      settlementMode: "PAYMENT_PLAN",
+      totalQtyTons: 100,
+      toleranceType: "weight",
+      toleranceValue: 10,
+      orderDate: new Date(),
+      deliveryDate: new Date(Date.now() + 60 * 86400000),
+      status: "draft",
+      notes: "أمر بيع تجريبي — خردة، نظام دفعات.",
+      createdById: systemUser.id,
+    },
+  });
+  const scrapSize = sizeByCode("scrap");
+  if (scrapSize) {
+    await prisma.orderItem.create({
+      data: {
+        orderNumber: so2Number,
+        sizeId: scrapSize.id,
+        pricePerTon: 200,
+      },
+    });
+  }
+
+  const so3Number = `${activeContractNumber}-003`;
+  await prisma.salesOrder.create({
+    data: {
+      orderNumber: so3Number,
+      contractNumber: activeContractNumber,
+      kind: "REBAR",
+      grade: "SECOND",
+      settlementMode: "CREDIT",
+      paymentDeadlineDays: 21,
+      totalQtyTons: 120,
+      toleranceType: "percentage",
+      toleranceValue: 5,
+      specialRatioPct: 8,
+      orderDate: new Date(),
+      deliveryDate: new Date(Date.now() + 45 * 86400000),
+      status: "in_progress",
+      notes: "أمر بيع تجريبي — مبروم نخب ثاني.",
+      createdById: systemUser.id,
+    },
+  });
+  await seedRebarOrderItems(so3Number);
+
+  const c91 = `${yy}-91`;
+  const so91001 = `${c91}-001`;
+  await prisma.salesOrder.create({
+    data: {
+      orderNumber: so91001,
+      contractNumber: c91,
+      kind: "REBAR",
+      grade: "FIRST",
+      settlementMode: "CREDIT",
+      paymentDeadlineDays: 30,
+      totalQtyTons: 300,
+      toleranceType: "percentage",
+      toleranceValue: 5,
+      orderDate: new Date(),
+      deliveryDate: new Date(Date.now() + 75 * 86400000),
+      status: "approved",
+      notes: "أمر بيع تجريبي — عقد 91، مبروم أول.",
+      createdById: systemUser.id,
+    },
+  });
+  await seedRebarOrderItems(so91001);
+
+  const so91002 = `${c91}-002`;
+  await prisma.salesOrder.create({
+    data: {
+      orderNumber: so91002,
+      contractNumber: c91,
+      kind: "SHORTBAR_4_12M",
+      settlementMode: "PAYMENT_PLAN",
+      totalQtyTons: 40,
+      toleranceType: "weight",
+      toleranceValue: 5,
+      orderDate: new Date(),
+      deliveryDate: new Date(Date.now() + 30 * 86400000),
+      status: "draft",
+      notes: "أمر بيع تجريبي — توالف 4–12 م.",
+      createdById: systemUser.id,
+    },
+  });
+  const shortbar412 = sizeByCode("shortbar_4_12m");
+  if (shortbar412) {
+    await prisma.orderItem.create({
+      data: {
+        orderNumber: so91002,
+        sizeId: shortbar412.id,
+        pricePerTon: 575,
+      },
+    });
+  }
+
+  const c93 = `${yy}-93`;
+  const so93001 = `${c93}-001`;
+  await prisma.salesOrder.create({
+    data: {
+      orderNumber: so93001,
+      contractNumber: c93,
+      kind: "REBAR",
+      grade: "FIRST",
+      settlementMode: "CREDIT",
+      paymentDeadlineDays: 28,
+      totalQtyTons: 200,
+      toleranceType: "percentage",
+      toleranceValue: 5,
+      orderDate: new Date(),
+      deliveryDate: new Date(Date.now() + 50 * 86400000),
+      status: "approved",
+      notes: "أمر بيع تجريبي — عقد 93.",
+      createdById: systemUser.id,
+    },
+  });
+  await seedRebarOrderItems(so93001);
+
+  const c94 = `${yy}-94`;
+  const so94001 = `${c94}-001`;
+  await prisma.salesOrder.create({
+    data: {
+      orderNumber: so94001,
+      contractNumber: c94,
+      kind: "REBAR",
+      grade: "FIRST",
+      settlementMode: "CREDIT",
+      paymentDeadlineDays: 28,
+      totalQtyTons: 150,
+      toleranceType: "percentage",
+      toleranceValue: 5,
+      orderDate: new Date(),
+      deliveryDate: new Date(Date.now() + 40 * 86400000),
+      status: "draft",
+      notes: "أمر بيع تجريبي — مسودة (درعا).",
+      createdById: systemUser.id,
+    },
+  });
+  await seedRebarOrderItems(so94001);
+
+  const c95 = `${yy}-95`;
+  const so95001 = `${c95}-001`;
+  await prisma.salesOrder.create({
+    data: {
+      orderNumber: so95001,
+      contractNumber: c95,
+      kind: "SCRAP",
+      settlementMode: "PAYMENT_PLAN",
+      totalQtyTons: 55,
+      toleranceType: "weight",
+      toleranceValue: 8,
+      orderDate: new Date(),
+      deliveryDate: new Date(Date.now() + 20 * 86400000),
+      status: "draft",
+      notes: "أمر بيع تجريبي — خردة (مؤسسة الأمان).",
+      createdById: systemUser.id,
+    },
+  });
+  if (scrapSize) {
+    await prisma.orderItem.create({
+      data: {
+        orderNumber: so95001,
+        sizeId: scrapSize.id,
+        pricePerTon: 195,
+      },
+    });
+  }
+
+  const c98 = `${yy}-98`;
+  const so98001 = `${c98}-001`;
+  await prisma.salesOrder.create({
+    data: {
+      orderNumber: so98001,
+      contractNumber: c98,
+      kind: "REBAR",
+      grade: "FIRST",
+      settlementMode: "CREDIT",
+      paymentDeadlineDays: 14,
+      totalQtyTons: 80,
+      toleranceType: "percentage",
+      toleranceValue: 5,
+      orderDate: new Date(),
+      deliveryDate: new Date(Date.now() + 10 * 86400000),
+      status: "cancelled",
+      notes: "أمر بيع تجريبي — ملغى للعرض.",
+      createdById: systemUser.id,
+    },
+  });
+  await seedRebarOrderItems(so98001);
+
+  console.log("  ✓ Demo sales orders seeded (8 SOs with price items)");
+
+  // ─── Demo Payments (Phase B) ──────────────────────────────────
+  const demoPaymentsData: Array<{
+    customerNationalId: string;
+    amount: number;
+    method: "CASH" | "BANK_TRANSFER" | "CHECK";
+    daysAgo: number;
+    referenceNumber: string | null;
+    notes: string | null;
+  }> = [
+    {
+      customerNationalId: "DEMO-SEED-001",
+      amount: 50000,
+      method: "BANK_TRANSFER",
+      daysAgo: 20,
+      referenceNumber: "TRF-2026-001",
+      notes: "دفعة أولى — تحويل بنكي.",
+    },
+    {
+      customerNationalId: "DEMO-SEED-001",
+      amount: 25000,
+      method: "CASH",
+      daysAgo: 10,
+      referenceNumber: null,
+      notes: "دفعة نقدية ثانية.",
+    },
+    {
+      customerNationalId: "DEMO-SEED-002",
+      amount: 80000,
+      method: "BANK_TRANSFER",
+      daysAgo: 15,
+      referenceNumber: "TRF-2026-002",
+      notes: "دفعة أولية — عقد 91.",
+    },
+    {
+      customerNationalId: "DEMO-SEED-004",
+      amount: 30000,
+      method: "CHECK",
+      daysAgo: 5,
+      referenceNumber: "CHK-0042",
+      notes: "شيك — عقد 93.",
+    },
+    {
+      customerNationalId: "DEMO-SEED-006",
+      amount: 15000,
+      method: "CASH",
+      daysAgo: 3,
+      referenceNumber: null,
+      notes: "دفعة نقدية — درعا.",
+    },
+  ];
+
+  for (const dp of demoPaymentsData) {
+    const custId = byNid(dp.customerNationalId);
+    await prisma.payment.create({
+      data: {
+        customerId: custId,
+        amount: dp.amount,
+        method: dp.method,
+        paymentDate: new Date(Date.now() - dp.daysAgo * 86400000),
+        referenceNumber: dp.referenceNumber,
+        notes: dp.notes,
+        createdById: systemUser.id,
+      },
+    });
+  }
+  console.log(`  ✓ Demo payments seeded (${demoPaymentsData.length} payments)`);
 
   console.log("\nSeeding complete!");
 }

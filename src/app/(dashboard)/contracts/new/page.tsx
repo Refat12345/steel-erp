@@ -2,11 +2,13 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { CustomerFormDialog } from "@/components/contracts/customer-form-dialog";
@@ -14,6 +16,7 @@ import {
   contractCreateSchema,
   type ContractCreateInput,
 } from "@/lib/validators/contract";
+import { sessionHasPermission } from "@/lib/client-permissions";
 import {
   Loader2,
   Upload,
@@ -33,6 +36,7 @@ interface CustomerOption {
 }
 
 export default function NewContractPage() {
+  const { data: session, status: sessionStatus } = useSession();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -149,6 +153,33 @@ export default function NewContractPage() {
     setCustomerSearch("");
     setShowCustomerDropdown(false);
   };
+
+  if (sessionStatus === "loading") {
+    return (
+      <div className="mx-auto max-w-2xl space-y-6">
+        <Skeleton className="h-10 w-64" />
+        <Skeleton className="h-72 w-full" />
+      </div>
+    );
+  }
+
+  if (!sessionHasPermission(session, "contract.create")) {
+    return (
+      <div className="mx-auto max-w-2xl space-y-6">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="icon-sm" onClick={() => router.push("/contracts")}>
+            <ArrowRight className="h-4 w-4" />
+          </Button>
+          <h1 className="text-xl font-bold tracking-tight">عقد جديد</h1>
+        </div>
+        <Card>
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+            لا تملك صلاحية إنشاء عقد. تواصل مع المسؤول إذا كنت بحاجة للوصول.
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">

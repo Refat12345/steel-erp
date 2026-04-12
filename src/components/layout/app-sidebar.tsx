@@ -2,7 +2,7 @@
 
 import { useSession, signOut } from "next-auth/react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   FileText,
   ShoppingCart,
@@ -95,6 +95,13 @@ const navItems = [
 export function AppSidebar() {
   const { data: session } = useSession();
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function handleSignOut() {
+    await signOut({ redirect: false });
+    router.push("/login");
+    router.refresh();
+  }
 
   if (!session) return null;
 
@@ -276,7 +283,7 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton
               tooltip="تسجيل الخروج"
-              onClick={() => signOut({ callbackUrl: "/login" })}
+              onClick={() => void handleSignOut()}
               className="h-9 gap-2.5 rounded-lg px-2 text-sidebar-foreground/50 hover:bg-destructive/12 hover:text-destructive transition-colors duration-200"
             >
               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-all duration-200">

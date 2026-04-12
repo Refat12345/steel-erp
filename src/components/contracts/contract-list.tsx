@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { sessionHasPermission } from "@/lib/client-permissions";
 import { toast } from "sonner";
 import {
   Table,
@@ -39,6 +41,8 @@ const statusMap: Record<string, { label: string; variant: "default" | "secondary
 };
 
 export function ContractList() {
+  const { data: session } = useSession();
+  const canCreateContract = sessionHasPermission(session, "contract.create");
   const router = useRouter();
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,13 +90,15 @@ export function ContractList() {
             placeholder="بحث برقم العقد أو اسم العميل..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pr-9"
+            className="pr-9" 
           />
         </div>
-        <Button onClick={() => router.push("/contracts/new")} size="sm">
-          <Plus className="h-4 w-4" />
-          عقد جديد
-        </Button>
+        {canCreateContract && (
+          <Button onClick={() => router.push("/contracts/new")} size="sm">
+            <Plus className="h-4 w-4" />
+            عقد جديد
+          </Button>
+        )}
       </div>
 
       {/* Table */}
@@ -174,33 +180,6 @@ export function ContractList() {
           </TableBody>
         </Table>
       </div>
-
-      {/* Pagination */}
-      {total > pageSize && (
-        <div className="flex items-center justify-center gap-4 pt-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => p - 1)}
-          >
-            <ChevronRight className="h-4 w-4" />
-            السابق
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            صفحة {page} من {Math.ceil(total / pageSize)}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page >= Math.ceil(total / pageSize)}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            التالي
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-        </div>
-      )}
     </div>
   );
 }

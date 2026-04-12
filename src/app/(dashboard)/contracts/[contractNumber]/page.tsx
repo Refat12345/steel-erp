@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef, use } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { toast } from "sonner";
+import { sessionHasPermission } from "@/lib/client-permissions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -74,6 +76,12 @@ export default function ContractDetailPage({
   params: Promise<{ contractNumber: string }>;
 }) {
   const { contractNumber } = use(params);
+  const { data: session } = useSession();
+  const canEditContract = sessionHasPermission(session, "contract.edit");
+  const canChangeContractStatus = sessionHasPermission(
+    session,
+    "contract.change_status",
+  );
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -292,7 +300,7 @@ export default function ContractDetailPage({
           </div>
         </div>
 
-        {contract.status === "active" && (
+        {canChangeContractStatus && contract.status === "active" && (
           <Button
             variant="destructive"
             size="sm"
@@ -304,7 +312,7 @@ export default function ContractDetailPage({
             تعليق العقد
           </Button>
         )}
-        {contract.status === "suspended" && (
+        {canChangeContractStatus && contract.status === "suspended" && (
           <Button
             size="sm"
             onClick={() => {
@@ -365,28 +373,32 @@ export default function ContractDetailPage({
               <Paperclip className="h-4 w-4" />
               المرفقات ({contract.attachments.length})
             </CardTitle>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              disabled={uploading}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              {uploading ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Upload className="h-3.5 w-3.5" />
-              )}
-              إضافة مرفق
-            </Button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="hidden"
-              accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
-              onChange={uploadAttachment}
-              disabled={uploading}
-            />
+            {canEditContract && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={uploading}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  {uploading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Upload className="h-3.5 w-3.5" />
+                  )}
+                  إضافة مرفق
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
+                  onChange={uploadAttachment}
+                  disabled={uploading}
+                />
+              </>
+            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -438,23 +450,27 @@ export default function ContractDetailPage({
           <Textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
+            readOnly={!canEditContract}
             rows={3}
             placeholder="ملاحظات على العقد..."
+            className={!canEditContract ? "bg-muted/50" : undefined}
           />
-          <div className="flex justify-end">
-            <Button
-              size="sm"
-              onClick={saveNotes}
-              disabled={saving || notes === (contract.notes || "")}
-            >
-              {saving ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Save className="h-3.5 w-3.5" />
-              )}
-              حفظ الملاحظات
-            </Button>
-          </div>
+          {canEditContract && (
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                onClick={saveNotes}
+                disabled={saving || notes === (contract.notes || "")}
+              >
+                {saving ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Save className="h-3.5 w-3.5" />
+                )}
+                حفظ الملاحظات
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 

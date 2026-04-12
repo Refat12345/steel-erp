@@ -1,3 +1,8 @@
+-- Step 0: Ensure the admin role exists (needed for shadow DB where seed has not run)
+INSERT INTO "roles" ("code", "display_name")
+VALUES ('admin', 'مدير عام')
+ON CONFLICT ("code") DO NOTHING;
+
 -- Step 1: Insert system user (non-loginable) for FK references on historical/seed data
 INSERT INTO "users" ("username", "password_hash", "full_name", "role_code", "is_active", "created_at", "updated_at")
 VALUES ('system', '!nologin', 'النظام', 'admin', false, NOW(), NOW())

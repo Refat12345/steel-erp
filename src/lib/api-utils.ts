@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { authOptions } from "@/lib/auth";
 import { ServiceError } from "@/lib/services/errors";
 import { logger } from "@/lib/logger";
+import { getEffectivePermissions } from "@/lib/permissions";
 
 export interface ApiSession {
   userId: number;
@@ -11,14 +12,25 @@ export interface ApiSession {
   permissions: string[];
 }
 
+/**
+ * Authenticate via JWT, then fetch fresh permissions from DB.
+ * JWT provides identity (userId, roleCode); DB is the source of truth
+ * for authorization — any permission change takes effect immediately.
+ */
 export async function getApiSession(): Promise<ApiSession | null> {
   const session = await getServerSession(authOptions);
   if (!session?.user) return null;
+
+  const userId = session.user.id as number;
+  const role = session.user.role as string;
+
+  const freshPermissions = await getEffectivePermissions(userId, role);
+
   return {
-    userId: session.user.id as number,
+    userId,
     username: session.user.username as string,
-    role: session.user.role as string,
-    permissions: session.user.permissions as string[],
+    role,
+    permissions: Array.from(freshPermissions),
   };
 }
 

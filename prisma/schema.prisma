@@ -28,6 +28,48 @@ enum AuditAction {
   delete
 }
 
+enum SalesOrderKind {
+  REBAR
+  SHORTBAR_1_4M
+  SHORTBAR_4_12M
+  SCRAP
+}
+
+enum SalesOrderGrade {
+  FIRST
+  SECOND
+}
+
+enum SettlementMode {
+  CREDIT
+  PAYMENT_PLAN
+}
+
+enum SalesOrderStatus {
+  draft
+  approved
+  in_progress
+  completed
+  cancelled
+}
+
+enum ToleranceType {
+  percentage
+  weight
+}
+
+enum SliceStatus {
+  pending
+  partial
+  paid
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  CHECK
+}
+
 // ─── Authentication & Permissions ─────────────────────────────────
 
 model User {
@@ -53,6 +95,9 @@ model User {
   attachmentsUploaded  ContractAttachment[]      @relation("AttachmentUploader")
   permOverridesGranted UserPermissionOverride[]  @relation("OverrideGranter")
   auditLogs            AuditLog[]                @relation("AuditLogUser")
+  salesOrdersCreated   SalesOrder[]              @relation("SalesOrderCreator")
+  salesOrdersUpdated   SalesOrder[]              @relation("SalesOrderUpdater")
+  paymentsCreated      Payment[]                 @relation("PaymentCreator")
 
   @@map("users")
 }
@@ -128,6 +173,7 @@ model Customer {
   creator   User  @relation("CustomerCreator", fields: [createdById], references: [id])
   updater   User? @relation("CustomerUpdater", fields: [updatedById], references: [id])
   contracts MasterContract[]
+  payments  Payment[]
 
   @@index([phonePrimary])
   @@index([createdAt])
@@ -149,6 +195,7 @@ model MasterContract {
   creator     User                 @relation("ContractCreator", fields: [createdById], references: [id])
   updater     User?                @relation("ContractUpdater", fields: [updatedById], references: [id])
   attachments ContractAttachment[]
+  salesOrders SalesOrder[]
 
   @@unique([customerId, contractNumber])
   @@index([customerId])
@@ -171,6 +218,111 @@ model ContractAttachment {
 
   @@index([contractNumber])
   @@map("contract_attachments")
+}
+
+// ─── Sales Orders ─────────────────────────────────────────────────
+
+model SalesOrder {
+  orderNumber        String           @id @map("order_number") // YY-CC-OOO
+  contractNumber     String           @map("contract_number")
+  kind               SalesOrderKind
+  grade              SalesOrderGrade?
+  settlementMode     SettlementMode   @map("settlement_mode")
+  paymentDeadlineDays Int?            @map("payment_deadline_days")
+  totalQtyTons       Decimal          @map("total_qty_tons") @db.Decimal(12, 3)
+  toleranceType      ToleranceType    @map("tolerance_type")
+  toleranceValue     Decimal          @map("tolerance_value") @db.Decimal(8, 3)
+  specialRatioPct    Decimal?         @map("special_ratio_pct") @db.Decimal(5, 2)
+  bufferPct          Decimal?         @map("buffer_pct") @db.Decimal(5, 2)
+  orderDate          DateTime         @map("order_date") @db.Date
+  deliveryDate       DateTime         @map("delivery_date") @db.Date
+  status             SalesOrderStatus @default(draft)
+  notes              String?
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+  createdById        Int              @map("created_by_id")
+  updatedById        Int?             @map("updated_by_id")
+
+  contract      MasterContract  @relation(fields: [contractNumber], references: [contractNumber])
+  creator       User            @relation("SalesOrderCreator", fields: [createdById], references: [id])
+  updater       User?           @relation("SalesOrderUpdater", fields: [updatedById], references: [id])
+  items              OrderItem[]
+  paymentSlices      PaymentSlice[]
+  paymentAllocations PaymentAllocation[]
+
+  @@index([contractNumber])
+  @@index([status])
+  @@index([kind])
+  @@index([createdAt])
+  @@map("sales_orders")
+}
+
+model OrderItem {
+  id             Int     @id @default(autoincrement())
+  orderNumber    String  @map("order_number")
+  sizeId         Int     @map("size_id")
+  pricePerTon    Decimal @map("price_per_ton") @db.Decimal(12, 2)
+
+  salesOrder SalesOrder @relation(fields: [orderNumber], references: [orderNumber])
+  size       SizeLookup @relation(fields: [sizeId], references: [id])
+
+  @@unique([orderNumber, sizeId])
+  @@map("order_items")
+}
+
+model PaymentSlice {
+  id           Int         @id @default(autoincrement())
+  orderNumber  String      @map("order_number")
+  postingDate  DateTime    @map("posting_date") @db.Date
+  quantityTons Decimal     @map("quantity_tons") @db.Decimal(12, 3)
+  amountDue    Decimal     @map("amount_due") @db.Decimal(14, 2)
+  deadline     DateTime    @db.Date
+  status       SliceStatus @default(pending)
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  salesOrder SalesOrder @relation(fields: [orderNumber], references: [orderNumber])
+
+  @@index([orderNumber])
+  @@index([deadline])
+  @@map("payment_slices")
+}
+
+// ─── Payments ─────────────────────────────────────────────────────
+
+model Payment {
+  id              Int           @id @default(autoincrement())
+  customerId      Int           @map("customer_id")
+  amount          Decimal       @db.Decimal(14, 2)
+  method          PaymentMethod
+  paymentDate     DateTime      @map("payment_date") @db.Date
+  referenceNumber String?       @map("reference_number")
+  notes           String?
+  createdById     Int           @map("created_by_id")
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  customer    Customer            @relation(fields: [customerId], references: [id])
+  creator     User                @relation("PaymentCreator", fields: [createdById], references: [id])
+  allocations PaymentAllocation[]
+
+  @@index([customerId])
+  @@index([paymentDate])
+  @@index([createdAt])
+  @@map("payments")
+}
+
+model PaymentAllocation {
+  id              Int      @id @default(autoincrement())
+  paymentId       Int      @map("payment_id")
+  orderNumber     String   @map("order_number")
+  allocatedAmount Decimal  @map("allocated_amount") @db.Decimal(14, 2)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  payment    Payment    @relation(fields: [paymentId], references: [id])
+  salesOrder SalesOrder @relation(fields: [orderNumber], references: [orderNumber])
+
+  @@unique([paymentId, orderNumber])
+  @@index([orderNumber])
+  @@map("payment_allocations")
 }
 
 // ─── Audit ────────────────────────────────────────────────────────
@@ -203,6 +355,8 @@ model SizeLookup {
   isBundleType       Boolean @default(true) @map("is_bundle_type")
   isActive           Boolean @default(true) @map("is_active")
   sortOrder          Int     @default(0) @map("sort_order")
+
+  orderItems OrderItem[]
 
   @@map("size_lookup")
 }

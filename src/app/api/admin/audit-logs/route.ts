@@ -9,7 +9,8 @@ import {
   handleServiceError,
 } from "@/lib/api-utils";
 import { auditLogListFiltersSchema } from "@/lib/validators/audit";
-import { listAuditLogs } from "@/lib/services/audit.service";
+import { listAuditLogs, type AuditLogListFilters } from "@/lib/services/audit.service";
+import type { AuditAction } from "@prisma/client";
 
 export async function GET(req: NextRequest) {
   const session = await getApiSession();
@@ -28,7 +29,13 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const result = await listAuditLogs(parsedFilters.data, pagination);
+    const filters: AuditLogListFilters = {
+      ...(parsedFilters.data.userId != null && { userId: parsedFilters.data.userId }),
+      ...(parsedFilters.data.action != null && { action: parsedFilters.data.action as AuditAction }),
+      ...(parsedFilters.data.from != null && { from: parsedFilters.data.from }),
+      ...(parsedFilters.data.to != null && { to: parsedFilters.data.to }),
+    };
+    const result = await listAuditLogs(filters, pagination);
     return NextResponse.json({ success: true, ...result });
   } catch (e) {
     return handleServiceError(e);

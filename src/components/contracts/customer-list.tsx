@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSession } from "next-auth/react";
 import { toast } from "sonner";
+import { sessionHasPermission } from "@/lib/client-permissions";
 import {
   Table,
   TableBody,
@@ -34,6 +36,9 @@ interface Customer {
 }
 
 export function CustomerList() {
+  const { data: session } = useSession();
+  const canCreateCustomer = sessionHasPermission(session, "contract.create");
+  const canEditCustomer = sessionHasPermission(session, "contract.edit");
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -95,10 +100,12 @@ export function CustomerList() {
             className="pr-9"
           />
         </div>
-        <Button onClick={handleAdd} size="sm">
-          <Plus className="h-4 w-4" />
-          إضافة عميل
-        </Button>
+        {canCreateCustomer && (
+          <Button onClick={handleAdd} size="sm">
+            <Plus className="h-4 w-4" />
+            إضافة عميل
+          </Button>
+        )}
       </div>
 
       {/* Table */}
@@ -113,14 +120,14 @@ export function CustomerList() {
               <TableHead>الهاتف</TableHead>
               <TableHead className="w-20">العقود</TableHead>
               <TableHead className="w-20">الحالة</TableHead>
-              <TableHead className="w-16" />
+              {canEditCustomer && <TableHead className="w-16" />}
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 8 }).map((_, j) => (
+                  {Array.from({ length: canEditCustomer ? 8 : 7 }).map((_, j) => (
                     <TableCell key={j}>
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
@@ -129,10 +136,17 @@ export function CustomerList() {
               ))
             ) : customers.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
+                <TableCell
+                  colSpan={canEditCustomer ? 8 : 7}
+                  className="h-32 text-center text-muted-foreground"
+                >
                   <div className="flex flex-col items-center gap-2">
                     <UserCircle className="h-8 w-8 opacity-40" />
-                    {search ? "لا توجد نتائج" : "لا يوجد عملاء — أضف أول عميل"}
+                    {search
+                      ? "لا توجد نتائج"
+                      : canCreateCustomer
+                        ? "لا يوجد عملاء — أضف أول عميل"
+                        : "لا يوجد عملاء"}
                   </div>
                 </TableCell>
               </TableRow>
@@ -154,15 +168,17 @@ export function CustomerList() {
                       {c.isActive ? "نشط" : "معطّل"}
                     </Badge>
                   </TableCell>
-                  <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => handleEdit(c)}
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                  </TableCell>
+                  {canEditCustomer && (
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => handleEdit(c)}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             )}
