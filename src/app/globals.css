@@ -4,6 +4,12 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Prevent horizontal page scroll on mobile; tables scroll inside their own container */
+html, body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
 /* ─── Theme Token Bridge ──────────────────────────────────────────────────── */
 
 @theme inline {

@@ -75,7 +75,11 @@ export async function GET(req: NextRequest) {
         { status: 401 },
       );
     }
-    if (!hasPermission(session, "contract.view")) {
+    if (
+      !hasPermission(session, "contract.view") &&
+      !hasPermission(session, "truck.view_approved") &&
+      !hasPermission(session, "scale.upload_photo")
+    ) {
       return NextResponse.json(
         { success: false, error: "لا تملك صلاحية لهذه العملية" },
         { status: 403 },

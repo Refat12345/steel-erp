@@ -15,7 +15,11 @@ import { listCustomers, createCustomer } from "@/lib/services/customer.service";
 export async function GET(req: NextRequest) {
   const session = await getApiSession();
   if (!session) return unauthorized();
-  if (!hasPermission(session, "contract.view")) return forbidden();
+  if (
+    !hasPermission(session, "contract.view") &&
+    !hasPermission(session, "truck.register")
+  )
+    return forbidden();
 
   const { searchParams } = req.nextUrl;
   const search = searchParams.get("search") || "";

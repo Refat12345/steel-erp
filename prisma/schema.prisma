@@ -70,6 +70,18 @@ enum PaymentMethod {
   CHECK
 }
 
+enum TruckStatus {
+  Queued
+  Approved
+  FirstWeigh
+  Loading
+  OnScale
+  LoadingComplete
+  SecondWeigh
+  Completed
+  Cancelled
+}
+
 // ─── Authentication & Permissions ─────────────────────────────────
 
 model User {
@@ -98,6 +110,8 @@ model User {
   salesOrdersCreated   SalesOrder[]              @relation("SalesOrderCreator")
   salesOrdersUpdated   SalesOrder[]              @relation("SalesOrderUpdater")
   paymentsCreated      Payment[]                 @relation("PaymentCreator")
+  trucksCreated        TruckOperation[]          @relation("TruckCreator")
+  trucksClosed         TruckOperation[]          @relation("TruckCloser")
 
   @@map("users")
 }
@@ -172,8 +186,9 @@ model Customer {
 
   creator   User  @relation("CustomerCreator", fields: [createdById], references: [id])
   updater   User? @relation("CustomerUpdater", fields: [updatedById], references: [id])
-  contracts MasterContract[]
-  payments  Payment[]
+  contracts       MasterContract[]
+  payments        Payment[]
+  truckOperations TruckOperation[] @relation("TruckCustomer")
 
   @@index([phonePrimary])
   @@index([createdAt])
@@ -249,6 +264,7 @@ model SalesOrder {
   items              OrderItem[]
   paymentSlices      PaymentSlice[]
   paymentAllocations PaymentAllocation[]
+  truckOperations    TruckOperation[]
 
   @@index([contractNumber])
   @@index([status])
@@ -356,7 +372,91 @@ model SizeLookup {
   isActive           Boolean @default(true) @map("is_active")
   sortOrder          Int     @default(0) @map("sort_order")
 
-  orderItems OrderItem[]
+  orderItems        OrderItem[]
+  weighSessions     WeighSession[]
+  truckRequestItems TruckRequestItem[]
 
   @@map("size_lookup")
+}
+
+// ─── Truck / Weighbridge ──────────────────────────────────────────
+
+model TruckOperation {
+  id               Int          @id @default(autoincrement())
+  customerId       Int?         @map("customer_id")
+  plateNumber      String       @map("plate_number")
+  driverName       String       @map("driver_name")
+  salesOrderNumber String?      @map("sales_order_number")
+  status           TruckStatus  @default(Queued)
+  tareWeightKg     Decimal?     @map("tare_weight_kg") @db.Decimal(10, 1)
+  grossWeightKg    Decimal?     @map("gross_weight_kg") @db.Decimal(10, 1)
+  tareTime         DateTime?    @map("tare_time")
+  grossTime        DateTime?    @map("gross_time")
+  notes            String?
+  cancelReason     String?      @map("cancel_reason")
+  closedAt         DateTime?    @map("closed_at")
+  closedById       Int?         @map("closed_by_id")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+  createdById      Int          @map("created_by_id")
+
+  customer     Customer?   @relation("TruckCustomer", fields: [customerId], references: [id])
+  salesOrder   SalesOrder? @relation(fields: [salesOrderNumber], references: [orderNumber])
+  creator      User        @relation("TruckCreator", fields: [createdById], references: [id])
+  closer       User?       @relation("TruckCloser", fields: [closedById], references: [id])
+  sessions     WeighSession[]
+  photos       TruckPhoto[]
+  requestItems TruckRequestItem[]
+
+  @@index([customerId])
+  @@index([plateNumber])
+  @@index([status])
+  @@index([salesOrderNumber])
+  @@index([createdAt])
+  @@map("truck_operations")
+}
+
+model TruckRequestItem {
+  id               Int     @id @default(autoincrement())
+  truckOperationId Int     @map("truck_operation_id")
+  sizeId           Int     @map("size_id")
+  bundleCount      Int?    @map("bundle_count")
+  requestedTons    Decimal? @map("requested_tons") @db.Decimal(10, 3)
+
+  truckOperation TruckOperation @relation(fields: [truckOperationId], references: [id])
+  size           SizeLookup     @relation(fields: [sizeId], references: [id])
+
+  @@unique([truckOperationId, sizeId])
+  @@index([truckOperationId])
+  @@map("truck_request_items")
+}
+
+model WeighSession {
+  id               Int      @id @default(autoincrement())
+  truckOperationId Int      @map("truck_operation_id")
+  sessionNumber    Int      @map("session_number")
+  sizeId           Int?     @map("size_id")
+  bundleCount      Int?     @map("bundle_count")
+  weightTons       Decimal  @map("weight_tons") @db.Decimal(10, 3)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  truckOperation TruckOperation @relation(fields: [truckOperationId], references: [id])
+  size           SizeLookup?    @relation(fields: [sizeId], references: [id])
+
+  @@unique([truckOperationId, sessionNumber])
+  @@index([truckOperationId])
+  @@map("weigh_sessions")
+}
+
+model TruckPhoto {
+  id               Int      @id @default(autoincrement())
+  truckOperationId Int      @map("truck_operation_id")
+  filePath         String   @map("file_path")
+  capturedAt       DateTime @default(now()) @map("captured_at")
+
+  truckOperation TruckOperation @relation(fields: [truckOperationId], references: [id])
+
+  @@index([truckOperationId])
+  @@map("truck_photos")
 }

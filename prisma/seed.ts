@@ -1,12 +1,12 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type SettlementMode } from "@prisma/client";
 import { hashSync } from "bcryptjs";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 
 const prisma = new PrismaClient();
 
-/** National IDs reserved for re-runnable demo data (removed and recreated each seed). */
-const DEMO_NATIONAL_IDS = [
+/** Original slice demo customers (removed and recreated each seed). */
+const DEMO_SEED_NATIONAL_IDS = [
   "DEMO-SEED-001",
   "DEMO-SEED-002",
   "DEMO-SEED-003",
@@ -19,6 +19,18 @@ const DEMO_NATIONAL_IDS = [
   "DEMO-SEED-010",
 ] as const;
 
+/** Large UI dataset: customers, one contract each, one sales order each. */
+const DEMO_BULK_CUSTOMER_COUNT = 50;
+const DEMO_BULK_NATIONAL_IDS = Array.from(
+  { length: DEMO_BULK_CUSTOMER_COUNT },
+  (_, i) => `DEMO-BULK-${String(i + 1).padStart(3, "0")}`
+);
+
+const ALL_DEMO_CUSTOMER_NATIONAL_IDS = [
+  ...DEMO_SEED_NATIONAL_IDS,
+  ...DEMO_BULK_NATIONAL_IDS,
+];
+
 async function main() {
   console.log("Seeding database...");
 
@@ -27,7 +39,8 @@ async function main() {
     { code: "admin", displayName: "المدير العام" },
     { code: "finance", displayName: "المالية" },
     { code: "logistics", displayName: "اللوجستيك" },
-    { code: "scale_operator", displayName: "عامل القبان" },
+    { code: "scale_operator", displayName: "عامل القبان الخارجي" },
+    { code: "internal_loader", displayName: "عامل التحميل الداخلي" },
   ];
 
   for (const role of roles) {
@@ -72,7 +85,9 @@ async function main() {
     { code: "scale.enter_session", displayName: "إدخال وزنة داخلية", module: "scale" },
     { code: "scale.edit_session", displayName: "تعديل وزنة", module: "scale" },
     { code: "scale.upload_photo", displayName: "رفع صورة", module: "scale" },
-    { code: "scale.close", displayName: "إغلاق عملية وطباعة كرت", module: "scale" },
+    { code: "scale.loading_complete", displayName: "تأكيد اكتمال التحميل", module: "scale" },
+    { code: "scale.reopen_before_gross", displayName: "إعادة فتح التحميل قبل الجروس", module: "scale" },
+    { code: "scale.close", displayName: "إغلاق نهائي وطباعة كرت", module: "scale" },
     { code: "scale.cancel", displayName: "إلغاء عملية مع سبب", module: "scale" },
     // Admin
     { code: "forcepass.execute", displayName: "تمرير إجباري", module: "admin" },
@@ -126,17 +141,20 @@ async function main() {
       "report.salesorder_status",
     ],
     scale_operator: [
-      "contract.view",
-      "salesorder.view",
       "truck.view_approved",
       "scale.start",
       "scale.enter_tare",
       "scale.enter_gross",
+      "scale.close",
+      "scale.cancel",
+    ],
+    internal_loader: [
+      "truck.view_approved",
       "scale.enter_session",
       "scale.edit_session",
       "scale.upload_photo",
-      "scale.close",
-      "scale.cancel",
+      "scale.loading_complete",
+      "scale.reopen_before_gross",
     ],
   };
 
@@ -150,8 +168,15 @@ async function main() {
         create: { roleCode, permissionCode: permCode },
       });
     }
+    // Remove stale mappings that are no longer in the desired set
+    await prisma.roleDefaultPermission.deleteMany({
+      where: {
+        roleCode,
+        permissionCode: { notIn: permCodes },
+      },
+    });
   }
-  console.log("  ✓ Role-permission mappings seeded");
+  console.log("  ✓ Role-permission mappings seeded (stale removed)");
 
   // ─── Size Lookup ──────────────────────────────────────────────
   const sizes = [
@@ -217,11 +242,12 @@ async function main() {
   const demoUsers: Array<{
     username: string;
     fullName: string;
-    roleCode: "finance" | "logistics" | "scale_operator";
+    roleCode: "finance" | "logistics" | "scale_operator" | "internal_loader";
   }> = [
     { username: "finance", fullName: "موظف المالية (تجريبي)", roleCode: "finance" },
     { username: "logistics", fullName: "موظف اللوجستيك (تجريبي)", roleCode: "logistics" },
-    { username: "scale", fullName: "عامل القبان (تجريبي)", roleCode: "scale_operator" },
+    { username: "scale", fullName: "عامل القبان الخارجي (تجريبي)", roleCode: "scale_operator" },
+    { username: "loader", fullName: "عامل التحميل الداخلي (تجريبي)", roleCode: "internal_loader" },
   ];
   for (const u of demoUsers) {
     await prisma.user.upsert({
@@ -242,7 +268,7 @@ async function main() {
       },
     });
   }
-  console.log("  * Role demo users (password for all: demo123): finance, logistics, scale");
+  console.log("  * Role demo users (password for all: demo123): finance, logistics, scale, loader");
 
   // ─── Demo customers & contracts (Slice 1 UI) ──────────────────
   const uploadsDir = path.join(process.cwd(), "uploads");
@@ -255,7 +281,7 @@ async function main() {
   const seedAttachmentPath = `uploads/${seedAttachmentFileName}`;
 
   const demoCustomers = await prisma.customer.findMany({
-    where: { nationalId: { in: [...DEMO_NATIONAL_IDS] } },
+    where: { nationalId: { in: [...ALL_DEMO_CUSTOMER_NATIONAL_IDS] } },
     select: { id: true },
   });
   const demoCustomerIds = demoCustomers.map((c) => c.id);
@@ -794,6 +820,158 @@ async function main() {
   await seedRebarOrderItems(so98001);
 
   console.log("  ✓ Demo sales orders seeded (8 SOs with price items)");
+
+  // ─── Bulk demo: 50 customers, 50 contracts, 50 sales orders ───
+  const bulkCities = [
+    "دمشق",
+    "حلب",
+    "حمص",
+    "اللاذقية",
+    "طرطوس",
+    "درعا",
+    "السويداء",
+    "إدلب",
+    "الحسكة",
+    "دير الزور",
+  ];
+  const bulkKinds: Array<
+    "REBAR" | "SCRAP" | "SHORTBAR_1_4M" | "SHORTBAR_4_12M"
+  > = ["REBAR", "REBAR", "SCRAP", "SHORTBAR_4_12M", "SHORTBAR_1_4M"];
+  const bulkStatuses: Array<
+    "draft" | "approved" | "in_progress" | "completed" | "cancelled"
+  > = ["draft", "approved", "in_progress", "completed", "cancelled"];
+
+  const addBulkRebarItems = async (orderNumber: string, priceBump: number) => {
+    const codes = ["8mm", "10mm", "12mm", "14mm"] as const;
+    for (const code of codes) {
+      const rp = rebarPrices.find((r) => r.code === code);
+      const size = sizeByCode(code);
+      if (rp && size) {
+        await prisma.orderItem.create({
+          data: {
+            orderNumber,
+            sizeId: size.id,
+            pricePerTon: rp.price + priceBump,
+          },
+        });
+      }
+    }
+  };
+
+  for (let i = 0; i < DEMO_BULK_CUSTOMER_COUNT; i++) {
+    const seq = i + 1;
+    const nationalId = `DEMO-BULK-${String(seq).padStart(3, "0")}`;
+    const customer = await prisma.customer.create({
+      data: {
+        code: `C-BULK-${String(seq).padStart(3, "0")}`,
+        fullName: `عميل تجريبي جماعي ${seq}`,
+        fatherName: `والد ${seq}`,
+        nationalId,
+        phonePrimary: `0944${String(100000 + seq).padStart(6, "0")}`,
+        phoneSecondary: seq % 5 === 0 ? `011-${String(2000000 + seq).slice(0, 7)}` : null,
+        companyAddress: `${bulkCities[i % bulkCities.length]} — منطقة تجريبية ${seq}`,
+        commercialRegistration: seq % 4 === 0 ? `CR-BULK-${seq}` : null,
+        notes: `بيانات تجريبية جماعية للواجهات — عميل ${seq}`,
+        isActive: seq % 17 !== 0,
+        createdById: systemUser.id,
+      },
+    });
+
+    const contractNumber = `${yy}-${String(40 + i).padStart(2, "0")}`;
+    const contractStatus = i % 11 === 0 ? "suspended" : "active";
+    await prisma.masterContract.create({
+      data: {
+        contractNumber,
+        customerId: customer.id,
+        attachmentPath: seedAttachmentPath,
+        status: contractStatus,
+        notes: `عقد تجريبي جماعي — ${contractNumber}`,
+        createdById: systemUser.id,
+      },
+    });
+    await prisma.contractAttachment.create({
+      data: {
+        contractNumber,
+        filePath: seedAttachmentPath,
+        fileName: seedAttachmentFileName,
+        fileSize: Buffer.byteLength(minimalPdf, "utf8"),
+        uploadedById: systemUser.id,
+      },
+    });
+
+    const kind = bulkKinds[i % bulkKinds.length];
+    const orderStatus = bulkStatuses[i % bulkStatuses.length];
+    const orderNumber = `${contractNumber}-001`;
+    const settlementMode: SettlementMode =
+      i % 3 === 0 ? "PAYMENT_PLAN" : "CREDIT";
+    const priceBump = i % 7;
+
+    const baseSo = {
+      orderNumber,
+      contractNumber,
+      kind,
+      settlementMode,
+      totalQtyTons: 40 + (i % 15) * 10,
+      toleranceType: i % 2 === 0 ? ("percentage" as const) : ("weight" as const),
+      toleranceValue: i % 2 === 0 ? 5 : 8,
+      orderDate: new Date(Date.now() - (i % 60) * 86400000),
+      deliveryDate: new Date(Date.now() + (20 + (i % 40)) * 86400000),
+      status: orderStatus,
+      notes: `أمر بيع تجريبي جماعي — ${orderNumber}`,
+      createdById: systemUser.id,
+    };
+
+    if (kind === "REBAR") {
+      const grade = i % 2 === 0 ? "FIRST" : "SECOND";
+      await prisma.salesOrder.create({
+        data: {
+          ...baseSo,
+          grade,
+          paymentDeadlineDays:
+            settlementMode === "CREDIT" ? 14 + (i % 21) : null,
+          specialRatioPct: grade === "FIRST" ? 10 : 8,
+        },
+      });
+      await addBulkRebarItems(orderNumber, priceBump);
+    } else {
+      await prisma.salesOrder.create({
+        data: {
+          ...baseSo,
+          grade: null,
+          paymentDeadlineDays:
+            settlementMode === "CREDIT" ? 14 + (i % 21) : null,
+          specialRatioPct: null,
+        },
+      });
+      if (kind === "SCRAP") {
+        const scrapSize = sizeByCode("scrap");
+        if (scrapSize) {
+          await prisma.orderItem.create({
+            data: {
+              orderNumber,
+              sizeId: scrapSize.id,
+              pricePerTon: 190 + (i % 15),
+            },
+          });
+        }
+      } else {
+        const sbCode = kind === "SHORTBAR_4_12M" ? "shortbar_4_12m" : "shortbar_1_4m";
+        const sb = sizeByCode(sbCode);
+        if (sb) {
+          await prisma.orderItem.create({
+            data: {
+              orderNumber,
+              sizeId: sb.id,
+              pricePerTon: 560 + (i % 20),
+            },
+          });
+        }
+      }
+    }
+  }
+  console.log(
+    `  ✓ Bulk demo seeded (${DEMO_BULK_CUSTOMER_COUNT} customers, ${DEMO_BULK_CUSTOMER_COUNT} contracts, ${DEMO_BULK_CUSTOMER_COUNT} sales orders)`
+  );
 
   // ─── Demo Payments (Phase B) ──────────────────────────────────
   const demoPaymentsData: Array<{

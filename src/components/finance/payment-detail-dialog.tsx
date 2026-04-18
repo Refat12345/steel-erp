@@ -153,8 +153,8 @@ export function PaymentDetailDialog({ paymentId, onClose }: Props) {
                   لا توجد توزيعات — المبلغ كامل كرصيد غير مخصّص للعميل
                 </p>
               ) : (
-                <div className="rounded-lg border">
-                  <Table>
+                <div className="rounded-lg border overflow-x-auto">
+                  <Table className="min-w-[500px]">
                     <TableHeader>
                       <TableRow>
                         <TableHead>رقم الأمر</TableHead>

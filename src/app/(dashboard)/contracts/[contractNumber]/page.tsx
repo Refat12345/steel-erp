@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { toast } from "sonner";
 import { sessionHasPermission } from "@/lib/client-permissions";
+import { compressImage } from "@/lib/compress-image";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -213,10 +214,11 @@ export default function ContractDetailPage({
   };
 
   const uploadAttachment = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const raw = e.target.files?.[0];
+    if (!raw) return;
     setUploading(true);
     try {
+      const file = raw.type.startsWith("image/") ? await compressImage(raw) : raw;
       const formData = new FormData();
       formData.append("file", file);
       const uploadRes = await fetch("/api/upload", {

@@ -11,7 +11,11 @@ import { listActiveSizes } from "@/lib/services/size-lookup.service";
 export async function GET() {
   const session = await getApiSession();
   if (!session) return unauthorized();
-  if (!hasPermission(session, "salesorder.view")) return forbidden();
+  if (
+    !hasPermission(session, "salesorder.view") &&
+    !hasPermission(session, "scale.enter_session")
+  )
+    return forbidden();
 
   try {
     const rows = await listActiveSizes();

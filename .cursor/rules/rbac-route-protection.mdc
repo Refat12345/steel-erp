@@ -1,0 +1,74 @@
+---
+description: RBAC route protection — 3-layer permission enforcement for every protected page
+alwaysApply: true
+---
+
+# RBAC Route Protection (3-Layer Defense)
+
+Every protected page MUST be guarded at **all 3 layers**. No exceptions.
+
+## Layer 1: Middleware (`src/middleware.ts`)
+
+Add a `ROUTE_PERMISSIONS` entry for every new route. First match wins; put specific routes before wildcard parents.
+
+```ts
+// ✅ Correct order — /contracts/new before /contracts(.*)
+{ pattern: /^\/contracts\/new$/, permissions: ["contract.create"] },
+{ pattern: /^\/contracts(\/.*)?$/, permissions: ["contract.view"] },
+```
+
+Permissions use OR logic: user needs **at least one** of the listed permissions.
+
+## Layer 2: Route-Group Layout (`layout.tsx`)
+
+Every protected route group MUST have a `layout.tsx` that calls `requirePagePermission()` from `@/lib/page-auth`.
+
+```ts
+// src/app/(dashboard)/my-module/layout.tsx
+import { requirePagePermission } from "@/lib/page-auth";
+
+export default async function MyModuleLayout({ children }: { children: React.ReactNode }) {
+  await requirePagePermission("mymodule.view");
+  return <>{children}</>;
+}
+```
+
+This provides **fresh DB permission checks** (not cached JWT) and blocks rendering entirely on failure.
+
+## Layer 3: Page-Level (for stricter sub-routes)
+
+If a sub-page requires a MORE specific permission than its layout (e.g., `/new` needs `create` beyond `view`), make the page a **server component** that calls `requirePagePermission()` before rendering.
+
+```ts
+// src/app/(dashboard)/my-module/new/page.tsx
+import { requirePagePermission } from "@/lib/page-auth";
+import { MyForm } from "@/components/my-module/my-form";
+
+export default async function NewPage() {
+  await requirePagePermission("mymodule.create");
+  return <MyForm />;
+}
+```
+
+For client component pages that don't need stricter checks than the layout, the layout + middleware are sufficient.
+
+## Critical Rules
+
+- **NEVER** render empty UI for unauthorized users — always `redirect("/forbidden")`
+- **NEVER** rely on client-side permission hiding as the sole gate
+- **NEVER** use `role === "..."` checks in routes or business logic — use permission codes only
+- **NEVER** skip adding a middleware rule for new routes
+- Sidebar visibility is **UI convenience only**, not security — the 3 layers are the real enforcement
+- `requirePagePermission()` uses OR logic (user needs at least one listed permission)
+- `requireAdmin()` checks `role === "admin"` — use only for admin-exclusive pages
+
+## New Route Checklist
+
+When adding a new protected route:
+
+1. Add permission code(s) in `prisma/seed.ts` → `permissions` array
+2. Assign to roles in `rolePermissions` map in seed
+3. Add `ROUTE_PERMISSIONS` entry in `src/middleware.ts`
+4. Create `layout.tsx` in the route group with `requirePagePermission()`
+5. If sub-route needs stricter permission: add page-level `requirePagePermission()`
+6. Update sidebar `navItems` in `src/components/layout/app-sidebar.tsx`

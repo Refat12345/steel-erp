@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { getSession, signIn } from "next-auth/react";
 import {
   Factory,
   User,
@@ -17,7 +16,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -29,10 +27,13 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
 
+    const origin =
+      typeof window !== "undefined" ? window.location.origin : "";
     const result = await signIn("credentials", {
       username,
       password,
       redirect: false,
+      callbackUrl: origin ? `${origin}/` : "/",
     });
 
     setLoading(false);
@@ -42,8 +43,26 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/");
-    router.refresh();
+    if (result?.ok === false) {
+      setError("تعذر إكمال تسجيل الدخول. حاول مرة أخرى.");
+      return;
+    }
+
+    // Session cookie may lag briefly on mobile / LAN; retry a few times.
+    let session = await getSession();
+    for (let i = 0; i < 5 && !session; i++) {
+      await new Promise((r) => setTimeout(r, 120));
+      session = await getSession();
+    }
+    if (!session) {
+      setError(
+        "لم تُنشأ جلسة بعد تسجيل الدخول. إذا كنت تفتح النظام من الهاتف أو عبر عنوان IP، أضف في ملف .env.local السطر: NEXTAUTH_URL=http://عنوان-جهازك-هنا:3000 (نفس العنوان الذي يظهر في شريط المتصفح بدون شرطة في النهاية)"
+      );
+      return;
+    }
+
+    // Full navigation avoids stale session on some mobile browsers after credentials sign-in.
+    window.location.assign("/");
   }
 
   return (

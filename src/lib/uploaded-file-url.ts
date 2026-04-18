@@ -9,13 +9,23 @@ export function buildUploadedFileRelativePath(storedPath: string): string {
 }
 
 /** Browser-safe UTF-8 → base64url (no dependency on Node Buffer). */
-function utf8ToBase64Url(s: string): string {
+export function utf8ToBase64Url(s: string): string {
   const u8 = new TextEncoder().encode(s);
   let bin = "";
   for (const byte of u8) {
     bin += String.fromCharCode(byte);
   }
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/**
+ * Relative URL for GET `/api/files/view?p=…` (must match server decoder in `api/files/view`).
+ */
+export function buildFileViewUrl(storedPath: string): string {
+  const rel = buildUploadedFileRelativePath(storedPath);
+  if (!rel) return "#";
+  const p = utf8ToBase64Url(rel);
+  return `/api/files/view?p=${encodeURIComponent(p)}`;
 }
 
 /**

@@ -1,9 +1,8 @@
 import { prisma } from "@/lib/db";
-import type { Prisma, ContractStatus } from "@prisma/client";
+import { Prisma, type ContractStatus } from "@prisma/client";
 import type { ContractCreateInput, ContractUpdateInput } from "@/lib/validators/contract";
 import type { PaginationParams, PaginatedResult } from "@/lib/api-utils";
 import { ServiceError } from "./errors";
-import { withRetry } from "./tx-retry";
 import { logAudit } from "./audit.service";
 import { logger } from "@/lib/logger";
 
@@ -87,59 +86,72 @@ export async function createContract(
     );
   }
 
-  const contract = await withRetry(() =>
-    prisma.$transaction(async (tx) => {
-      const lastContract = await tx.masterContract.findFirst({
-        where: { contractNumber: { startsWith: `${yy}-` } },
-        orderBy: { contractNumber: "desc" },
-      });
+  const MAX_ATTEMPTS = 3;
+  let contract;
 
-      let nextSeq = 1;
-      if (lastContract) {
-        const parts = lastContract.contractNumber.split("-");
-        nextSeq = parseInt(parts[1], 10) + 1;
-      }
-      const contractNumber = `${yy}-${String(nextSeq).padStart(2, "0")}`;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      contract = await prisma.$transaction(async (tx) => {
+        const allContracts = await tx.masterContract.findMany({
+          where: { contractNumber: { startsWith: `${yy}-` } },
+          select: { contractNumber: true },
+        });
 
-      const c = await tx.masterContract.create({
-        data: {
-          contractNumber,
-          customerId: data.customerId,
-          attachmentPath: attachment.path,
-          notes: data.notes || null,
-          createdById,
-        },
-        include: {
-          customer: { select: { id: true, code: true, fullName: true } },
-        },
-      });
+        let maxSeq = 0;
+        for (const c of allContracts) {
+          const seq = parseInt(c.contractNumber.split("-")[1], 10);
+          if (seq > maxSeq) maxSeq = seq;
+        }
+        const contractNumber = `${yy}-${String(maxSeq + 1).padStart(2, "0")}`;
 
-      if (attachment.name) {
-        await tx.contractAttachment.create({
+        const created = await tx.masterContract.create({
           data: {
             contractNumber,
-            filePath: attachment.path,
-            fileName: attachment.name,
-            fileSize: attachment.size,
-            uploadedById: createdById,
+            customerId: data.customerId,
+            attachmentPath: attachment.path,
+            notes: data.notes || null,
+            createdById,
+          },
+          include: {
+            customer: { select: { id: true, code: true, fullName: true } },
           },
         });
-      }
 
-      await logAudit(tx, {
-        userId: createdById,
-        action: "create",
-        entityType: "MasterContract",
-        entityId: contractNumber,
-        details: { customerId: data.customerId },
-      });
+        if (attachment.name) {
+          await tx.contractAttachment.create({
+            data: {
+              contractNumber,
+              filePath: attachment.path,
+              fileName: attachment.name,
+              fileSize: attachment.size,
+              uploadedById: createdById,
+            },
+          });
+        }
 
-      return c;
-    }, { isolationLevel: "Serializable" }),
-  );
+        await logAudit(tx, {
+          userId: createdById,
+          action: "create",
+          entityType: "MasterContract",
+          entityId: contractNumber,
+          details: { customerId: data.customerId },
+        });
 
-  logger.info({ contractNumber: contract.contractNumber }, "contract created");
-  return contract;
+        return created;
+      }, { isolationLevel: "Serializable" });
+
+      break;
+    } catch (e) {
+      const isRetryable =
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        (e.code === "P2002" || e.code === "P2034");
+      if (isRetryable && attempt < MAX_ATTEMPTS - 1) continue;
+      throw e;
+    }
+  }
+
+  logger.info({ contractNumber: contract!.contractNumber }, "contract created");
+  return contract!;
 }
 
 export async function getContractByNumber(contractNumber: string) {

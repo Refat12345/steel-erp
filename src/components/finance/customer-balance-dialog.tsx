@@ -136,8 +136,8 @@ export function CustomerBalanceDialog({ customerId, onClose }: Props) {
               {data.orderBalances.length === 0 ? (
                 <p className="text-sm text-muted-foreground">لا توجد أوامر بيع</p>
               ) : (
-                <div className="rounded-lg border">
-                  <Table>
+                <div className="rounded-lg border overflow-x-auto">
+                  <Table className="min-w-[500px]">
                     <TableHeader>
                       <TableRow>
                         <TableHead>رقم الأمر</TableHead>

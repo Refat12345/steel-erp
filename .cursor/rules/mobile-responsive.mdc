@@ -1,0 +1,50 @@
+---
+description: Mobile-first responsive UI rules — prevents horizontal overflow and ensures proper mobile layout
+globs: "**/*.tsx"
+alwaysApply: false
+---
+
+# Mobile & Responsive UI Rules
+
+This project is used on phones (360px wide) as well as desktop. Every page and component MUST work on mobile without horizontal page scroll.
+
+## Tables — Always Contained Scroll
+
+Tables are wider than mobile viewports. NEVER let a table overflow the page.
+
+```tsx
+// ❌ BAD — table overflows the page, causes full-page horizontal scroll
+<div className="rounded-lg border">
+  <Table>...</Table>
+</div>
+
+// ✅ GOOD — table scrolls inside its own container
+<div className="rounded-lg border overflow-x-auto">
+  <Table className="min-w-[640px]">...</Table>
+</div>
+```
+
+- Wrap every `<Table>` in a container with `overflow-x-auto`
+- Set `min-w-[Npx]` on `<Table>` so columns don't collapse (typically 500–700px)
+- NEVER set fixed widths on table containers that exceed viewport
+
+## Layout Containers — Prevent Overflow
+
+- The `<main>` wrapper in the dashboard layout MUST include `min-w-0 max-w-full overflow-x-hidden`
+- Content wrappers (`<div>` inside `<main>`) MUST include `min-w-0 max-w-full`
+- Use `p-4 sm:p-6` for content padding (tighter on mobile)
+
+## Sheet / Sidebar (Mobile Drawer)
+
+- The mobile sidebar uses `<Sheet>` from base-ui. The backdrop MUST be opaque enough to hide content behind it (`bg-black/50` minimum)
+- Sidebar width on mobile: use viewport-relative units (`85vw`) not fixed `rem` values
+- Always pass `dir="rtl"` to `<Sidebar>` since the Sheet portals outside the RTL root
+- Avoid `backdrop-blur` on mobile overlays — causes GPU rendering artifacts (black strips) on some Android devices
+- Use `h-dvh` instead of `h-full` for Sheet panels to account for mobile browser address bar
+
+## General Mobile Rules
+
+- Never use fixed pixel widths on flex children without `min-w-0`
+- Prefer `truncate` on text that might overflow (e.g., page titles in headers)
+- Use `flex-wrap` on toolbar rows with multiple controls
+- Test every new page/component at 360×820 viewport (Tecno KI7 / typical Android)

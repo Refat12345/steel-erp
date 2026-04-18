@@ -1,9 +1,8 @@
 import { prisma } from "@/lib/db";
-import type { Prisma, SalesOrderKind, SalesOrderStatus } from "@prisma/client";
+import { Prisma, type SalesOrderKind, type SalesOrderStatus } from "@prisma/client";
 import type { SalesOrderCreateInput, SalesOrderUpdateInput } from "@/lib/validators/sales-order";
 import type { PaginationParams, PaginatedResult } from "@/lib/api-utils";
 import { ServiceError } from "./errors";
-import { withRetry } from "./tx-retry";
 import { logAudit } from "./audit.service";
 import { logger } from "@/lib/logger";
 
@@ -130,67 +129,80 @@ export async function createSalesOrder(
     );
   }
 
-  const result = await withRetry(() =>
-    prisma.$transaction(async (tx) => {
-      const lastSO = await tx.salesOrder.findFirst({
-        where: { contractNumber: data.contractNumber },
-        orderBy: { orderNumber: "desc" },
-      });
+  const MAX_ATTEMPTS = 3;
+  let result;
 
-      let nextSeq = 1;
-      if (lastSO) {
-        const parts = lastSO.orderNumber.split("-");
-        nextSeq = parseInt(parts[2], 10) + 1;
-      }
-      const orderNumber = `${data.contractNumber}-${String(nextSeq).padStart(3, "0")}`;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      result = await prisma.$transaction(async (tx) => {
+        const allSOs = await tx.salesOrder.findMany({
+          where: { contractNumber: data.contractNumber },
+          select: { orderNumber: true },
+        });
 
-      const so = await tx.salesOrder.create({
-        data: {
-          orderNumber,
-          contractNumber: data.contractNumber,
-          kind: data.kind,
-          grade: data.kind === "REBAR" ? data.grade : null,
-          settlementMode: data.settlementMode,
-          paymentDeadlineDays:
-            data.settlementMode === "CREDIT" ? data.paymentDeadlineDays! : null,
-          totalQtyTons: data.totalQtyTons,
-          toleranceType: data.toleranceType,
-          toleranceValue: data.toleranceValue,
-          specialRatioPct: data.kind === "REBAR" ? (data.specialRatioPct ?? 0) : null,
-          orderDate: new Date(data.orderDate),
-          deliveryDate: new Date(data.deliveryDate),
-          notes: data.notes || null,
-          createdById,
-        },
-        include: {
-          contract: {
-            select: {
-              contractNumber: true,
-              customer: { select: { id: true, code: true, fullName: true } },
+        let maxSeq = 0;
+        for (const so of allSOs) {
+          const seq = parseInt(so.orderNumber.split("-").pop()!, 10);
+          if (seq > maxSeq) maxSeq = seq;
+        }
+        const orderNumber = `${data.contractNumber}-${String(maxSeq + 1).padStart(3, "0")}`;
+
+        const created = await tx.salesOrder.create({
+          data: {
+            orderNumber,
+            contractNumber: data.contractNumber,
+            kind: data.kind,
+            grade: data.kind === "REBAR" ? data.grade : null,
+            settlementMode: data.settlementMode,
+            paymentDeadlineDays:
+              data.settlementMode === "CREDIT" ? data.paymentDeadlineDays! : null,
+            totalQtyTons: data.totalQtyTons,
+            toleranceType: data.toleranceType,
+            toleranceValue: data.toleranceValue,
+            specialRatioPct: data.kind === "REBAR" ? (data.specialRatioPct ?? 0) : null,
+            orderDate: new Date(data.orderDate),
+            deliveryDate: new Date(data.deliveryDate),
+            notes: data.notes || null,
+            createdById,
+          },
+          include: {
+            contract: {
+              select: {
+                contractNumber: true,
+                customer: { select: { id: true, code: true, fullName: true } },
+              },
             },
           },
-        },
+        });
+
+        await logAudit(tx, {
+          userId: createdById,
+          action: "create",
+          entityType: "SalesOrder",
+          entityId: orderNumber,
+          details: {
+            kind: data.kind,
+            grade: data.grade,
+            settlementMode: data.settlementMode,
+            totalQtyTons: data.totalQtyTons,
+          },
+        });
+
+        return created;
       });
 
-      await logAudit(tx, {
-        userId: createdById,
-        action: "create",
-        entityType: "SalesOrder",
-        entityId: orderNumber,
-        details: {
-          kind: data.kind,
-          grade: data.grade,
-          settlementMode: data.settlementMode,
-          totalQtyTons: data.totalQtyTons,
-        },
-      });
+      break;
+    } catch (e) {
+      const isRetryable =
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        (e.code === "P2002" || e.code === "P2034");
+      if (isRetryable && attempt < MAX_ATTEMPTS - 1) continue;
+      throw e;
+    }
+  }
 
-      return so;
-    })
-  );
-
-  logger.info({ orderNumber: result.orderNumber }, "Sales order created");
-  return result;
+  logger.info({ orderNumber: result!.orderNumber }, "Sales order created");
+  return result!;
 }
 
 export async function updateSalesOrder(

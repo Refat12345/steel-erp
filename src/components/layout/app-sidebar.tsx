@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useSession, signOut } from "next-auth/react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -14,6 +15,7 @@ import {
   ClipboardList,
   LogOut,
   Factory,
+  LayoutDashboard,
 } from "lucide-react";
 import {
   Sidebar,
@@ -26,6 +28,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
@@ -41,7 +44,18 @@ const WHITE_4 = "oklch(1 0 0 / 4%)";
 const WHITE_6 = "oklch(1 0 0 / 6%)";
 const EMERALD = "oklch(0.630 0.155 152)";
 
-const navItems = [
+const navItems: {
+  title: string;
+  url: string;
+  icon: typeof LayoutDashboard;
+  permission: string | string[] | null;
+}[] = [
+  {
+    title: "لوحة المؤشرات",
+    url: "/",
+    icon: LayoutDashboard,
+    permission: null,
+  },
   {
     title: "العقود",
     url: "/contracts",
@@ -64,7 +78,7 @@ const navItems = [
     title: "القبان",
     url: "/scale",
     icon: Scale,
-    permission: "scale.start",
+    permission: ["truck.view_approved", "scale.start"],
   },
   {
     title: "المالية",
@@ -96,6 +110,16 @@ export function AppSidebar() {
   const { data: session } = useSession();
   const pathname = usePathname();
   const router = useRouter();
+  const { isMobile, setOpenMobile } = useSidebar();
+
+  function closeMobileNav() {
+    if (isMobile) setOpenMobile(false);
+  }
+
+  // Close the mobile sheet after any client-side navigation (backup if onClick is skipped).
+  useEffect(() => {
+    if (isMobile) setOpenMobile(false);
+  }, [pathname, isMobile, setOpenMobile]);
 
   async function handleSignOut() {
     await signOut({ redirect: false });
@@ -108,9 +132,12 @@ export function AppSidebar() {
   const userPermissions = new Set(session.user.permissions);
   const isAdmin = session.user.role === "admin";
 
-  const visibleItems = navItems.filter(
-    (item) => isAdmin || userPermissions.has(item.permission)
-  );
+  const visibleItems = navItems.filter((item) => {
+    if (item.permission === null || isAdmin) return true;
+    if (Array.isArray(item.permission))
+      return item.permission.some((p) => userPermissions.has(p));
+    return userPermissions.has(item.permission);
+  });
 
   const initials = session.user.name
     .split(" ")
@@ -119,7 +146,7 @@ export function AppSidebar() {
     .slice(0, 2);
 
   return (
-    <Sidebar side="right" collapsible="icon">
+    <Sidebar side="right" collapsible="icon" dir="rtl">
 
       {/* ── Brand Header ─────────────────────────────────────────────── */}
       <SidebarHeader className="px-3 py-4">
@@ -166,9 +193,12 @@ export function AppSidebar() {
           </SidebarGroupLabel>
 
           <SidebarGroupContent>
-            <SidebarMenu className="gap-0.5">
+            <SidebarMenu className="gap-0.5" onClick={closeMobileNav}>
               {visibleItems.map((item) => {
-                const isActive = pathname.startsWith(item.url);
+                const isActive =
+                  item.url === "/"
+                    ? pathname === "/"
+                    : pathname.startsWith(item.url);
                 return (
                   <SidebarMenuItem key={item.url} className="relative">
 

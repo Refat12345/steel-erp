@@ -21,15 +21,15 @@ export default async function DashboardLayout({
     <TooltipProvider>
       <SidebarProvider>
         <AppSidebar />
-        <main className="flex-1 flex flex-col min-h-screen">
-          <header className="flex h-14 items-center gap-2 border-b px-4">
+        <main className="flex-1 flex flex-col min-h-screen min-w-0 max-w-full overflow-x-hidden">
+          <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
             <SidebarTrigger />
             <Separator orientation="vertical" className="h-6" />
-            <h1 className="text-sm font-medium text-muted-foreground">
+            <h1 className="text-sm font-medium text-muted-foreground truncate">
               نظام إدارة مصنع الحديد
             </h1>
           </header>
-          <div className="flex-1 p-6">{children}</div>
+          <div className="flex-1 p-4 sm:p-6 min-w-0 max-w-full">{children}</div>
         </main>
       </SidebarProvider>
     </TooltipProvider>

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
+import { Check, ChevronsUpDown } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -21,6 +22,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { cn } from "@/lib/utils";
 import { paymentCreateSchema, type PaymentCreateInput } from "@/lib/validators/payment";
 
 interface Customer {
@@ -38,6 +53,7 @@ interface Props {
 export function RecordPaymentDialog({ open, onOpenChange, onSuccess }: Props) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [customerOpen, setCustomerOpen] = useState(false);
 
   const {
     register,
@@ -82,6 +98,7 @@ export function RecordPaymentDialog({ open, onOpenChange, onSuccess }: Props) {
       if (json.success) {
         toast.success("تم تسجيل الدفعة بنجاح");
         reset();
+        setCustomerOpen(false);
         onOpenChange(false);
         onSuccess();
       } else {
@@ -104,21 +121,53 @@ export function RecordPaymentDialog({ open, onOpenChange, onSuccess }: Props) {
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-1.5">
             <Label>العميل</Label>
-            <Select
-              value={selectedCustomerId ? String(selectedCustomerId) : ""}
-              onValueChange={(v) => setValue("customerId", parseInt(v, 10), { shouldValidate: true })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="اختر العميل..." />
-              </SelectTrigger>
-              <SelectContent>
-                {customers.map((c) => (
-                  <SelectItem key={c.id} value={String(c.id)}>
-                    {c.fullName} ({c.code})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Popover open={customerOpen} onOpenChange={setCustomerOpen}>
+              <PopoverTrigger
+                className={cn(
+                  "inline-flex w-full items-center justify-between rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm font-normal transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  !selectedCustomerId && "text-muted-foreground"
+                )}
+              >
+                <span>
+                  {selectedCustomerId
+                    ? (() => {
+                        const c = customers.find((x) => x.id === selectedCustomerId);
+                        return c ? `${c.fullName} (${c.code})` : "اختر العميل...";
+                      })()
+                    : "اختر العميل..."}
+                </span>
+                <ChevronsUpDown className="ms-2 h-4 w-4 shrink-0 opacity-50" />
+              </PopoverTrigger>
+              <PopoverContent className="w-72 p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="ابحث باسم العميل أو الكود..." />
+                  <CommandList>
+                    <CommandEmpty>لا توجد نتائج</CommandEmpty>
+                    <CommandGroup>
+                      {customers.map((c) => (
+                        <CommandItem
+                          key={c.id}
+                          value={`${c.fullName} ${c.code}`}
+                          onSelect={() => {
+                            setValue("customerId", c.id, { shouldValidate: true });
+                            setCustomerOpen(false);
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              "me-2 h-4 w-4",
+                              selectedCustomerId === c.id ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                          {c.fullName}
+                          <span className="ms-1.5 text-xs text-muted-foreground">({c.code})</span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
             {errors.customerId && (
               <p className="text-sm text-destructive">{errors.customerId.message}</p>
             )}

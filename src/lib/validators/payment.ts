@@ -7,7 +7,7 @@ export const paymentCreateSchema = z.object({
     .positive("المبلغ يجب أن يكون أكبر من صفر")
     .max(999_999_999_999, "المبلغ كبير جداً"),
   method: z.enum(["CASH", "BANK_TRANSFER", "CHECK"], {
-    required_error: "طريقة الدفع مطلوبة",
+    message: "طريقة الدفع مطلوبة",
   }),
   paymentDate: z.string().min(1, "تاريخ الدفع مطلوب"),
   referenceNumber: z.string().max(100).optional().or(z.literal("")),
