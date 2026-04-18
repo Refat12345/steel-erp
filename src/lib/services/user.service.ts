@@ -176,7 +176,7 @@ export async function updateUser(id: number, data: UpdateUserInput, adminId: num
       action: "update",
       entityType: "User",
       entityId: String(id),
-      details: changes,
+      details: changes as Prisma.InputJsonValue,
     });
 
     return updated;

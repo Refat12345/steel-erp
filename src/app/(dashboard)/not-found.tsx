@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { FileQuestion, Home } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 export default function DashboardNotFound() {
   return (
@@ -15,12 +16,13 @@ export default function DashboardNotFound() {
           <p className="text-sm text-muted-foreground">
             عذراً، الصفحة التي تبحث عنها غير موجودة أو تم نقلها.
           </p>
-          <Button asChild size="sm" className="mt-2">
-            <Link href="/">
-              <Home className="ml-1.5 h-4 w-4" />
-              العودة للصفحة الرئيسية
-            </Link>
-          </Button>
+          <Link
+            href="/"
+            className={cn(buttonVariants({ variant: "default", size: "sm" }), "mt-2 inline-flex")}
+          >
+            <Home className="ml-1.5 h-4 w-4" />
+            العودة للصفحة الرئيسية
+          </Link>
         </CardContent>
       </Card>
     </div>

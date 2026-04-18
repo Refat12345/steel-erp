@@ -145,7 +145,7 @@ export function UserManagement() {
             <Select
               value={filterRole}
               onValueChange={(v) => {
-                setFilterRole(v);
+                setFilterRole(v ?? "all");
                 setPage(1);
               }}
             >
@@ -164,7 +164,7 @@ export function UserManagement() {
             <Select
               value={filterActive}
               onValueChange={(v) => {
-                setFilterActive(v);
+                setFilterActive(v ?? "all");
                 setPage(1);
               }}
             >
@@ -469,7 +469,11 @@ function CreateUserDialog({
           </div>
           <div className="space-y-2">
             <Label>الدور</Label>
-            <Select value={roleCode} onValueChange={setRoleCode} required>
+            <Select
+              value={roleCode}
+              onValueChange={(v) => setRoleCode(v ?? "")}
+              required
+            >
               <SelectTrigger>
                 <SelectValue placeholder="اختر الدور" />
               </SelectTrigger>
@@ -555,7 +559,10 @@ function EditUserDialog({
           </div>
           <div className="space-y-2">
             <Label>الدور</Label>
-            <Select value={roleCode} onValueChange={setRoleCode}>
+            <Select
+              value={roleCode}
+              onValueChange={(v) => setRoleCode(v ?? user.roleCode)}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>

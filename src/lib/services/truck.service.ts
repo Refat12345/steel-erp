@@ -128,11 +128,11 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
             entityType: "TruckOperation",
             entityId: String(created.id),
             details: {
-              customerId: data.customerId,
+              customerId: data.customerId ?? null,
               plateNumber: created.plateNumber,
               driverName: created.driverName,
-              requestItems: data.requestItems,
-            },
+              requestItems: data.requestItems ?? null,
+            } as Prisma.InputJsonValue,
           });
 
           return created;
