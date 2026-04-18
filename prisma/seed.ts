@@ -299,6 +299,17 @@ async function main() {
       });
       const demoSONumbers = demoSOs.map((s) => s.orderNumber);
       if (demoSONumbers.length > 0) {
+        const trucksWithSO = await prisma.truckOperation.findMany({
+          where: { salesOrderNumber: { in: demoSONumbers } },
+          select: { id: true },
+        });
+        const truckIds = trucksWithSO.map((t) => t.id);
+        if (truckIds.length > 0) {
+          await prisma.weighSession.deleteMany({ where: { truckOperationId: { in: truckIds } } });
+          await prisma.truckPhoto.deleteMany({ where: { truckOperationId: { in: truckIds } } });
+          await prisma.truckRequestItem.deleteMany({ where: { truckOperationId: { in: truckIds } } });
+          await prisma.truckOperation.deleteMany({ where: { id: { in: truckIds } } });
+        }
         await prisma.paymentAllocation.deleteMany({ where: { orderNumber: { in: demoSONumbers } } });
         await prisma.paymentSlice.deleteMany({ where: { orderNumber: { in: demoSONumbers } } });
         await prisma.orderItem.deleteMany({ where: { orderNumber: { in: demoSONumbers } } });
