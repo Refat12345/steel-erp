@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+import { isNavUrlSuspended } from "@/config/suspended-pages";
 
 /* CSS custom properties defined in globals.css */
 const BLUE = "oklch(0.620 0.175 222)";
@@ -133,6 +134,7 @@ export function AppSidebar() {
   const isAdmin = session.user.role === "admin";
 
   const visibleItems = navItems.filter((item) => {
+    if (isNavUrlSuspended(item.url)) return false;
     if (item.permission === null || isAdmin) return true;
     if (Array.isArray(item.permission))
       return item.permission.some((p) => userPermissions.has(p));
