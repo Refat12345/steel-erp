@@ -35,6 +35,17 @@ export const grossSchema = z.object({
     .max(200_000, "الوزن كبير جداً"),
 });
 
+// Corrections carry the version the client read, so concurrent edits are
+// detected via optimistic locking. See correctTare/correctGross in
+// truck.service.ts.
+export const correctTareSchema = tareSchema.extend({
+  expectedVersion: z.number().int().nonnegative("الإصدار المتوقّع غير صالح"),
+});
+
+export const correctGrossSchema = grossSchema.extend({
+  expectedVersion: z.number().int().nonnegative("الإصدار المتوقّع غير صالح"),
+});
+
 export const weighSessionSchema = z.object({
   sizeId: z.number().int().positive().optional().nullable(),
   bundleCount: z.number().int().min(1).optional().nullable(),
@@ -52,6 +63,7 @@ export const weighSessionEditSchema = z.object({
     .positive("الوزن يجب أن يكون أكبر من صفر")
     .max(200, "الوزن كبير جداً")
     .optional(),
+  expectedVersion: z.number().int().nonnegative("الإصدار المتوقّع غير صالح"),
 });
 
 export const cancelSchema = z.object({

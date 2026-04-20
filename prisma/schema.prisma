@@ -114,6 +114,7 @@ model User {
   paymentsCreated      Payment[]                 @relation("PaymentCreator")
   trucksCreated        TruckOperation[]          @relation("TruckCreator")
   trucksClosed         TruckOperation[]          @relation("TruckCloser")
+  idempotencyKeys      IdempotencyKey[]
 
   @@map("users")
 }
@@ -398,6 +399,10 @@ model TruckOperation {
   cancelReason     String?      @map("cancel_reason")
   closedAt         DateTime?    @map("closed_at")
   closedById       Int?         @map("closed_by_id")
+  /// Optimistic-lock counter. Incremented on every correction of tare/gross
+  /// so two operators editing the same record simultaneously are detected
+  /// instead of silently overwriting each other.
+  version          Int          @default(0)
   createdAt        DateTime     @default(now()) @map("created_at")
   updatedAt        DateTime     @updatedAt @map("updated_at")
   createdById      Int          @map("created_by_id")
@@ -440,6 +445,9 @@ model WeighSession {
   sizeId           Int?     @map("size_id")
   bundleCount      Int?     @map("bundle_count")
   weightTons       Decimal  @map("weight_tons") @db.Decimal(10, 3)
+  /// Optimistic-lock counter. Incremented on every edit so two operators
+  /// editing the same weigh session simultaneously are detected.
+  version          Int      @default(0)
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
@@ -461,4 +469,35 @@ model TruckPhoto {
 
   @@index([truckOperationId])
   @@map("truck_photos")
+}
+
+// ─── Idempotency ──────────────────────────────────────────────────
+//
+// Stores the response of a successful write request so that a client retrying
+// the same (user, idempotency-key) pair within the TTL gets the original
+// response replayed instead of the operation running twice. Compound PK on
+// (user_id, key) scopes keys per-user so one operator cannot shadow another's.
+//
+// `request_hash` is sha256 of `method\npath\nbodyText`. If the same key is
+// reused with a different hash we reject with 409 to catch client bugs where
+// the key survives across unrelated requests.
+//
+// A background job (not part of this migration) should periodically delete
+// rows where expires_at < now().
+model IdempotencyKey {
+  userId         Int      @map("user_id")
+  key            String
+  method         String
+  path           String
+  requestHash    String   @map("request_hash")
+  responseStatus Int      @map("response_status")
+  responseBody   Json     @map("response_body")
+  createdAt      DateTime @default(now()) @map("created_at")
+  expiresAt      DateTime @map("expires_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, key])
+  @@index([expiresAt])
+  @@map("idempotency_keys")
 }

@@ -52,6 +52,16 @@ export function badRequest(error: string) {
   return NextResponse.json({ success: false, error }, { status: 400 });
 }
 
+export function tooManyRequests(retryAfterMs: number) {
+  return NextResponse.json(
+    { success: false, error: "عدد الطلبات تجاوز الحد المسموح، حاول بعد قليل" },
+    {
+      status: 429,
+      headers: { "Retry-After": String(Math.max(1, Math.ceil(retryAfterMs / 1000))) },
+    },
+  );
+}
+
 export function notFound(entity = "العنصر") {
   return NextResponse.json(
     { success: false, error: `${entity} غير موجود` },

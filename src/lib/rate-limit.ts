@@ -7,6 +7,17 @@ export interface RateLimitConfig {
   maxAttempts: number;
 }
 
+/**
+ * Per-user rate limit for scale-write endpoints (tare, gross, weigh session,
+ * loading-complete). 60 req/min is well above any human operator cadence and
+ * blocks runaway clients (e.g. a barcode scanner stuck in a retry loop) from
+ * saturating the DB connection pool.
+ */
+export const SCALE_WRITE_RATE_LIMIT: RateLimitConfig = {
+  windowMs: 60_000,
+  maxAttempts: 60,
+};
+
 interface Entry {
   timestamps: number[];
 }

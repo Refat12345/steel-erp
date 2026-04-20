@@ -203,7 +203,12 @@ export async function enterTare(truckId: number, weightKg: number, userId: numbe
 
 // ─── Correct Tare (before gross only) ─────────────────────────────
 
-export async function correctTare(truckId: number, newWeightKg: number, userId: number) {
+export async function correctTare(
+  truckId: number,
+  newWeightKg: number,
+  expectedVersion: number,
+  userId: number,
+) {
   if (newWeightKg <= 0) throw new ServiceError("الوزن يجب أن يكون أكبر من صفر");
   const tareError = validateTareWeight(newWeightKg);
   if (tareError) throw new ServiceError(tareError);
@@ -221,10 +226,25 @@ export async function correctTare(truckId: number, newWeightKg: number, userId: 
 
         const oldWeight = truck.tareWeightKg ? Number(truck.tareWeightKg) : null;
 
-        const updated = await tx.truckOperation.update({
-          where: { id: truckId },
-          data: { tareWeightKg: newWeightKg, tareTime: new Date() },
+        // Optimistic lock: update only if the version the client saw is still
+        // the current version. Two operators correcting at the same time will
+        // both target the same expectedVersion; only the first commits, the
+        // second sees count=0 and is asked to reload.
+        const result = await tx.truckOperation.updateMany({
+          where: { id: truckId, version: expectedVersion },
+          data: {
+            tareWeightKg: newWeightKg,
+            tareTime: new Date(),
+            version: { increment: 1 },
+          },
         });
+        if (result.count === 0) {
+          throw new ServiceError(
+            "تم تعديل السجل من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
+          );
+        }
+
+        const updated = await tx.truckOperation.findUnique({ where: { id: truckId } });
 
         await logAudit(tx, {
           userId,
@@ -235,11 +255,12 @@ export async function correctTare(truckId: number, newWeightKg: number, userId: 
             action: "tare_correction",
             oldTareWeightKg: oldWeight,
             newTareWeightKg: newWeightKg,
+            expectedVersion,
           },
         });
 
         logger.info({ truckId, oldWeight, newWeightKg }, "tare corrected");
-        return updated;
+        return updated!;
       },
       { isolationLevel: "Serializable" },
     ),
@@ -248,7 +269,12 @@ export async function correctTare(truckId: number, newWeightKg: number, userId: 
 
 // ─── Correct Gross (before close only) ────────────────────────────
 
-export async function correctGross(truckId: number, newWeightKg: number, userId: number) {
+export async function correctGross(
+  truckId: number,
+  newWeightKg: number,
+  expectedVersion: number,
+  userId: number,
+) {
   if (newWeightKg <= 0) throw new ServiceError("الوزن يجب أن يكون أكبر من صفر");
 
   return withRetry(() =>
@@ -272,10 +298,22 @@ export async function correctGross(truckId: number, newWeightKg: number, userId:
 
         const oldWeight = truck.grossWeightKg ? Number(truck.grossWeightKg) : null;
 
-        const updated = await tx.truckOperation.update({
-          where: { id: truckId },
-          data: { grossWeightKg: newWeightKg, grossTime: new Date() },
+        // Optimistic lock — see correctTare for the full rationale.
+        const result = await tx.truckOperation.updateMany({
+          where: { id: truckId, version: expectedVersion },
+          data: {
+            grossWeightKg: newWeightKg,
+            grossTime: new Date(),
+            version: { increment: 1 },
+          },
         });
+        if (result.count === 0) {
+          throw new ServiceError(
+            "تم تعديل السجل من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
+          );
+        }
+
+        const updated = await tx.truckOperation.findUnique({ where: { id: truckId } });
 
         await logAudit(tx, {
           userId,
@@ -286,11 +324,12 @@ export async function correctGross(truckId: number, newWeightKg: number, userId:
             action: "gross_correction",
             oldGrossWeightKg: oldWeight,
             newGrossWeightKg: newWeightKg,
+            expectedVersion,
           },
         });
 
         logger.info({ truckId, oldWeight, newWeightKg }, "gross corrected");
-        return updated;
+        return updated!;
       },
       { isolationLevel: "Serializable" },
     ),
@@ -315,6 +354,24 @@ export async function enterWeighSession(
   return withRetry(() =>
     prisma.$transaction(
       async (tx: TxClient) => {
+        // Pessimistic row lock on the truck serializes concurrent
+        // enterWeighSession calls for the same truck. Without this lock two
+        // internal-loading workers can both compute the same next
+        // sessionNumber and hit the unique (truck_operation_id, session_number)
+        // constraint. Because the FOR UPDATE lock already serializes all
+        // write paths for this truck, ReadCommitted is sufficient and avoids
+        // the thundering P2034 herd that Serializable's SSI checker emits
+        // under heavy contention (observed: 10 parallel workers → ~5 aborts
+        // even with the row lock). Correctness of the `FirstWeigh → OnScale`
+        // transition is preserved because only the lock holder ever reads
+        // and writes at a given moment.
+        const locked = await tx.$queryRaw<{ id: number }[]>`
+          SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
+        `;
+        if (locked.length === 0) {
+          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        }
+
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
         if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
 
@@ -366,7 +423,7 @@ export async function enterWeighSession(
         logger.info({ truckId, sessionId: session.id, sessionNumber: nextNumber }, "weigh session added");
         return session;
       },
-      { isolationLevel: "Serializable" },
+      { isolationLevel: "ReadCommitted" },
     ),
   );
 }
@@ -376,6 +433,7 @@ export async function enterWeighSession(
 export async function editWeighSession(
   truckId: number,
   sessionId: number,
+  expectedVersion: number,
   data: Partial<WeighSessionInput>,
   userId: number,
 ) {
@@ -398,26 +456,38 @@ export async function editWeighSession(
           throw new ServiceError("الوزن يجب أن يكون أكبر من صفر");
         }
 
-        const updateData: Prisma.WeighSessionUpdateInput = {};
+        // Optimistic lock against two concurrent edits of the same weigh
+        // session. Use the "unchecked" variant so we can set the FK scalar
+        // `sizeId` directly (updateMany cannot nest relation writes).
+        const updateData: Prisma.WeighSessionUncheckedUpdateManyInput = {
+          version: { increment: 1 },
+        };
         if (data.weightTons !== undefined) updateData.weightTons = data.weightTons;
-        if (data.sizeId !== undefined) updateData.size = data.sizeId ? { connect: { id: data.sizeId } } : { disconnect: true };
+        if (data.sizeId !== undefined) updateData.sizeId = data.sizeId ?? null;
         if (data.bundleCount !== undefined) updateData.bundleCount = data.bundleCount;
 
-        const updated = await tx.weighSession.update({
-          where: { id: sessionId },
+        const result = await tx.weighSession.updateMany({
+          where: { id: sessionId, version: expectedVersion },
           data: updateData,
         });
+        if (result.count === 0) {
+          throw new ServiceError(
+            "تم تعديل الوزنة من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
+          );
+        }
+
+        const updated = await tx.weighSession.findUnique({ where: { id: sessionId } });
 
         await logAudit(tx, {
           userId,
           action: "update",
           entityType: "WeighSession",
           entityId: String(sessionId),
-          details: { truckId, changes: data },
+          details: { truckId, changes: data, expectedVersion },
         });
 
         logger.info({ truckId, sessionId }, "weigh session edited");
-        return updated;
+        return updated!;
       },
       { isolationLevel: "Serializable" },
     ),
@@ -427,27 +497,34 @@ export async function editWeighSession(
 // ─── Upload Photo ─────────────────────────────────────────────────
 
 export async function uploadPhoto(truckId: number, filePath: string, userId: number) {
-  const truck = await prisma.truckOperation.findUnique({ where: { id: truckId } });
-  if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
-  if (truck.status === "Completed" || truck.status === "Cancelled") {
-    throw new ServiceError("لا يمكن رفع صورة لعملية مغلقة أو ملغاة");
-  }
+  const photo = await withRetry(() =>
+    prisma.$transaction(
+      async (tx: TxClient) => {
+        // Re-check truck inside the serializable tx so a concurrent cancel or
+        // close cannot race a photo upload.
+        const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
+        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (truck.status === "Completed" || truck.status === "Cancelled") {
+          throw new ServiceError("لا يمكن رفع صورة لعملية مغلقة أو ملغاة");
+        }
 
-  const photo = await prisma.$transaction(async (tx: TxClient) => {
-    const created = await tx.truckPhoto.create({
-      data: { truckOperationId: truckId, filePath },
-    });
+        const created = await tx.truckPhoto.create({
+          data: { truckOperationId: truckId, filePath },
+        });
 
-    await logAudit(tx, {
-      userId,
-      action: "upload",
-      entityType: "TruckPhoto",
-      entityId: String(created.id),
-      details: { truckId, filePath },
-    });
+        await logAudit(tx, {
+          userId,
+          action: "upload",
+          entityType: "TruckPhoto",
+          entityId: String(created.id),
+          details: { truckId, filePath },
+        });
 
-    return created;
-  });
+        return created;
+      },
+      { isolationLevel: "Serializable" },
+    ),
+  );
 
   logger.info({ truckId, photoId: photo.id }, "photo uploaded");
   return photo;
@@ -459,21 +536,40 @@ export async function confirmLoadingComplete(truckId: number, userId: number) {
   return withRetry(() =>
     prisma.$transaction(
       async (tx: TxClient) => {
+        // Row lock serializes this confirmation with any in-flight
+        // enterWeighSession (which also takes FOR UPDATE). This guarantees
+        // the session count / totalInternalTons we log below reflect every
+        // session that exists at commit time, not an earlier snapshot.
+        const locked = await tx.$queryRaw<{ id: number }[]>`
+          SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
+        `;
+        if (locked.length === 0) {
+          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        }
+
         const truck = await tx.truckOperation.findUnique({
           where: { id: truckId },
-          include: { sessions: true, photos: true },
         });
         if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
         assertTransition(truck.status, "LoadingComplete");
 
-        if (truck.sessions.length === 0) {
+        // Re-query after the lock so both collections are up-to-date.
+        const [sessions, photoCount] = await Promise.all([
+          tx.weighSession.findMany({
+            where: { truckOperationId: truckId },
+            select: { weightTons: true },
+          }),
+          tx.truckPhoto.count({ where: { truckOperationId: truckId } }),
+        ]);
+
+        if (sessions.length === 0) {
           throw new ServiceError("يجب إدخال وزنة واحدة على الأقل قبل تأكيد اكتمال التحميل");
         }
-        if (truck.photos.length === 0) {
+        if (photoCount === 0) {
           throw new ServiceError("يجب رفع صورة واحدة على الأقل قبل تأكيد اكتمال التحميل");
         }
 
-        const totalInternalTons = truck.sessions.reduce(
+        const totalInternalTons = sessions.reduce(
           (sum, s) => sum.plus(s.weightTons),
           new Decimal(0),
         );
@@ -491,15 +587,19 @@ export async function confirmLoadingComplete(truckId: number, userId: number) {
           details: {
             from: truck.status,
             to: "LoadingComplete",
-            sessionCount: truck.sessions.length,
+            sessionCount: sessions.length,
             totalInternalTons: totalInternalTons.toNumber(),
           },
         });
 
-        logger.info({ truckId, sessions: truck.sessions.length }, "loading complete confirmed");
+        logger.info({ truckId, sessions: sessions.length }, "loading complete confirmed");
         return updated;
       },
-      { isolationLevel: "Serializable" },
+      // The FOR UPDATE lock above already serialises every writer of this
+      // truck. ReadCommitted avoids the Serializable SSI checker's thundering
+      // P2034 herd under heavy contention (see enterWeighSession for the same
+      // rationale).
+      { isolationLevel: "ReadCommitted" },
     ),
   );
 }
@@ -510,6 +610,17 @@ export async function reopenBeforeGross(truckId: number, userId: number) {
   return withRetry(() =>
     prisma.$transaction(
       async (tx: TxClient) => {
+        // Row lock keeps this reopen serialised with any concurrent
+        // confirmLoadingComplete, enterGross, cancel, etc. Without it two
+        // operators can both flip the status back to OnScale and emit two
+        // audit rows for a single logical transition.
+        const locked = await tx.$queryRaw<{ id: number }[]>`
+          SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
+        `;
+        if (locked.length === 0) {
+          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        }
+
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
         if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
 
@@ -533,7 +644,7 @@ export async function reopenBeforeGross(truckId: number, userId: number) {
         logger.info({ truckId }, "loading complete reopened");
         return updated;
       },
-      { isolationLevel: "Serializable" },
+      { isolationLevel: "ReadCommitted" },
     ),
   );
 }
@@ -590,6 +701,17 @@ export async function closeOperation(truckId: number, userId: number) {
   return withRetry(() =>
     prisma.$transaction(
       async (tx: TxClient) => {
+        // Serialise against any concurrent correctGross / correctTare / edit
+        // that might be in flight. The lock also ensures the `sessions`
+        // snapshot we read (and hash into the audit log) reflects post-commit
+        // state rather than an earlier view.
+        const locked = await tx.$queryRaw<{ id: number }[]>`
+          SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
+        `;
+        if (locked.length === 0) {
+          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        }
+
         const truck = await tx.truckOperation.findUnique({
           where: { id: truckId },
           include: { sessions: true },
@@ -639,7 +761,7 @@ export async function closeOperation(truckId: number, userId: number) {
         );
         return updated;
       },
-      { isolationLevel: "Serializable" },
+      { isolationLevel: "ReadCommitted" },
     ),
   );
 }
@@ -652,6 +774,17 @@ export async function cancelOperation(truckId: number, reason: string, userId: n
   return withRetry(() =>
     prisma.$transaction(
       async (tx: TxClient) => {
+        // Row lock makes the cancel wait for any in-flight weigh session
+        // insert (which also takes FOR UPDATE). Avoids the race where a
+        // session commits a fraction of a second before a cancel and leaves
+        // semantically orphaned rows on a cancelled truck.
+        const locked = await tx.$queryRaw<{ id: number }[]>`
+          SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
+        `;
+        if (locked.length === 0) {
+          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        }
+
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
         if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
         assertTransition(truck.status, "Cancelled");
@@ -677,7 +810,7 @@ export async function cancelOperation(truckId: number, reason: string, userId: n
         logger.info({ truckId, reason }, "truck operation cancelled");
         return updated;
       },
-      { isolationLevel: "Serializable" },
+      { isolationLevel: "ReadCommitted" },
     ),
   );
 }

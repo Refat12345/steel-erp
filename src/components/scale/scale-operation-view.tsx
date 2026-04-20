@@ -66,6 +66,7 @@ interface WeighSessionItem {
   sizeId: number | null;
   bundleCount: number | null;
   weightTons: string;
+  version: number;
   size: { id: number; code: string; displayName: string } | null;
 }
 
@@ -97,6 +98,7 @@ interface TruckDetail {
   notes: string | null;
   cancelReason: string | null;
   closedAt: string | null;
+  version: number;
   createdAt: string;
   customer: { id: number; fullName: string; code: string } | null;
   creator: { id: number; fullName: string; username: string };
@@ -179,11 +181,20 @@ export function ScaleOperationView({ truckId }: { truckId: number }) {
     setActionLoading(true);
     try {
       const opts: RequestInit = { method };
+      // One fresh key per user action; retries of the same action should
+      // reuse the same key, but the current UI does not retry implicitly.
+      // Photo upload uses FormData and its endpoint is not idempotency-
+      // protected, so skip the header in that branch.
+      const headers: Record<string, string> = {};
       if (formData) {
         opts.body = formData;
-      } else if (body !== undefined) {
-        opts.headers = { "Content-Type": "application/json" };
-        opts.body = JSON.stringify(body);
+      } else {
+        if (body !== undefined) {
+          headers["Content-Type"] = "application/json";
+          opts.body = JSON.stringify(body);
+        }
+        headers["Idempotency-Key"] = crypto.randomUUID();
+        opts.headers = headers;
       }
       const res = await fetch(url, opts);
       const json = await res.json();
@@ -627,14 +638,24 @@ export function ScaleOperationView({ truckId }: { truckId: number }) {
         onOpenChange={setShowCorrectTareDialog}
         title="تصحيح وزن الفارغ (كغ)"
         currentValue={tare ?? undefined}
-        onSubmit={(kg) => doAction(`/api/trucks/${truck.id}/correct-tare`, "PATCH", { weightKg: kg })}
+        onSubmit={(kg) =>
+          doAction(`/api/trucks/${truck.id}/correct-tare`, "PATCH", {
+            weightKg: kg,
+            expectedVersion: truck.version,
+          })
+        }
       />
       <WeightDialog
         open={showCorrectGrossDialog}
         onOpenChange={setShowCorrectGrossDialog}
         title="تصحيح وزن المحمّل (كغ)"
         currentValue={gross ?? undefined}
-        onSubmit={(kg) => doAction(`/api/trucks/${truck.id}/correct-gross`, "PATCH", { weightKg: kg })}
+        onSubmit={(kg) =>
+          doAction(`/api/trucks/${truck.id}/correct-gross`, "PATCH", {
+            weightKg: kg,
+            expectedVersion: truck.version,
+          })
+        }
       />
       <SessionDialog
         open={showSessionDialog}
@@ -993,7 +1014,10 @@ function SessionDialog({
 
       const res = await fetch(`/api/trucks/${truckId}/sessions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": crypto.randomUUID(),
+        },
         body: JSON.stringify(body),
       });
       const json = await res.json();
@@ -1151,10 +1175,14 @@ function EditSessionButton({
       const body: Record<string, unknown> = { weightTons: parsedWeight };
       body.sizeId = sizeId ? parseInt(sizeId, 10) : null;
       body.bundleCount = parsedBundles;
+      body.expectedVersion = s.version;
 
       const res = await fetch(`/api/trucks/${truckId}/sessions/${s.id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": crypto.randomUUID(),
+        },
         body: JSON.stringify(body),
       });
       const json = await res.json();
@@ -1361,7 +1389,10 @@ function CancelDialog({
     try {
       const res = await fetch(`/api/trucks/${truckId}/cancel`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": crypto.randomUUID(),
+        },
         body: JSON.stringify({ reason: reason.trim() }),
       });
       const json = await res.json();

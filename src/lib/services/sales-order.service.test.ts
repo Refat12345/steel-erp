@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockPrisma = vi.hoisted(() => ({
   masterContract: { findUnique: vi.fn() },
-  salesOrder: { findFirst: vi.fn(), create: vi.fn() },
+  salesOrder: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
   auditLog: { create: vi.fn() },
   $transaction: vi.fn(),
 }));
@@ -47,7 +47,9 @@ const scrapOrder: SalesOrderCreateInput = {
 };
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  // resetAllMocks also clears queued mockResolvedValueOnce values; clearAllMocks
+  // does not, which let queued `findFirst` returns leak between tests.
+  vi.resetAllMocks();
   mockPrisma.$transaction.mockImplementation(async (fn: (tx: typeof mockPrisma) => unknown) =>
     fn(mockPrisma),
   );
@@ -57,6 +59,9 @@ beforeEach(() => {
     status: "active",
     customerId: 1,
   });
+  // Default: no duplicate and no existing orders (sequence starts at 001).
+  mockPrisma.salesOrder.findFirst.mockResolvedValue(null);
+  mockPrisma.salesOrder.findMany.mockResolvedValue([]);
 });
 
 describe("createSalesOrder", () => {
@@ -79,9 +84,10 @@ describe("createSalesOrder", () => {
   });
 
   it("allows a second REBAR order when the grade differs", async () => {
-    mockPrisma.salesOrder.findFirst
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null);
+    // The duplicate check runs findFirst (no match), then the sequence
+    // generator runs findMany inside the transaction (empty list).
+    mockPrisma.salesOrder.findFirst.mockResolvedValueOnce(null);
+    mockPrisma.salesOrder.findMany.mockResolvedValueOnce([]);
     mockPrisma.salesOrder.create.mockResolvedValue({
       orderNumber: "26-01-001",
       contractNumber: "26-01",
@@ -104,9 +110,8 @@ describe("createSalesOrder", () => {
   });
 
   it("creates first order when no duplicate exists", async () => {
-    mockPrisma.salesOrder.findFirst
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null);
+    mockPrisma.salesOrder.findFirst.mockResolvedValueOnce(null);
+    mockPrisma.salesOrder.findMany.mockResolvedValueOnce([]);
     mockPrisma.salesOrder.create.mockResolvedValue({
       orderNumber: "26-01-001",
       contractNumber: "26-01",

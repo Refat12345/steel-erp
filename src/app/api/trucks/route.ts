@@ -9,6 +9,7 @@ import {
   handleServiceError,
   parsePagination,
 } from "@/lib/api-utils";
+import { withIdempotency, readJsonBody } from "@/lib/idempotency";
 import { truckRegisterSchema } from "@/lib/validators/truck";
 import { registerTruck, listOperations } from "@/lib/services/truck.service";
 import type { TruckStatus } from "@prisma/client";
@@ -50,29 +51,26 @@ export async function POST(req: NextRequest) {
   if (!session) return unauthorized();
   if (!hasPermission(session, "truck.register")) return forbidden();
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return badRequest("بيانات غير صالحة");
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return badRequest("بيانات غير صالحة");
 
-  const parsed = truckRegisterSchema.safeParse(body);
-  if (!parsed.success) {
-    return badRequest(parsed.error.issues[0]?.message || "بيانات غير صالحة");
-  }
-
-  try {
-    const truck = await registerTruck(
-      {
-        ...parsed.data,
-        salesOrderNumber: parsed.data.salesOrderNumber || null,
-        notes: parsed.data.notes || null,
-      },
-      session.userId,
-    );
-    return ok(truck);
-  } catch (e) {
-    return handleServiceError(e);
-  }
+  return withIdempotency(req, session.userId, parsed.text, async () => {
+    const validated = truckRegisterSchema.safeParse(parsed.json);
+    if (!validated.success) {
+      return badRequest(validated.error.issues[0]?.message || "بيانات غير صالحة");
+    }
+    try {
+      const truck = await registerTruck(
+        {
+          ...validated.data,
+          salesOrderNumber: validated.data.salesOrderNumber || null,
+          notes: validated.data.notes || null,
+        },
+        session.userId,
+      );
+      return ok(truck);
+    } catch (e) {
+      return handleServiceError(e);
+    }
+  });
 }

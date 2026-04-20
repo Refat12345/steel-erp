@@ -34,10 +34,16 @@ import { ServiceError } from "./errors";
 // ─── Setup ─────────────────────────────────────────────────────
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  // resetAllMocks clears both call history *and* queued mockResolvedValueOnce
+  // implementations. clearAllMocks does not clear the once-queue, which let
+  // queued values bleed between tests and hide bugs.
+  vi.resetAllMocks();
   mockPrisma.$transaction.mockImplementation(async (fn: any) => fn(mockPrisma));
   mockPrisma.auditLog.create.mockResolvedValue({});
   mockPrisma.contractAttachment.create.mockResolvedValue({ id: 1 });
+  // Sensible defaults so individual tests only mock what they actually use.
+  mockPrisma.masterContract.findFirst.mockResolvedValue(null);
+  mockPrisma.masterContract.findMany.mockResolvedValue([]);
 });
 
 const yy = String(new Date().getFullYear()).slice(-2);
@@ -50,10 +56,10 @@ describe("createContract", () => {
       id: 1,
       isActive: true,
     });
-    // No existing contract for this customer this year
-    mockPrisma.masterContract.findFirst
-      .mockResolvedValueOnce(null)   // year-uniqueness check
-      .mockResolvedValueOnce(null);  // sequence generation (no previous)
+    // No existing contract for this customer this year (findFirst) and no
+    // contracts at all to compute the sequence from (findMany).
+    mockPrisma.masterContract.findFirst.mockResolvedValueOnce(null);
+    mockPrisma.masterContract.findMany.mockResolvedValueOnce([]);
     mockPrisma.masterContract.create.mockResolvedValue({
       contractNumber: `${yy}-01`,
       customerId: 1,
@@ -75,9 +81,13 @@ describe("createContract", () => {
       id: 2,
       isActive: true,
     });
-    mockPrisma.masterContract.findFirst
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ contractNumber: `${yy}-05` });
+    mockPrisma.masterContract.findFirst.mockResolvedValueOnce(null);
+    // The service now scans all year-matching contracts and picks max(seq)+1.
+    mockPrisma.masterContract.findMany.mockResolvedValueOnce([
+      { contractNumber: `${yy}-02` },
+      { contractNumber: `${yy}-05` },
+      { contractNumber: `${yy}-03` },
+    ]);
     mockPrisma.masterContract.create.mockResolvedValue({
       contractNumber: `${yy}-06`,
       customerId: 2,

@@ -8,6 +8,7 @@ import {
   hasPermission,
   handleServiceError,
 } from "@/lib/api-utils";
+import { withIdempotency, readJsonBody } from "@/lib/idempotency";
 import { weighSessionEditSchema } from "@/lib/validators/truck";
 import { editWeighSession } from "@/lib/services/truck.service";
 
@@ -24,22 +25,27 @@ export async function PATCH(
   const sid = parseInt(sessionId, 10);
   if (isNaN(truckId) || isNaN(sid)) return badRequest("معرّف غير صالح");
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return badRequest("بيانات غير صالحة");
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return badRequest("بيانات غير صالحة");
 
-  const parsed = weighSessionEditSchema.safeParse(body);
-  if (!parsed.success) {
-    return badRequest(parsed.error.issues[0]?.message || "بيانات غير صالحة");
-  }
+  return withIdempotency(req, session.userId, parsed.text, async () => {
+    const validated = weighSessionEditSchema.safeParse(parsed.json);
+    if (!validated.success) {
+      return badRequest(validated.error.issues[0]?.message || "بيانات غير صالحة");
+    }
 
-  try {
-    const ws = await editWeighSession(truckId, sid, parsed.data, session.userId);
-    return ok(ws);
-  } catch (e) {
-    return handleServiceError(e);
-  }
+    try {
+      const { expectedVersion, ...patch } = validated.data;
+      const ws = await editWeighSession(
+        truckId,
+        sid,
+        expectedVersion,
+        patch,
+        session.userId,
+      );
+      return ok(ws);
+    } catch (e) {
+      return handleServiceError(e);
+    }
+  });
 }

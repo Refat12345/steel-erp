@@ -8,7 +8,8 @@ import {
   hasPermission,
   handleServiceError,
 } from "@/lib/api-utils";
-import { grossSchema } from "@/lib/validators/truck";
+import { withIdempotency, readJsonBody } from "@/lib/idempotency";
+import { correctGrossSchema } from "@/lib/validators/truck";
 import { correctGross } from "@/lib/services/truck.service";
 
 export async function PATCH(
@@ -23,22 +24,25 @@ export async function PATCH(
   const truckId = parseInt(id, 10);
   if (isNaN(truckId)) return badRequest("معرّف غير صالح");
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return badRequest("بيانات غير صالحة");
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return badRequest("بيانات غير صالحة");
 
-  const parsed = grossSchema.safeParse(body);
-  if (!parsed.success) {
-    return badRequest(parsed.error.issues[0]?.message || "بيانات غير صالحة");
-  }
+  return withIdempotency(req, session.userId, parsed.text, async () => {
+    const validated = correctGrossSchema.safeParse(parsed.json);
+    if (!validated.success) {
+      return badRequest(validated.error.issues[0]?.message || "بيانات غير صالحة");
+    }
 
-  try {
-    const truck = await correctGross(truckId, parsed.data.weightKg, session.userId);
-    return ok(truck);
-  } catch (e) {
-    return handleServiceError(e);
-  }
+    try {
+      const truck = await correctGross(
+        truckId,
+        validated.data.weightKg,
+        validated.data.expectedVersion,
+        session.userId,
+      );
+      return ok(truck);
+    } catch (e) {
+      return handleServiceError(e);
+    }
+  });
 }

@@ -7,7 +7,10 @@ import {
   ok,
   hasPermission,
   handleServiceError,
+  tooManyRequests,
 } from "@/lib/api-utils";
+import { checkRateLimit, SCALE_WRITE_RATE_LIMIT } from "@/lib/rate-limit";
+import { withIdempotency, readJsonBody } from "@/lib/idempotency";
 import { weighSessionSchema } from "@/lib/validators/truck";
 import { enterWeighSession } from "@/lib/services/truck.service";
 
@@ -23,22 +26,23 @@ export async function POST(
   const truckId = parseInt(id, 10);
   if (isNaN(truckId)) return badRequest("معرّف غير صالح");
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return badRequest("بيانات غير صالحة");
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return badRequest("بيانات غير صالحة");
 
-  const parsed = weighSessionSchema.safeParse(body);
-  if (!parsed.success) {
-    return badRequest(parsed.error.issues[0]?.message || "بيانات غير صالحة");
-  }
+  return withIdempotency(req, session.userId, parsed.text, async () => {
+    const rl = checkRateLimit(`scale:${session.userId}`, SCALE_WRITE_RATE_LIMIT);
+    if (!rl.allowed) return tooManyRequests(rl.retryAfterMs);
 
-  try {
-    const ws = await enterWeighSession(truckId, parsed.data, session.userId);
-    return ok(ws);
-  } catch (e) {
-    return handleServiceError(e);
-  }
+    const validated = weighSessionSchema.safeParse(parsed.json);
+    if (!validated.success) {
+      return badRequest(validated.error.issues[0]?.message || "بيانات غير صالحة");
+    }
+
+    try {
+      const ws = await enterWeighSession(truckId, validated.data, session.userId);
+      return ok(ws);
+    } catch (e) {
+      return handleServiceError(e);
+    }
+  });
 }
