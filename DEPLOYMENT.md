@@ -113,7 +113,7 @@
 - [ ] `git`, `node (v22+)`, `npm` مثبتين.
 - [ ] التطبيق شغال محلياً (`npm run dev`).
 - [ ] الـ `.env.local` فيه كل المتغيرات المطلوبة.
-- [ ] SSH client (PowerShell 7+ على ويندوز بيجي بـ SSH جاهز، أو استخدم Windows Terminal).
+- [ ] SSH client (PowerShell 7+ على ويندوز غالباً فيه `ssh` جاهز، أو Windows Terminal، أو **طرفية Cursor** — نفس الفكرة؛ تفاصيل إضافية بـ §4).
 - [ ] GitHub account والمشروع مرفوع على repo خاص.
 - [ ] إنشاء SSH key لو ما عندك: `ssh-keygen -t ed25519 -C "your-email@example.com"` - المفتاح العام بيكون بـ `~/.ssh/id_ed25519.pub`.
 
@@ -128,7 +128,76 @@
 
 ## 4. المرحلة 0: أساسيات SSH وأدوات لازم تعرفها
 
+### قبل الأوامر: وين تكتبها؟ (Windows + Cursor)
+
+جهازك **Windows**. الأوامر اللي بالدليل من نوع `ssh` و `scp` هي أوامر **سطر أوامر** (Terminal). ما في فرق جوهري بين:
+
+| المكان | ملاحظة |
+|--------|--------|
+| **طرفية Cursor** | من القائمة: `Terminal` → `New Terminal`، أو من لوحة المفاتيح: **Ctrl** مع المفتاح **فوق Tab** (نفس مفتاح علامة الـ grave في لوحة إنجليزية). نافذة الطرفية هي **نفس مبدأ** PowerShell أو CMD حسب الـ Default Profile. **نعم، تقدر تشتغل أوامر جهازك من هون** طالما `ssh` شغال. |
+| **Windows Terminal** | تطبيق Microsoft؛ يفتح تبويب PowerShell أو Ubuntu (WSL) حسب إعدادك. |
+| **PowerShell منفصل** | ابحث في قائمة ابدأ عن *Windows PowerShell* أو *PowerShell 7*. |
+
+**متى تكون «على Windows» ومتى «على السيرفر»؟**
+
+1. **على Windows (محلياً):** تكتب أوامر مثل `ssh deploy@...` و `scp ...` لفتح الاتصال أو نقل ملفات بين لابتوبك والـ VPS. مسار ملفاتك يكون مثل `C:\Users\اسمك\steel-erp\...`.
+2. **بعد ما تدخل بـ SSH:** الطرفية تصير **جلسة Linux على الـ VPS** (Ubuntu). هون بتشتغل أوامر مثل `sudo`, `nano`, `journalctl`, `pm2`, `npx prisma migrate deploy`. هالأوامر **ما بتنفّذها على Windows مباشرة** — لازم تكون **داخل** `ssh` أولاً.
+
+**رمز المجلد `~` (tilde):**
+
+- على **Linux / السيرفر:** يعني «مجلد المستخدم الحالي»، غالباً `/home/deploy`.
+- على **Windows مع PowerShell:** غالباً يترجم لـ `C:\Users\اسم_المستخدم` (نفس فكرة «مجلد المستخدم»).
+
+**مفاتيح SSH — وين بتنحفظ؟**
+
+لما تنفّذ على جهازك (من Cursor أو PowerShell):
+
+```powershell
+ssh-keygen -t ed25519 -C "your-email@example.com"
+```
+
+- الافتراضي يحفظ المفتاح تحت مجلد **مخفي** اسمه `.ssh` داخل مجلد المستخدم:
+  - **Windows:** `C:\Users\اسم_المستخدم\.ssh\`
+  - الملف **`id_ed25519`** = المفتاح **الخاص** — **لا** ترفعه لأي مكان ولا ترسله بالواتساب. من يمسكه يقدر يتظاهر إنك أنت أمام السيرفر.
+  - الملف **`id_ed25519.pub`** = المفتاح **العام** — **هذا** اللي تنسخه إلى GitHub (**Deploy keys** أو حسابك) أو يرسله الشخص التقني ليضيفه على الـ VPS في `~/.ssh/authorized_keys`.
+- لو سألك `ssh-keygen` عن **passphrase**: عبارة سر اختيارية لقفل المفتاح على جهازك؛ أنصح فيها على أجهزة العمل، وبعدها Windows قد يطلبها عند أول `ssh` في الجلسة.
+
+**تأكد إن `ssh` موجود على Windows:**
+
+```powershell
+ssh -V
+```
+
+إذا ظهر خطأ «الأمر غير معروف»:
+
+- **Windows 10/11:** الإعدادات → *Apps* → *Optional features* → تأكد من تثبيت **OpenSSH Client**؛ أو ثبّت [PowerShell 7](https://github.com/PowerShell/PowerShell/releases) من الموقع الرسمي.
+- بديل شائع: تثبيت **Git for Windows** واستخدام **Git Bash** — فيه `ssh` و `scp` جاهزين.
+
+**نسخ المفتاح العام لصقه في GitHub (مثال PowerShell):**
+
+```powershell
+Get-Content $env:USERPROFILE\.ssh\id_ed25519.pub | Set-Clipboard
+```
+
+(يقرأ الملف وينسخ محتواه للحافظة؛ بعدها الصق في GitHub.)
+
+لتتأكد إن المجلد موجود من PowerShell:
+
+```powershell
+dir $env:USERPROFILE\.ssh
+```
+
+ولفتح المجلد في مستكشف الملفات:
+
+```powershell
+explorer $env:USERPROFILE\.ssh
+```
+
+---
+
 ### الأوامر اللي لازم تفهمها قبل ما تبدأ
+
+> **تنبيه:** أوامر **`ssh`** و **`scp`** في أول الكتلة تُنفَّذ **من Windows** (طرفية Cursor أو PowerShell) — قبل الدخول أو بدون ما تفتح جلسة تفاعلية طويلة على السيرفر. **باقي الأوامر** (`sudo`, `journalctl`, `nano`, …) تُنفَّذ **بعد** ما تكون داخل جلسة **SSH على Ubuntu** (السيرفر).
 
 ```bash
 # الدخول على السيرفر
