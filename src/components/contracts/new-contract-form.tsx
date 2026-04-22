@@ -199,12 +199,12 @@ export function NewContractForm() {
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-        {/* Customer Selection */}
-        <Card>
+        {/* Customer Selection — overflow-visible + z-index so the list is not clipped by Card or covered by cards below */}
+        <Card className="relative z-20 overflow-visible">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">العميل</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-3 overflow-visible">
             {selectedCustomer ? (
               <div className="flex items-center justify-between rounded-lg border p-3 bg-muted/30">
                 <div>
@@ -226,9 +226,9 @@ export function NewContractForm() {
                 </Button>
               </div>
             ) : (
-              <div className="relative">
+              <div className="relative isolate">
                 <div className="relative">
-                  <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none z-10" />
                   <Input
                     placeholder="ابحث عن عميل بالاسم أو الرقم الوطني..."
                     value={customerSearch}
@@ -238,12 +238,16 @@ export function NewContractForm() {
                     }}
                     onFocus={() => setShowCustomerDropdown(true)}
                     className="pr-9"
+                    autoComplete="off"
                   />
                 </div>
                 {showCustomerDropdown && (
-                  <div className="absolute z-10 mt-1 w-full rounded-lg border bg-popover shadow-lg max-h-48 overflow-auto">
+                  <div
+                    className="absolute start-0 end-0 top-full z-50 mt-1 max-h-[min(22rem,70vh)] min-h-0 overflow-y-auto overscroll-contain rounded-lg border bg-popover py-1 shadow-lg ring-1 ring-foreground/10"
+                    role="listbox"
+                  >
                     {customers.length === 0 ? (
-                      <div className="p-3 text-center text-sm text-muted-foreground">
+                      <div className="px-3 py-4 text-center text-sm text-muted-foreground">
                         لا توجد نتائج
                       </div>
                     ) : (
@@ -251,11 +255,12 @@ export function NewContractForm() {
                         <button
                           key={c.id}
                           type="button"
+                          role="option"
                           onClick={() => selectCustomer(c)}
-                          className="w-full text-right px-3 py-2 hover:bg-muted transition-colors text-sm"
+                          className="flex w-full flex-col items-stretch gap-0.5 px-3 py-2.5 text-right text-sm transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
                         >
-                          <span className="font-medium">{c.fullName}</span>
-                          <span className="text-muted-foreground mr-2 text-xs">
+                          <span className="font-medium leading-snug">{c.fullName}</span>
+                          <span className="text-xs text-muted-foreground">
                             {c.code}
                           </span>
                         </button>

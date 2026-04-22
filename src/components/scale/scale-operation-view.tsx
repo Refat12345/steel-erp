@@ -974,7 +974,7 @@ function SessionDialog({
   sizes: SizeOption[];
   onSuccess: () => void;
 }) {
-  const [sizeId, setSizeId] = useState<string>("");
+  const [sizeCode, setSizeCode] = useState<string>("");
   const [bundleCount, setBundleCount] = useState("");
   const [weightTons, setWeightTons] = useState("");
   const [confirming, setConfirming] = useState(false);
@@ -982,11 +982,11 @@ function SessionDialog({
 
   const parsedWeight = parseFloat(weightTons);
   const parsedBundles = bundleCount ? parseInt(bundleCount, 10) : null;
-  const selectedSize = sizes.find((s) => String(s.id) === sizeId);
+  const selectedSize = sizes.find((s) => s.code === sizeCode);
   const isValid = !isNaN(parsedWeight) && parsedWeight > 0;
 
   const reset = () => {
-    setSizeId("");
+    setSizeCode("");
     setBundleCount("");
     setWeightTons("");
     setConfirming(false);
@@ -1010,7 +1010,10 @@ function SessionDialog({
     setSaving(true);
     try {
       const body: Record<string, unknown> = { weightTons: parsedWeight };
-      if (sizeId) body.sizeId = parseInt(sizeId, 10);
+      if (sizeCode) {
+        const sz = sizes.find((s) => s.code === sizeCode);
+        if (sz) body.sizeId = sz.id;
+      }
       if (parsedBundles != null) body.bundleCount = parsedBundles;
 
       const res = await fetch(`/api/trucks/${truckId}/sessions`, {
@@ -1045,13 +1048,16 @@ function SessionDialog({
           <form onSubmit={handleNext} className="space-y-4">
             <div className="space-y-2">
               <Label>القياس</Label>
-              <Select value={sizeId} onValueChange={(v) => setSizeId(v ?? "")}>
+              <Select
+                value={sizeCode}
+                onValueChange={(v) => setSizeCode(v ?? "")}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="اختر القياس" />
                 </SelectTrigger>
                 <SelectContent>
                   {sizes.map((s) => (
-                    <SelectItem key={s.id} value={String(s.id)}>
+                    <SelectItem key={s.id} value={s.code}>
                       {s.displayName}
                     </SelectItem>
                   ))}
@@ -1142,7 +1148,7 @@ function EditSessionButton({
   onEdited: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [sizeId, setSizeId] = useState(s.sizeId ? String(s.sizeId) : "");
+  const [sizeCode, setSizeCode] = useState(s.size?.code ?? "");
   const [bundleCount, setBundleCount] = useState(
     s.bundleCount != null ? String(s.bundleCount) : "",
   );
@@ -1152,7 +1158,7 @@ function EditSessionButton({
 
   const parsedWeight = parseFloat(weightTons);
   const parsedBundles = bundleCount ? parseInt(bundleCount, 10) : null;
-  const selectedSize = sizes.find((sz) => String(sz.id) === sizeId);
+  const selectedSize = sizes.find((sz) => sz.code === sizeCode);
   const originalWeight = Number(s.weightTons);
   const isValid = !isNaN(parsedWeight) && parsedWeight > 0;
 
@@ -1174,7 +1180,12 @@ function EditSessionButton({
     setSaving(true);
     try {
       const body: Record<string, unknown> = { weightTons: parsedWeight };
-      body.sizeId = sizeId ? parseInt(sizeId, 10) : null;
+      if (sizeCode) {
+        const sz = sizes.find((x) => x.code === sizeCode);
+        body.sizeId = sz?.id ?? null;
+      } else {
+        body.sizeId = null;
+      }
       body.bundleCount = parsedBundles;
       body.expectedVersion = s.version;
 
@@ -1218,13 +1229,16 @@ function EditSessionButton({
               </div>
               <div className="space-y-2">
                 <Label>القياس</Label>
-                <Select value={sizeId} onValueChange={(v) => setSizeId(v ?? "")}>
+                <Select
+                  value={sizeCode}
+                  onValueChange={(v) => setSizeCode(v ?? "")}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="اختر القياس" />
                   </SelectTrigger>
                   <SelectContent>
                     {sizes.map((sz) => (
-                      <SelectItem key={sz.id} value={String(sz.id)}>
+                      <SelectItem key={sz.id} value={sz.code}>
                         {sz.displayName}
                       </SelectItem>
                     ))}

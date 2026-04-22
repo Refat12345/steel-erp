@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -38,7 +38,8 @@ interface SizeOption {
 
 interface RequestItemRow {
   key: number;
-  sizeId: string;
+  /** Size catalog `code` (e.g. "8mm"); maps to numeric id only when submitting. */
+  sizeCode: string;
   bundleCount: string;
 }
 
@@ -95,7 +96,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
   const addRequestItem = () => {
     setRequestItems((prev) => [
       ...prev,
-      { key: ++rowKeyCounter, sizeId: "", bundleCount: "" },
+      { key: ++rowKeyCounter, sizeCode: "", bundleCount: "" },
     ]);
   };
 
@@ -105,7 +106,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
 
   const updateRequestItem = (
     key: number,
-    field: "sizeId" | "bundleCount",
+    field: "sizeCode" | "bundleCount",
     value: string,
   ) => {
     setRequestItems((prev) =>
@@ -113,7 +114,19 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
     );
   };
 
-  const usedSizeIds = new Set(requestItems.map((r) => r.sizeId).filter(Boolean));
+  const usedSizeCodes = new Set(
+    requestItems.map((r) => r.sizeCode).filter(Boolean),
+  );
+
+  /** Lets Select.Value show the customer name; Base UI renders raw `value` without `items`. */
+  const customerSelectItems = useMemo(
+    () =>
+      customers.map((c) => ({
+        value: String(c.id),
+        label: `${c.fullName} (${c.code})`,
+      })),
+    [customers],
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,12 +140,18 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
       return;
     }
 
-    const items = requestItems
-      .filter((r) => r.sizeId)
-      .map((r) => ({
-        sizeId: Number(r.sizeId),
+    const items: { sizeId: number; bundleCount: number | null }[] = [];
+    for (const r of requestItems.filter((x) => x.sizeCode)) {
+      const sz = sizes.find((s) => s.code === r.sizeCode);
+      if (!sz) {
+        toast.error("قياس غير صالح، أعد تحميل الصفحة والمحاولة");
+        return;
+      }
+      items.push({
+        sizeId: sz.id,
         bundleCount: r.bundleCount ? Number(r.bundleCount) : null,
-      }));
+      });
+    }
 
     for (const item of items) {
       if (item.bundleCount !== null && item.bundleCount < 1) {
@@ -184,6 +203,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
               <div className="h-9 animate-pulse rounded-md bg-muted" />
             ) : (
               <Select
+                items={customerSelectItems}
                 value={customerId}
                 onValueChange={(v) => setCustomerId(v ?? "")}
               >
@@ -254,9 +274,9 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                 >
                   <div className="flex-1 min-w-0">
                     <Select
-                      value={row.sizeId}
+                      value={row.sizeCode}
                       onValueChange={(v) =>
-                        updateRequestItem(row.key, "sizeId", v ?? "")
+                        updateRequestItem(row.key, "sizeCode", v ?? "")
                       }
                     >
                       <SelectTrigger className="w-full">
@@ -266,11 +286,11 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                         {sizes
                           .filter(
                             (s) =>
-                              String(s.id) === row.sizeId ||
-                              !usedSizeIds.has(String(s.id)),
+                              s.code === row.sizeCode ||
+                              !usedSizeCodes.has(s.code),
                           )
                           .map((s) => (
-                            <SelectItem key={s.id} value={String(s.id)}>
+                            <SelectItem key={s.id} value={s.code}>
                               {s.displayName}
                             </SelectItem>
                           ))}
