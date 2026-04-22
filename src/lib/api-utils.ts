@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { authOptions } from "@/lib/auth";
 import { ServiceError } from "@/lib/services/errors";
 import { logger } from "@/lib/logger";
-import { getEffectivePermissions } from "@/lib/permissions";
+import { resolveUserAuth } from "@/lib/permissions";
 
 export interface ApiSession {
   userId: number;
@@ -13,24 +13,29 @@ export interface ApiSession {
 }
 
 /**
- * Authenticate via JWT, then fetch fresh permissions from DB.
- * JWT provides identity (userId, roleCode); DB is the source of truth
- * for authorization — any permission change takes effect immediately.
+ * Authenticate via JWT (identity only), then resolve role + isActive +
+ * permissions from the DB. The JWT is used solely to discover `userId`;
+ * every authorization-relevant field (role, active status, permission
+ * set) is re-read from the database with a short cache window.
+ *
+ * Returns `null` if the user no longer exists or has been deactivated —
+ * callers must treat that identically to an unauthenticated request.
  */
 export async function getApiSession(): Promise<ApiSession | null> {
   const session = await getServerSession(authOptions);
   if (!session?.user) return null;
 
-  const userId = session.user.id as number;
-  const role = session.user.role as string;
+  const userId = session.user.id as number | undefined;
+  if (typeof userId !== "number") return null;
 
-  const freshPermissions = await getEffectivePermissions(userId, role);
+  const authContext = await resolveUserAuth(userId);
+  if (!authContext) return null;
 
   return {
-    userId,
-    username: session.user.username as string,
-    role,
-    permissions: Array.from(freshPermissions),
+    userId: authContext.userId,
+    username: authContext.username,
+    role: authContext.roleCode,
+    permissions: Array.from(authContext.permissions),
   };
 }
 
@@ -73,8 +78,12 @@ export function ok<T>(data: T) {
   return NextResponse.json({ success: true, data });
 }
 
+/**
+ * Permission-only gate. No role-based bypasses: admin users receive the
+ * full permission set from `resolveUserAuth`, so this check naturally
+ * authorizes them without ever consulting `session.role`.
+ */
 export function hasPermission(session: ApiSession, code: string): boolean {
-  if (session.role === "admin") return true;
   return session.permissions.includes(code);
 }
 
@@ -96,9 +105,16 @@ export function parsePagination(searchParams: URLSearchParams): PaginationParams
   return { page, pageSize };
 }
 
+const SERVICE_ERROR_STATUS: Record<string, number> = {
+  NOT_FOUND: 404,
+  FORBIDDEN: 403,
+  CONFLICT: 409,
+  BAD_REQUEST: 400,
+};
+
 export function handleServiceError(e: unknown): NextResponse {
   if (e instanceof ServiceError) {
-    const status = e.code === "NOT_FOUND" ? 404 : e.code === "FORBIDDEN" ? 403 : 400;
+    const status = SERVICE_ERROR_STATUS[e.code] ?? 400;
     return NextResponse.json({ success: false, error: e.message }, { status });
   }
   logger.error({ err: e }, "unhandled error in route handler");

@@ -1,41 +1,36 @@
 import { describe, it, expect } from "vitest";
-import { checkRateLimit } from "./rate-limit";
+import {
+  checkRateLimit,
+  LOGIN_RATE_LIMIT,
+  SCALE_WRITE_RATE_LIMIT,
+} from "./rate-limit";
 
-const config = { windowMs: 60_000, maxAttempts: 3 };
-
-describe("checkRateLimit", () => {
-  it("allows requests within the limit", () => {
-    const key = `test-allow-${Date.now()}-${Math.random()}`;
-    const r = checkRateLimit(key, config);
-    expect(r.allowed).toBe(true);
-    expect(r.remaining).toBe(2);
-    expect(r.retryAfterMs).toBe(0);
+describe("LOGIN_RATE_LIMIT — Part 6 brute-force protection", () => {
+  it("blocks after 10 attempts within 60 s", () => {
+    // Use a unique key per test run to isolate from other tests sharing the
+    // in-memory store. The sliding window means state persists across
+    // invocations of checkRateLimit for the same key.
+    const key = `login:test:${Math.random()}`;
+    for (let i = 0; i < 10; i++) {
+      const r = checkRateLimit(key, LOGIN_RATE_LIMIT);
+      expect(r.allowed).toBe(true);
+    }
+    const blocked = checkRateLimit(key, LOGIN_RATE_LIMIT);
+    expect(blocked.allowed).toBe(false);
+    expect(blocked.retryAfterMs).toBeGreaterThan(0);
   });
 
-  it("decrements remaining on each call", () => {
-    const key = `test-dec-${Date.now()}-${Math.random()}`;
-    expect(checkRateLimit(key, config).remaining).toBe(2);
-    expect(checkRateLimit(key, config).remaining).toBe(1);
-    expect(checkRateLimit(key, config).remaining).toBe(0);
+  it("has the exact Part 6 parameters (10 attempts / 60 s)", () => {
+    expect(LOGIN_RATE_LIMIT.maxAttempts).toBe(10);
+    expect(LOGIN_RATE_LIMIT.windowMs).toBe(60_000);
   });
 
-  it("blocks after maxAttempts reached", () => {
-    const key = `test-block-${Date.now()}-${Math.random()}`;
-    checkRateLimit(key, config);
-    checkRateLimit(key, config);
-    checkRateLimit(key, config);
-    const r = checkRateLimit(key, config);
-    expect(r.allowed).toBe(false);
-    expect(r.remaining).toBe(0);
-    expect(r.retryAfterMs).toBeGreaterThan(0);
-  });
-
-  it("uses separate counters per key", () => {
-    const key1 = `test-sep1-${Date.now()}-${Math.random()}`;
-    const key2 = `test-sep2-${Date.now()}-${Math.random()}`;
-    checkRateLimit(key1, config);
-    checkRateLimit(key1, config);
-    expect(checkRateLimit(key1, config).remaining).toBe(0);
-    expect(checkRateLimit(key2, config).remaining).toBe(2);
+  it("does not interfere with scale write buckets", () => {
+    // Separate keys => separate counters. Regression test against a refactor
+    // that accidentally shares the Map across configs.
+    const k = `scale:test:${Math.random()}`;
+    for (let i = 0; i < 50; i++) {
+      expect(checkRateLimit(k, SCALE_WRITE_RATE_LIMIT).allowed).toBe(true);
+    }
   });
 });

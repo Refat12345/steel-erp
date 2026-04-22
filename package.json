@@ -12,6 +12,7 @@
     "db:migrate": "npx prisma migrate dev",
     "db:seed": "npx tsx prisma/seed.ts",
     "db:reset": "npx prisma migrate reset --force",
+    "db:reset-admin": "npx tsx scripts/reset-db-admin-only.ts",
     "db:studio": "npx prisma studio",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -8,7 +8,6 @@ import {
   FileText,
   ShoppingCart,
   Truck,
-  Scale,
   Wallet,
   BarChart3,
   Shield,
@@ -33,6 +32,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { isNavUrlSuspended } from "@/config/suspended-pages";
+import { isAnalyticsRestrictedRole } from "@/lib/rbac-policy";
 
 /* CSS custom properties defined in globals.css */
 const BLUE = "oklch(0.620 0.175 222)";
@@ -55,7 +55,7 @@ const navItems: {
     title: "لوحة المؤشرات",
     url: "/",
     icon: LayoutDashboard,
-    permission: null,
+    permission: "dashboard.view",
   },
   {
     title: "العقود",
@@ -73,13 +73,7 @@ const navItems: {
     title: "الشاحنات",
     url: "/trucks",
     icon: Truck,
-    permission: "truck.view_queue",
-  },
-  {
-    title: "القبان",
-    url: "/scale",
-    icon: Scale,
-    permission: ["truck.view_approved", "scale.start"],
+    permission: ["truck.view_queue", "truck.view_approved"],
   },
   {
     title: "المالية",
@@ -91,7 +85,7 @@ const navItems: {
     title: "التقارير",
     url: "/reports",
     icon: BarChart3,
-    permission: "report.daily_trucks",
+    permission: "reports.view",
   },
   {
     title: "الإدارة",
@@ -131,11 +125,20 @@ export function AppSidebar() {
   if (!session) return null;
 
   const userPermissions = new Set(session.user.permissions);
-  const isAdmin = session.user.role === "admin";
+  const analyticsRestricted = isAnalyticsRestrictedRole(session.user.role);
 
   const visibleItems = navItems.filter((item) => {
     if (isNavUrlSuspended(item.url)) return false;
-    if (item.permission === null || isAdmin) return true;
+
+    // Hardcoded denylist — analytics-restricted roles never see the
+    // dashboard or reports entries, even if a permission override has
+    // been granted. Real enforcement lives in the server guards/API;
+    // this is UI hygiene so nothing is tempting them to click.
+    if (analyticsRestricted && (item.url === "/" || item.url === "/reports")) {
+      return false;
+    }
+
+    if (item.permission === null) return true;
     if (Array.isArray(item.permission))
       return item.permission.some((p) => userPermissions.has(p));
     return userPermissions.has(item.permission);

@@ -3,7 +3,7 @@
  * Usage: npx tsx scripts/reset-demo-passwords.ts <new-password>
  */
 import { PrismaClient } from "@prisma/client";
-import { hashSync } from "bcryptjs";
+import { hash as bcryptHash } from "bcryptjs";
 
 const prisma = new PrismaClient();
 
@@ -17,12 +17,12 @@ async function main() {
     process.exit(1);
   }
 
-  const hash = hashSync(newPassword, 12);
+  const passwordHash = await bcryptHash(newPassword, 12);
 
   for (const username of DEMO_USERNAMES) {
     const result = await prisma.user.updateMany({
       where: { username },
-      data: { passwordHash: hash },
+      data: { passwordHash },
     });
     if (result.count > 0) {
       console.log(`  ✓ ${username} — password updated`);

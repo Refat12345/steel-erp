@@ -20,7 +20,7 @@ describe("hasPermission", () => {
     userId: 1,
     username: "admin",
     role: "admin",
-    permissions: [],
+    permissions: ["any.thing", "contract.view", "contract.create"],
   };
 
   const user: ApiSession = {
@@ -30,8 +30,13 @@ describe("hasPermission", () => {
     permissions: ["contract.view", "payment.view"],
   };
 
-  it("returns true for admin regardless of permission code", () => {
+  it("authorizes admin through their permission set (no role-based bypass)", () => {
     expect(hasPermission(admin, "any.thing")).toBe(true);
+  });
+
+  it("denies admin if the code is genuinely absent from the permission set", () => {
+    const strippedAdmin: ApiSession = { ...admin, permissions: [] };
+    expect(hasPermission(strippedAdmin, "any.thing")).toBe(false);
   });
 
   it("returns true when permission is in the list", () => {

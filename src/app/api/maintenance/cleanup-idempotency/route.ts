@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getApiSession } from "@/lib/api-utils";
+import { getApiSession, hasPermission } from "@/lib/api-utils";
 import { cleanupExpiredIdempotencyKeys } from "@/lib/idempotency";
 import { logger } from "@/lib/logger";
 
@@ -31,9 +31,9 @@ async function handle(req: NextRequest): Promise<NextResponse> {
     authorised = true;
   } else {
     const session = await getApiSession();
-    if (session && session.role === "admin") {
+    if (session && hasPermission(session, "user.manage")) {
       authorised = true;
-      actor = `admin:${session.username}`;
+      actor = `user:${session.username}`;
     }
   }
 

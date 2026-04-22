@@ -1,10 +1,53 @@
+import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { Factory, CalendarDays, LayoutDashboard } from "lucide-react";
 import { ChartsSection } from "@/components/dashboard/charts-section";
+import { resolveUserAuth } from "@/lib/permissions";
+import {
+  canAccessDashboard,
+  getRoleLandingPage,
+  isAnalyticsRestrictedRole,
+} from "@/lib/rbac-policy";
+import { logger } from "@/lib/logger";
 
 export default async function DashboardPage() {
   const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const userId = session.user.id as number | undefined;
+  if (typeof userId !== "number") {
+    redirect("/login");
+  }
+
+  // Authoritative, DB-backed auth context — role + permissions re-read
+  // from the database so that JWT tampering, stale JWTs, and admin
+  // overrides granted post-login cannot bypass this gate.
+  const auth = await resolveUserAuth(userId);
+  if (!auth) {
+    redirect("/login");
+  }
+
+  if (!canAccessDashboard({ roleCode: auth.roleCode, permissions: auth.permissions })) {
+    logger.warn(
+      {
+        userId: auth.userId,
+        username: auth.username,
+        roleCode: auth.roleCode,
+        reason: isAnalyticsRestrictedRole(auth.roleCode)
+          ? "role is on ANALYTICS_RESTRICTED_ROLES denylist"
+          : "missing dashboard.view permission",
+      },
+      "dashboard page access denied",
+    );
+    // Prefer the role's configured landing page (e.g. shop-floor
+    // roles land on /trucks) so login never ends on a dead-end
+    // /forbidden screen. Fall back to /forbidden only when there is
+    // no mapped home for the role.
+    redirect(getRoleLandingPage(auth.roleCode) ?? "/forbidden");
+  }
 
   const dateStr = new Date().toLocaleDateString("ar-SA", {
     weekday: "long",

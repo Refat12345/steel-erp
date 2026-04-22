@@ -1,7 +1,13 @@
+export type ServiceErrorCode =
+  | "BAD_REQUEST"
+  | "NOT_FOUND"
+  | "FORBIDDEN"
+  | "CONFLICT";
+
 export class ServiceError extends Error {
   constructor(
     message: string,
-    public code: "BAD_REQUEST" | "NOT_FOUND" | "FORBIDDEN" = "BAD_REQUEST",
+    public code: ServiceErrorCode = "BAD_REQUEST",
   ) {
     super(message);
     this.name = "ServiceError";

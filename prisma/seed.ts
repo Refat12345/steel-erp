@@ -1,9 +1,40 @@
 import { PrismaClient, type SettlementMode } from "@prisma/client";
-import { hashSync } from "bcryptjs";
+import { hash } from "bcryptjs";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 
 const prisma = new PrismaClient();
+
+/**
+ * When set (`1` or `true`), seed wipes all operational data then re-applies
+ * RBAC + sizes + system user + admin only — no demo customers/contracts/SOs.
+ * Use with `npx prisma migrate reset --force` via `npm run db:reset-admin`.
+ */
+const SEED_ADMIN_ONLY =
+  process.env.SEED_ADMIN_ONLY === "1" ||
+  process.env.SEED_ADMIN_ONLY?.toLowerCase() === "true";
+
+/** Delete all business rows so you can test from a clean slate. Keeps roles / permissions / size lookup definitions (re-upserted below). */
+async function wipeTransactionalData(client: PrismaClient) {
+  await client.idempotencyKey.deleteMany();
+  await client.auditLog.deleteMany();
+  await client.weighSession.deleteMany();
+  await client.truckPhoto.deleteMany();
+  await client.truckRequestItem.deleteMany();
+  await client.truckOperation.deleteMany();
+  await client.paymentAllocation.deleteMany();
+  await client.paymentSlice.deleteMany();
+  await client.orderItem.deleteMany();
+  await client.salesOrder.deleteMany();
+  await client.contractAttachment.deleteMany();
+  await client.masterContract.deleteMany();
+  await client.payment.deleteMany();
+  await client.customer.deleteMany();
+  await client.userPermissionOverride.deleteMany();
+  await client.user.deleteMany({
+    where: { username: { notIn: ["system", "admin"] } },
+  });
+}
 
 /** Original slice demo customers (removed and recreated each seed). */
 const DEMO_SEED_NATIONAL_IDS = [
@@ -33,6 +64,13 @@ const ALL_DEMO_CUSTOMER_NATIONAL_IDS = [
 
 async function main() {
   console.log("Seeding database...");
+
+  if (SEED_ADMIN_ONLY) {
+    console.log(
+      "  → SEED_ADMIN_ONLY: مسح الزبائن، العقود، أوامر البيع، الشاحنات، الدفعات، مفاتيح الطلبات المكررة، سجل التدقيق، ومستخدمي التجربة…",
+    );
+    await wipeTransactionalData(prisma);
+  }
 
   // ─── Roles ────────────────────────────────────────────────────
   const roles = [
@@ -95,10 +133,13 @@ async function main() {
     { code: "user.set_permissions", displayName: "تعديل صلاحيات المستخدمين", module: "admin" },
     { code: "settings.edit", displayName: "تعديل الإعدادات العامة", module: "admin" },
     // Reports
+    { code: "reports.view", displayName: "الوصول إلى قسم التقارير", module: "reports" },
     { code: "report.daily_trucks", displayName: "تقرير شاحنات يومي", module: "reports" },
     { code: "report.customer_balance", displayName: "تقرير رصيد زبون", module: "reports" },
     { code: "report.salesorder_status", displayName: "تقرير حالة أمر بيع", module: "reports" },
     { code: "report.audit", displayName: "تقرير التدقيق", module: "reports" },
+    // Analytics / Dashboard
+    { code: "dashboard.view", displayName: "عرض لوحة المؤشرات والإحصاءات", module: "analytics" },
   ];
 
   for (const perm of permissions) {
@@ -123,10 +164,17 @@ async function main() {
       "payment.view",
       "buffer.grant",
       "specialratio.override",
+      "reports.view",
       "report.customer_balance",
       "report.salesorder_status",
       "report.audit",
+      "dashboard.view",
     ],
+    // `logistics` is an OPERATIONAL role. It MUST NOT receive any
+    // analytics or reports permissions — no `dashboard.view`, no
+    // `reports.view`, no per-report codes. Requests to /, /reports,
+    // /analytics and their APIs are denied at every layer (middleware,
+    // page guards, API guards, sidebar).
     logistics: [
       "contract.create",
       "contract.edit",
@@ -137,8 +185,6 @@ async function main() {
       "truck.register",
       "truck.edit_queued",
       "truck.view_queue",
-      "report.daily_trucks",
-      "report.salesorder_status",
     ],
     scale_operator: [
       "truck.view_approved",
@@ -222,7 +268,7 @@ async function main() {
   console.log("  ✓ System user seeded");
 
   // ─── Default Admin User ───────────────────────────────────────
-  const adminPassword = hashSync("admin123", 10);
+  const adminPassword = await hash("admin123", 10);
   await prisma.user.upsert({
     where: { username: "admin" },
     update: {},
@@ -237,8 +283,16 @@ async function main() {
   });
   console.log("  ✓ Admin user seeded (username: admin, password: admin123)");
 
+  if (SEED_ADMIN_ONLY) {
+    console.log(
+      "  ✓ وضع admin فقط: تم تخطي بيانات التجربة. للدخول: admin / admin123 (مستخدم system داخلي غير قابل لتسجيل الدخول).",
+    );
+    console.log("\nSeeding complete!");
+    return;
+  }
+
   // ─── Demo users per role (dev / QA) ───────────────────────────
-  const demoUserPassword = hashSync("demo123", 10);
+  const demoUserPassword = await hash("demo123", 10);
   const demoUsers: Array<{
     username: string;
     fullName: string;

@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
     "10.1.2.63",
     "10.1.2.80",
     "10.2.0.2",
+    "10.14.0.2",
   ],
 
   async headers() {

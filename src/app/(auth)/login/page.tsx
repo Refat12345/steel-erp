@@ -39,7 +39,16 @@ export default function LoginPage() {
     setLoading(false);
 
     if (result?.error) {
-      setError("اسم المستخدم أو كلمة المرور غير صحيحة");
+      // Labelled errors coming from authorize() are forwarded verbatim as
+      // `result.error`. Translate the known brute-force one to a clear
+      // user-facing message; fall back to generic invalid-credentials.
+      if (result.error === "TOO_MANY_REQUESTS") {
+        setError(
+          "عدد محاولات الدخول كبير جداً. الرجاء الانتظار دقيقة والمحاولة مجدداً. (429 Too Many Requests)",
+        );
+      } else {
+        setError("اسم المستخدم أو كلمة المرور غير صحيحة");
+      }
       return;
     }
 

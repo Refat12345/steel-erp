@@ -2,9 +2,10 @@ import { prisma } from "@/lib/db";
 import { logAudit } from "./audit.service";
 import { ServiceError } from "./errors";
 import { logger } from "@/lib/logger";
-import { hashSync } from "bcryptjs";
+import { hash } from "bcryptjs";
 import type { Prisma } from "@prisma/client";
 import type { PaginationParams, PaginatedResult } from "@/lib/api-utils";
+import { invalidateUserAuth } from "@/lib/permissions";
 
 type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
@@ -84,7 +85,9 @@ export async function createUser(data: CreateUserInput, adminId: number) {
   const existing = await prisma.user.findUnique({ where: { username: data.username } });
   if (existing) throw new ServiceError("اسم المستخدم مستخدم مسبقاً");
 
-  const passwordHash = hashSync(data.password, 10);
+  // Async bcrypt: offloads the CPU-bound hash to libuv's thread pool so the
+  // Node.js event loop keeps serving other requests during admin onboarding.
+  const passwordHash = await hash(data.password, 10);
 
   const user = await prisma.$transaction(async (tx: TxClient) => {
     const created = await tx.user.create({
@@ -182,6 +185,10 @@ export async function updateUser(id: number, data: UpdateUserInput, adminId: num
     return updated;
   });
 
+  if ("roleCode" in changes || "isActive" in changes) {
+    invalidateUserAuth(id);
+  }
+
   logger.info({ userId: id, changes, by: adminId }, "user updated");
   return user;
 }
@@ -192,7 +199,7 @@ export async function resetPassword(id: number, newPassword: string, adminId: nu
     throw new ServiceError("المستخدم غير موجود", "NOT_FOUND");
   }
 
-  const passwordHash = hashSync(newPassword, 10);
+  const passwordHash = await hash(newPassword, 10);
 
   await prisma.$transaction(async (tx: TxClient) => {
     await tx.user.update({

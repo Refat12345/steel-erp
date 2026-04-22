@@ -13,8 +13,31 @@ import {
 import { uploadPhoto } from "@/lib/services/truck.service";
 
 const UPLOAD_DIR = path.join(process.cwd(), "uploads", "trucks");
-const MAX_SIZE = 10 * 1024 * 1024;
+
+/**
+ * MAX_FILE_SIZE = 15 MB. Enforced in THREE places:
+ *   1. Content-Length header check BEFORE reading the body (below).
+ *   2. Stream-size check after FormData parsing (in case body is sent
+ *      chunked without a length header, e.g. some mobile clients).
+ *   3. Indirect cap via Next.js body size limit (route.ts config).
+ *
+ * Reading a multi-hundred-MB body only to reject it afterwards is a trivial
+ * DoS vector: this pre-check rejects oversized uploads within milliseconds.
+ */
+const MAX_FILE_SIZE = 15 * 1024 * 1024;
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+/**
+ * Next.js App Router body size limit. Requests exceeding this are rejected
+ * with 413 by the framework before even reaching the handler.
+ */
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: `${MAX_FILE_SIZE}b`,
+    },
+  },
+};
 
 export async function POST(
   req: NextRequest,
@@ -28,6 +51,27 @@ export async function POST(
   const truckId = parseInt(id, 10);
   if (isNaN(truckId)) return badRequest("معرّف غير صالح");
 
+  // ── Pre-read Content-Length guard (Part 7) ─────────────────────
+  // Trust but verify: a malicious client can lie about Content-Length, but
+  // an honest-but-oversized upload is rejected immediately without buffering
+  // 100 MB into memory. The post-parse size check below handles the liars.
+  const contentLength = req.headers.get("content-length");
+  if (contentLength) {
+    const length = parseInt(contentLength, 10);
+    if (Number.isFinite(length) && length > MAX_FILE_SIZE) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: `حجم الملف يتجاوز الحد الأقصى المسموح (${MAX_FILE_SIZE / (1024 * 1024)} ميغابايت)`,
+        }),
+        {
+          status: 413,
+          headers: { "content-type": "application/json; charset=utf-8" },
+        },
+      );
+    }
+  }
+
   let formData: FormData;
   try {
     formData = await req.formData();
@@ -37,8 +81,23 @@ export async function POST(
 
   const file = formData.get("file") as File | null;
   if (!file) return badRequest("لم يتم اختيار صورة");
-  if (file.size > MAX_SIZE) return badRequest("حجم الصورة يتجاوز الحد المسموح (10 ميغابايت)");
-  if (!ALLOWED_TYPES.includes(file.type)) return badRequest("نوع الملف غير مسموح — يُقبل JPEG أو PNG أو WebP");
+  // Post-parse size check catches clients that lied about (or omitted)
+  // Content-Length. `file.size` here is authoritative.
+  if (file.size > MAX_FILE_SIZE) {
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: `حجم الملف يتجاوز الحد الأقصى المسموح (${MAX_FILE_SIZE / (1024 * 1024)} ميغابايت)`,
+      }),
+      {
+        status: 413,
+        headers: { "content-type": "application/json; charset=utf-8" },
+      },
+    );
+  }
+  if (!ALLOWED_TYPES.includes(file.type)) {
+    return badRequest("نوع الملف غير مسموح — يُقبل JPEG أو PNG أو WebP");
+  }
 
   await mkdir(UPLOAD_DIR, { recursive: true });
 

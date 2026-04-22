@@ -114,6 +114,7 @@ model User {
   paymentsCreated      Payment[]                 @relation("PaymentCreator")
   trucksCreated        TruckOperation[]          @relation("TruckCreator")
   trucksClosed         TruckOperation[]          @relation("TruckCloser")
+  trucksLoaded         TruckOperation[]          @relation("TruckLoader")
   idempotencyKeys      IdempotencyKey[]
 
   @@map("users")
@@ -399,6 +400,15 @@ model TruckOperation {
   cancelReason     String?      @map("cancel_reason")
   closedAt         DateTime?    @map("closed_at")
   closedById       Int?         @map("closed_by_id")
+  /// Timestamp when the loader confirmed loading completion. Null means no
+  /// loader has confirmed yet. `enterGross` refuses to run while this is null
+  /// — the strictest representation of the "loader must confirm before gross"
+  /// rule, independent of the state machine.
+  loadingConfirmedAt DateTime?  @map("loading_confirmed_at")
+  /// User id of the loader who confirmed loading completion. Set atomically
+  /// with `loadingConfirmedAt` inside `confirmLoadingComplete`. Required for
+  /// audit / dispute traceability.
+  loaderId         Int?         @map("loader_id")
   /// Optimistic-lock counter. Incremented on every correction of tare/gross
   /// so two operators editing the same record simultaneously are detected
   /// instead of silently overwriting each other.
@@ -411,6 +421,7 @@ model TruckOperation {
   salesOrder   SalesOrder? @relation(fields: [salesOrderNumber], references: [orderNumber])
   creator      User        @relation("TruckCreator", fields: [createdById], references: [id])
   closer       User?       @relation("TruckCloser", fields: [closedById], references: [id])
+  loader       User?       @relation("TruckLoader", fields: [loaderId], references: [id])
   sessions     WeighSession[]
   photos       TruckPhoto[]
   requestItems TruckRequestItem[]
@@ -420,6 +431,8 @@ model TruckOperation {
   @@index([status])
   @@index([salesOrderNumber])
   @@index([createdAt])
+  @@index([loaderId])
+  @@index([status, createdAt(sort: Desc)])
   @@map("truck_operations")
 }
 

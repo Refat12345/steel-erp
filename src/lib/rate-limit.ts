@@ -18,6 +18,17 @@ export const SCALE_WRITE_RATE_LIMIT: RateLimitConfig = {
   maxAttempts: 60,
 };
 
+/**
+ * Login brute-force protection. 10 attempts per username or per source IP
+ * per 60 s matches the hardening requirement. Applied in two separate keys
+ * (user + IP) so a single attacker using many usernames from one IP and a
+ * single attacker using one username from many IPs are BOTH caught.
+ */
+export const LOGIN_RATE_LIMIT: RateLimitConfig = {
+  windowMs: 60_000,
+  maxAttempts: 10,
+};
+
 interface Entry {
   timestamps: number[];
 }

@@ -6,7 +6,11 @@ import { logger } from "@/lib/logger";
 import { Prisma, type TruckStatus } from "@prisma/client";
 import type { PaginationParams, PaginatedResult } from "@/lib/api-utils";
 import Decimal from "decimal.js";
-import { validateTareWeight, validateGrossWeight } from "@/lib/weight-bounds";
+import {
+  validateTareWeight,
+  validateGrossWeight,
+  validateWeightRange,
+} from "@/lib/weight-bounds";
 
 type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
@@ -52,15 +56,32 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
     const customer = await prisma.customer.findUnique({ where: { id: data.customerId } });
     if (!customer) throw new ServiceError("الزبون غير موجود", "NOT_FOUND");
     if (!customer.isActive) throw new ServiceError("الزبون غير نشط");
+
+    const activeContract = await prisma.masterContract.findFirst({
+      where: { customerId: data.customerId, status: "active" },
+      select: { contractNumber: true },
+    });
+    if (!activeContract) {
+      throw new ServiceError(
+        "لا يمكن تسجيل شاحنة لزبون ليس لديه عقد عام نشط (معلّق أو مغلق)",
+      );
+    }
   }
 
   if (data.salesOrderNumber) {
     const so = await prisma.salesOrder.findUnique({
       where: { orderNumber: data.salesOrderNumber },
+      include: { contract: { select: { status: true, customerId: true } } },
     });
     if (!so) throw new ServiceError("أمر البيع غير موجود", "NOT_FOUND");
     if (so.status !== "approved" && so.status !== "in_progress") {
       throw new ServiceError("أمر البيع غير فعّال");
+    }
+    if (so.contract.status !== "active") {
+      throw new ServiceError("العقد المرتبط بأمر البيع غير نشط — لا يمكن تسجيل الشاحنة");
+    }
+    if (data.customerId != null && so.contract.customerId !== data.customerId) {
+      throw new ServiceError("أمر البيع لا يخص الزبون المحدد");
     }
   }
 
@@ -94,8 +115,11 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
             select: { id: true, status: true },
           });
           if (existingOpen) {
+            // 409 Conflict: a resource in the intended state already exists.
+            // Not a client bug (400) — the client's input is well-formed.
             throw new ServiceError(
               `يوجد عملية مفتوحة لنفس رقم اللوحة (عملية #${existingOpen.id})`,
+              "CONFLICT",
             );
           }
 
@@ -128,10 +152,15 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
             entityType: "TruckOperation",
             entityId: String(created.id),
             details: {
-              customerId: data.customerId ?? null,
-              plateNumber: created.plateNumber,
-              driverName: created.driverName,
-              requestItems: data.requestItems ?? null,
+              event: "truck_registered",
+              previousValue: null,
+              newValue: {
+                customerId: data.customerId ?? null,
+                plateNumber: created.plateNumber,
+                driverName: created.driverName,
+                salesOrderNumber: created.salesOrderNumber,
+                requestItems: data.requestItems ?? null,
+              },
             } as Prisma.InputJsonValue,
           });
 
@@ -152,6 +181,7 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
       if (targetStr.includes("plate_number")) {
         throw new ServiceError(
           `يوجد عملية مفتوحة لنفس رقم اللوحة (${normalizedPlate})`,
+          "CONFLICT",
         );
       }
     }
@@ -165,15 +195,36 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
 // ─── Enter Tare ────────────────────────────────────────────────────
 
 export async function enterTare(truckId: number, weightKg: number, userId: number) {
-  if (weightKg <= 0) throw new ServiceError("الوزن يجب أن يكون أكبر من صفر");
+  // Hard-rail check first (catches 0, negative, NaN, Infinity, >100t).
+  const rangeError = validateWeightRange(weightKg);
+  if (rangeError) throw new ServiceError(rangeError);
   const tareError = validateTareWeight(weightKg);
   if (tareError) throw new ServiceError(tareError);
 
   return withRetry(() =>
     prisma.$transaction(
       async (tx: TxClient) => {
+        // Row lock prevents two operators from simultaneously recording tare
+        // (same transition, both would pass assertTransition on stale reads).
+        const locked = await tx.$queryRaw<{ id: number }[]>`
+          SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
+        `;
+        if (locked.length === 0) {
+          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        }
+
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
         if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+
+        // Explicit "no double tare" message — clearer than the generic
+        // state-machine error for the most common misclick.
+        if (truck.tareWeightKg != null) {
+          throw new ServiceError(
+            `تم إدخال وزن الفارغ مسبقاً (${Number(truck.tareWeightKg)} كغ). استخدم تصحيح الوزن إن كان خطأ.`,
+            "CONFLICT",
+          );
+        }
+
         assertTransition(truck.status, "FirstWeigh");
 
         const updated = await tx.truckOperation.update({
@@ -190,13 +241,17 @@ export async function enterTare(truckId: number, weightKg: number, userId: numbe
           action: "status_change",
           entityType: "TruckOperation",
           entityId: String(truckId),
-          details: { from: truck.status, to: "FirstWeigh", tareWeightKg: weightKg },
+          details: {
+            event: "tare_recorded",
+            previousValue: { status: truck.status, tareWeightKg: null },
+            newValue: { status: "FirstWeigh", tareWeightKg: weightKg },
+          },
         });
 
         logger.info({ truckId, weightKg }, "tare entered");
         return updated;
       },
-      { isolationLevel: "Serializable" },
+      { isolationLevel: "ReadCommitted" },
     ),
   );
 }
@@ -574,9 +629,17 @@ export async function confirmLoadingComplete(truckId: number, userId: number) {
           new Decimal(0),
         );
 
+        // Stamp loader identity + timestamp atomically with the transition.
+        // `enterGross` will refuse to run while either is null — this is the
+        // primary enforcement of the two-role workflow rule (Part 1).
+        const confirmedAt = new Date();
         const updated = await tx.truckOperation.update({
           where: { id: truckId },
-          data: { status: "LoadingComplete" },
+          data: {
+            status: "LoadingComplete",
+            loadingConfirmedAt: confirmedAt,
+            loaderId: userId,
+          },
         });
 
         await logAudit(tx, {
@@ -585,14 +648,23 @@ export async function confirmLoadingComplete(truckId: number, userId: number) {
           entityType: "TruckOperation",
           entityId: String(truckId),
           details: {
-            from: truck.status,
-            to: "LoadingComplete",
-            sessionCount: sessions.length,
-            totalInternalTons: totalInternalTons.toNumber(),
+            event: "loading_confirmed",
+            previousValue: {
+              status: truck.status,
+              loadingConfirmedAt: truck.loadingConfirmedAt,
+              loaderId: truck.loaderId,
+            },
+            newValue: {
+              status: "LoadingComplete",
+              loadingConfirmedAt: confirmedAt.toISOString(),
+              loaderId: userId,
+              sessionCount: sessions.length,
+              totalInternalTons: totalInternalTons.toNumber(),
+            },
           },
         });
 
-        logger.info({ truckId, sessions: sessions.length }, "loading complete confirmed");
+        logger.info({ truckId, sessions: sessions.length, loaderId: userId }, "loading complete confirmed");
         return updated;
       },
       // The FOR UPDATE lock above already serialises every writer of this
@@ -628,9 +700,18 @@ export async function reopenBeforeGross(truckId: number, userId: number) {
           throw new ServiceError("لا يمكن إعادة الفتح إلا من حالة «اكتمال التحميل»");
         }
 
+        // Reopen invalidates the prior loader confirmation — the loader must
+        // re-confirm before gross can be recorded. Clearing both columns is
+        // protected by the DB CHECK constraint
+        // (truck_operations_loading_confirmation_pair_chk), which requires
+        // them to be null-together or set-together.
         const updated = await tx.truckOperation.update({
           where: { id: truckId },
-          data: { status: "OnScale" },
+          data: {
+            status: "OnScale",
+            loadingConfirmedAt: null,
+            loaderId: null,
+          },
         });
 
         await logAudit(tx, {
@@ -638,7 +719,19 @@ export async function reopenBeforeGross(truckId: number, userId: number) {
           action: "status_change",
           entityType: "TruckOperation",
           entityId: String(truckId),
-          details: { from: "LoadingComplete", to: "OnScale" },
+          details: {
+            event: "session_reopened",
+            previousValue: {
+              status: "LoadingComplete",
+              loadingConfirmedAt: truck.loadingConfirmedAt,
+              loaderId: truck.loaderId,
+            },
+            newValue: {
+              status: "OnScale",
+              loadingConfirmedAt: null,
+              loaderId: null,
+            },
+          },
         });
 
         logger.info({ truckId }, "loading complete reopened");
@@ -652,20 +745,56 @@ export async function reopenBeforeGross(truckId: number, userId: number) {
 // ─── Enter Gross ──────────────────────────────────────────────────
 
 export async function enterGross(truckId: number, weightKg: number, userId: number) {
-  if (weightKg <= 0) throw new ServiceError("الوزن يجب أن يكون أكبر من صفر");
+  // Hard-rail weight check before touching the DB.
+  const rangeError = validateWeightRange(weightKg);
+  if (rangeError) throw new ServiceError(rangeError);
 
   return withRetry(() =>
     prisma.$transaction(
       async (tx: TxClient) => {
+        // Row lock: prevents a race where two operators submit gross weight
+        // for the same truck in overlapping transactions. Without it, both
+        // requests could pass assertTransition on an OnScale snapshot and
+        // both would write (last-writer-wins silently).
+        const locked = await tx.$queryRaw<{ id: number }[]>`
+          SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
+        `;
+        if (locked.length === 0) {
+          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        }
+
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
         if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+
+        // ── Two-role workflow rule (Part 1) ──────────────────────────
+        // Gross weight CANNOT be recorded unless a loader has confirmed
+        // loading completion. Checked BEFORE the state-machine transition
+        // so the error message is user-friendly ("wait for the loader")
+        // rather than the generic "invalid transition".
+        if (!truck.loadingConfirmedAt) {
+          throw new ServiceError(
+            "Loading must be confirmed before recording gross weight / يجب تأكيد انتهاء التحميل من قبل عامل التحميل قبل تسجيل وزن المحمّل",
+            "FORBIDDEN",
+          );
+        }
+
+        // Explicit "no double gross" — friendlier than a state-machine error.
+        if (truck.grossWeightKg != null) {
+          throw new ServiceError(
+            `تم إدخال وزن المحمّل مسبقاً (${Number(truck.grossWeightKg)} كغ). استخدم تصحيح الوزن إن كان خطأ.`,
+            "CONFLICT",
+          );
+        }
+
         assertTransition(truck.status, "SecondWeigh");
 
         if (!truck.tareWeightKg) {
           throw new ServiceError("يجب إدخال وزن الفارغ أولاً");
         }
         if (new Decimal(weightKg).lte(truck.tareWeightKg)) {
-          throw new ServiceError("وزن المحمّل يجب أن يكون أكبر من وزن الفارغ");
+          throw new ServiceError(
+            "Gross weight must be greater than tare weight / وزن المحمّل يجب أن يكون أكبر من وزن الفارغ",
+          );
         }
         const grossError = validateGrossWeight(weightKg, Number(truck.tareWeightKg));
         if (grossError) throw new ServiceError(grossError);
@@ -684,13 +813,27 @@ export async function enterGross(truckId: number, weightKg: number, userId: numb
           action: "status_change",
           entityType: "TruckOperation",
           entityId: String(truckId),
-          details: { from: truck.status, to: "SecondWeigh", grossWeightKg: weightKg },
+          details: {
+            event: "gross_recorded",
+            previousValue: {
+              status: truck.status,
+              grossWeightKg: null,
+            },
+            newValue: {
+              status: "SecondWeigh",
+              grossWeightKg: weightKg,
+              tareWeightKg: Number(truck.tareWeightKg),
+              netWeightKg: weightKg - Number(truck.tareWeightKg),
+              loaderId: truck.loaderId,
+              loadingConfirmedAt: truck.loadingConfirmedAt,
+            },
+          },
         });
 
         logger.info({ truckId, weightKg }, "gross entered");
         return updated;
       },
-      { isolationLevel: "Serializable" },
+      { isolationLevel: "ReadCommitted" },
     ),
   );
 }
@@ -804,7 +947,21 @@ export async function cancelOperation(truckId: number, reason: string, userId: n
           action: "status_change",
           entityType: "TruckOperation",
           entityId: String(truckId),
-          details: { from: truck.status, to: "Cancelled", reason },
+          details: {
+            event: "session_cancelled",
+            previousValue: {
+              status: truck.status,
+              cancelReason: truck.cancelReason,
+              closedAt: truck.closedAt,
+              closedById: truck.closedById,
+            },
+            newValue: {
+              status: "Cancelled",
+              cancelReason: reason.trim(),
+              closedAt: updated.closedAt,
+              closedById: userId,
+            },
+          },
         });
 
         logger.info({ truckId, reason }, "truck operation cancelled");

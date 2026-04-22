@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { sessionHasPermission } from "@/lib/client-permissions";
 import { toast } from "sonner";
+import { createClientIdempotencyKey } from "@/lib/browser-idempotency-key";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -193,7 +194,7 @@ export function ScaleOperationView({ truckId }: { truckId: number }) {
           headers["Content-Type"] = "application/json";
           opts.body = JSON.stringify(body);
         }
-        headers["Idempotency-Key"] = crypto.randomUUID();
+        headers["Idempotency-Key"] = createClientIdempotencyKey();
         opts.headers = headers;
       }
       const res = await fetch(url, opts);
@@ -1016,7 +1017,7 @@ function SessionDialog({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": crypto.randomUUID(),
+          "Idempotency-Key": createClientIdempotencyKey(),
         },
         body: JSON.stringify(body),
       });
@@ -1181,7 +1182,7 @@ function EditSessionButton({
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": crypto.randomUUID(),
+          "Idempotency-Key": createClientIdempotencyKey(),
         },
         body: JSON.stringify(body),
       });
@@ -1391,7 +1392,7 @@ function CancelDialog({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": crypto.randomUUID(),
+          "Idempotency-Key": createClientIdempotencyKey(),
         },
         body: JSON.stringify({ reason: reason.trim() }),
       });

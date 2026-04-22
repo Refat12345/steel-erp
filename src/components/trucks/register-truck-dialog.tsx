@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Trash2, Plus } from "lucide-react";
+import { createClientIdempotencyKey } from "@/lib/browser-idempotency-key";
 
 interface Customer {
   id: number;
@@ -146,7 +147,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": crypto.randomUUID(),
+          "Idempotency-Key": createClientIdempotencyKey(),
         },
         body: JSON.stringify({
           customerId: Number(customerId),
