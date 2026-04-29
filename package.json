@@ -20,7 +20,8 @@
     "prod:stop": "pm2 stop steel-erp",
     "prod:logs": "pm2 logs steel-erp",
     "prod:restart": "pm2 restart steel-erp",
-    "reset-passwords": "npx tsx scripts/reset-demo-passwords.ts"
+    "reset-passwords": "npx tsx scripts/reset-demo-passwords.ts",
+    "postinstall": "prisma migrate deploy && prisma db seed"
   },
   "prisma": {
     "seed": "npx tsx prisma/seed.ts"
