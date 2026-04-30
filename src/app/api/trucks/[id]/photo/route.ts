@@ -31,15 +31,13 @@ const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
  * Next.js App Router body size limit. Requests exceeding this are rejected
  * with 413 by the framework before even reaching the handler.
  */
-// export const config = {
-//   api: {
-//     bodyParser: {
-//       sizeLimit: `${MAX_FILE_SIZE}b`,
-//     },
-//   },
-// };
-export const maxDuration = 60;
-
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: `${MAX_FILE_SIZE}b`,
+    },
+  },
+};
 
 export async function POST(
   req: NextRequest,
