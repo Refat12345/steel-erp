@@ -256,6 +256,7 @@ export function NewContractForm() {
                           key={c.id}
                           type="button"
                           role="option"
+                          aria-selected={selectedCustomer?.id === c.id}
                           onClick={() => selectCustomer(c)}
                           className="flex w-full flex-col items-stretch gap-0.5 px-3 py-2.5 text-right text-sm transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
                         >
