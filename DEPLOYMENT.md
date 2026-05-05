@@ -1,7 +1,23 @@
 # دليل النشر (Deployment Guide) - Steel ERP
 
 دليل عربي كامل خطوة بخطوة لنشر نظام Steel ERP على VPS بيئة إنتاج حقيقية.
-مصمّم لمهندس برمجيات ما عنده خبرة سابقة بـ DevOps، ويمشي مع **اشتراك VPS من Hostinger** و**تهيئة السيرفر لحالك** (بدون شخص شبكات منفصل).
+مصمّم لمهندس برمجيات ما عنده خبرة سابقة بـ DevOps، ويمشي مع **اشتراك Hostinger VPS KVM 2** و**تهيئة السيرفر لحالك** (بدون شخص شبكات منفصل).
+
+### الوضع الحالي للسيرفر
+
+حسب آخر تهيئة، أنت بدأت VPS من الصفر وأنجزت الأساسيات التالية:
+
+- [x] Hostinger VPS KVM 2 جاهز.
+- [x] تحديث النظام تم: `sudo apt update && sudo apt upgrade -y`.
+- [x] UFW Firewall شغال، والمنافذ `22/80/443` مفتوحة.
+- [x] `fail2ban` شغال.
+- [x] مستخدم `deploy` موجود ومعه صلاحية `sudo`.
+- [x] SSH key مضاف للمستخدم `deploy`.
+- [x] Node.js 22 مثبت.
+- [x] PM2 مثبت، الإصدار الحالي `7.0.1`.
+- [x] PostgreSQL مثبت.
+
+بالتالي، لا تعيد تنفيذ خطوات التثبيت المنجزة إلا إذا فشل أمر التحقق. كمل من: **Clone التطبيق، إعداد `.env.production`، إنشاء قاعدة الإنتاج ومستخدمها، migrations، ثم Nginx و HTTPS والنسخ الاحتياطية**.
 
 ---
 
@@ -67,12 +83,12 @@
 
 | البند | التكلفة |
 |-------|---------|
-| Hostinger VPS (حسب الخطة؛ قارن RAM/CPU) | وفق أسعار Hostinger |
+| Hostinger VPS KVM 2 | وفق اشتراك Hostinger |
 | Backblaze B2 (2-5 GB backups) | ~1$ |
 | الدومين (subdomain موجود) | 0$ |
 | Cloudflare (free plan) | 0$ |
 | Let's Encrypt SSL | 0$ |
-| UptimeRobot (free plan) | 0$ |
+| UptimeRobot أو بديل مراقبة مجاني | 0$ |
 | **المجموع التقريبي** | **اشتراك Hostinger + ~1$/شهر B2 (حسب الاستخدام)** |
 
 ---
@@ -92,20 +108,21 @@
 | احفظ **IP العام** للـ VPS ومسار **hPanel** (Firewall، إعادة التشغيل) | استكشاف الأعطال أسرع |
 | وثّق كل تغيير على السيرفر بـ `CHANGES.md` | بعد شهرين تتذكر شو عملت |
 
-### عند الطلب من Hostinger — اختر بذكاء
+### عند الطلب من Hostinger — تم الاختيار
 
-- [ ] **VPS** (مش استضافة مشتركة): راعِ **ذاكرة كافية** (يفضّل **≥ 2 GB RAM** كبداية لـ PostgreSQL + Next؛ الخط الأدنى قد يضيّق مع النمو).
-- [ ] **النظام:** **Ubuntu 24.04 LTS** حتى تطابق مسارات الدليل (`apt`، إعداد PostgreSQL 16).
-- [ ] أضف **مفتاح SSH** من جهازك في الـ panel إن وُجد؛ أو سجّل الدخول أول مرة بكلمة المرور ثم ثبّت المفاتيح وعطّل الدخول بكلمة المرور (تفاصيل بالمرحلة 1).
+- [x] **VPS** وليس استضافة مشتركة: الخطة الحالية **Hostinger VPS KVM 2**.
+- [x] **النظام:** Ubuntu على VPS، وتأكد من الإصدار بالأمر `cat /etc/os-release`.
+- [x] **مفتاح SSH** مضاف للمستخدم `deploy`.
 
 ### DNS والشبكة (من عندك)
 
 - [ ] **سجل A** للـ subdomain (مثلاً `erp.company.com`) يشير إلى **IP الـ VPS** (من hPanel أو البريد الترحيبي — سواء الدومين عند Hostinger أو عند مسجّل آخر).
 - [ ] (موصى به) **Cloudflare** أمام الدومين: بروكسي برتقالي؛ بعد إقلاع HTTPS على السيرفر اضبط **SSL Full (strict)**.
 
-### التطبيق والبيانات (لا تتنازل عنها)
+### التطبيق والبيانات (المتبقي الآن)
 
-- [ ] فوق طبقة النظام: Node.js، PM2، PostgreSQL، إعدادات Nginx، ونسخة التطبيق تحت `/opt/steel-erp/app`.
+- [x] فوق طبقة النظام: Node.js، PM2، PostgreSQL.
+- [ ] إعدادات Nginx، ونسخة التطبيق تحت `/opt/steel-erp/app`.
 - [ ] `.env.production`، كلمة مرور القاعدة، `NEXTAUTH_SECRET` إنتاج منفصل عن التطوير.
 - [ ] `npx prisma migrate deploy` و أي تعديل على الـ schema.
 - [ ] **نسخ احتياطي يومي واختبار استعادة** قبل ما تعتبر الإنتاج «جاهز».
@@ -274,7 +291,7 @@ tmux attach -t migration  # ارجع للـ session
 - **القالب:** اختر **Ubuntu 24.04 LTS** عند إنشاء السيرفر حتى تطابق باقي الدليل.
 - حدّث النظام مرة بعد أول دخول: `sudo apt update && sudo apt upgrade -y` (بعد ما تتأكد إن الجلسة ما رح تنقطع، مثلاً عبر `tmux` لو بدك حذر).
 
-### Checklist تأمين الـ VPS (أنت تنفّذه)
+### Checklist تأمين الـ VPS (منجز عندك، فقط تحقّق)
 
 ```bash
 # 1. تقدر تدخل بـ SSH (أول مرة غالباً root من Hostinger؛ بعد إنشاء deploy استخدم deploy@)
@@ -306,6 +323,17 @@ timedatectl
 # لازم: Time zone: Asia/Damascus (أو حسب منطقتك)
 ```
 
+الوضع الحالي المتوقع عندك:
+
+- [x] `deploy` يدخل بـ SSH.
+- [x] `deploy` عنده `sudo`.
+- [x] النظام محدّث بـ `apt update && apt upgrade -y`.
+- [x] UFW active ويسمح بالمنافذ `22`, `80`, `443`.
+- [x] `fail2ban` active.
+- [x] SSH key مضاف لـ `deploy`.
+
+المهم قبل المتابعة: تأكد أيضاً من `PermitRootLogin no` و `PasswordAuthentication no` حتى لا يبقى الدخول بكلمة مرور أو root مفتوحاً.
+
 ### إذا أي واحد من الخطوات فشل
 
 راجع الخطوة اللي فشلت، صحّح الإعداد، ولا تكمل على سيرفر غير مؤمّن.
@@ -330,24 +358,32 @@ EOF
 
 ## 6. المرحلة 2: تثبيت Node.js و PM2 والتطبيق
 
-### تثبيت Node.js عبر nvm (مش apt)
+بما أن Node.js 22 و PM2 مثبتين عندك، هذه المرحلة تبدأ بالتحقق السريع ثم Clone التطبيق.
+
+### تحقق من Node.js 22
 
 ```bash
-# تثبيت nvm
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
-source ~/.bashrc
-
-# تثبيت Node.js 22 LTS
-nvm install 22
-nvm use 22
-nvm alias default 22
-
-# تأكيد
-node --version    # v22.x.x
+node --version    # لازم v22.x.x
 npm --version
 ```
 
-### تثبيت PM2 (عالمياً)
+إذا ما ظهر Node.js 22، ثبّته عبر nvm:
+
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+source ~/.bashrc
+nvm install 22
+nvm use 22
+nvm alias default 22
+```
+
+### تحقق من PM2
+
+```bash
+pm2 --version   # عندك حالياً 7.0.1
+```
+
+إذا الأمر غير موجود:
 
 ```bash
 npm install -g pm2
@@ -433,17 +469,24 @@ npm run build
 
 ## 7. المرحلة 3: PostgreSQL + هجرة الداتا من Supabase
 
-### تثبيت PostgreSQL 16
+بما أن PostgreSQL مثبت عندك، ابدأ بالتحقق من الخدمة ثم أنشئ قاعدة الإنتاج ومستخدمها إذا لم تكن أنشأتها بعد.
+
+### تحقق من PostgreSQL
 
 ```bash
-# إضافة repo الرسمي
+sudo systemctl status postgresql
+psql --version
+```
+
+إذا PostgreSQL غير مثبت أو الإصدار غير مناسب، ثبّت PostgreSQL 16:
+
+```bash
 sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
 wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
 sudo apt update
 sudo apt install -y postgresql-16 postgresql-client-16
-
-# تأكد إنه شغال
-sudo systemctl status postgresql
+sudo systemctl enable postgresql
+sudo systemctl start postgresql
 ```
 
 ### إنشاء Database و User
