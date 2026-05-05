@@ -3,21 +3,42 @@
 دليل عربي كامل خطوة بخطوة لنشر نظام Steel ERP على VPS بيئة إنتاج حقيقية.
 مصمّم لمهندس برمجيات ما عنده خبرة سابقة بـ DevOps، ويمشي مع **اشتراك Hostinger VPS KVM 2** و**تهيئة السيرفر لحالك** (بدون شخص شبكات منفصل).
 
-### الوضع الحالي للسيرفر
+### الوضع الحالي للسيرفر (آخر حالة معروفة — سياق لـ Cursor والمتابعة)
 
-حسب آخر تهيئة، أنت بدأت VPS من الصفر وأنجزت الأساسيات التالية:
+> **أمان:** لا تضع كلمة مرور قاعدة البيانات أو أسراراً في هذا الملف أو في Git؛ احفظها في `.env.production` على السيرفر فقط.
 
-- [x] Hostinger VPS KVM 2 جاهز.
-- [x] تحديث النظام تم: `sudo apt update && sudo apt upgrade -y`.
-- [x] UFW Firewall شغال، والمنافذ `22/80/443` مفتوحة.
-- [x] `fail2ban` شغال.
-- [x] مستخدم `deploy` موجود ومعه صلاحية `sudo`.
-- [x] SSH key مضاف للمستخدم `deploy`.
-- [x] Node.js 22 مثبت.
-- [x] PM2 مثبت، الإصدار الحالي `7.0.1`.
-- [x] PostgreSQL مثبت.
+#### ما تم إنجازه على السيرفر (Hostinger VPS KVM 2)
 
-بالتالي، لا تعيد تنفيذ خطوات التثبيت المنجزة إلا إذا فشل أمر التحقق. كمل من: **Clone التطبيق، إعداد `.env.production`، إنشاء قاعدة الإنتاج ومستخدمها، migrations، ثم Nginx و HTTPS والنسخ الاحتياطية**.
+| البند | الحالة |
+|-------|--------|
+| IP العام | `187.124.15.232` |
+| OS | Ubuntu 24.04 LTS |
+| Timezone | Asia/Damascus |
+| `apt update && apt upgrade` | منجز |
+| UFW؛ المنافذ `22`, `80`, `443` مفتوحة | منجز |
+| `fail2ban` شغال | منجز |
+| مستخدم `deploy` مع `sudo` | منجز |
+| SSH key مضاف لـ `deploy` | منجز |
+| Node.js | `22.22.2` (nvm) |
+| PM2 | `7.0.1` |
+| PostgreSQL | `16` مثبت والخدمة شغالة |
+| قاعدة `steel_erp_prod` | موجودة |
+| مستخدم القاعدة `steel_erp` | موجود؛ كلمة المرور **على السيرفر فقط** وتُنسخ إلى `DATABASE_URL` |
+| Nginx | مثبت وشغال (صفحة افتراضية؛ **إعداد vhost التطبيق لاحقاً**) |
+| `/opt/steel-erp` | موجود |
+| `CHANGES.md` تحت المسار أعلاه | موجود |
+
+#### ما لم يتم بعد
+
+- [ ] Clone المشروع من GitHub (مثلاً تحت `/opt/steel-erp/app`).
+- [ ] إعداد `.env.production`.
+- [ ] `npm ci`، `npx prisma migrate deploy`، `npm run build`.
+- [ ] تشغيل التطبيق بـ PM2.
+- [ ] إعداد Nginx (reverse proxy لـ `localhost:3000`).
+- [ ] SSL (certbot).
+- [ ] النسخ الاحتياطية (سكربت + جدولة + تخزين خارجي إن وُجد).
+
+**قبل الإنتاج:** تأكد أن `PermitRootLogin no` و `PasswordAuthentication no` في `sshd`.
 
 ---
 
@@ -121,9 +142,9 @@
 
 ### التطبيق والبيانات (المتبقي الآن)
 
-- [x] فوق طبقة النظام: Node.js، PM2، PostgreSQL.
-- [ ] إعدادات Nginx، ونسخة التطبيق تحت `/opt/steel-erp/app`.
-- [ ] `.env.production`، كلمة مرور القاعدة، `NEXTAUTH_SECRET` إنتاج منفصل عن التطوير.
+- [x] Node.js، PM2، PostgreSQL؛ قاعدة `steel_erp_prod` ومستخدم `steel_erp`؛ Nginx مثبت (بدون vhost التطبيق بعد).
+- [ ] Clone المشروع ونسخة التطبيق تحت `/opt/steel-erp/app` وإعداد reverse proxy في Nginx.
+- [ ] `.env.production` و`NEXTAUTH_SECRET` إنتاج منفصل عن التطوير (كلمة مرور القاعدة داخل الملف فقط، لا في Git).
 - [ ] `npx prisma migrate deploy` و أي تعديل على الـ schema.
 - [ ] **نسخ احتياطي يومي واختبار استعادة** قبل ما تعتبر الإنتاج «جاهز».
 - [ ] مراقبة بسيطة: `pm2`، سجلات Nginx، UptimeRobot أو بديل.
