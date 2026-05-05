@@ -71,22 +71,26 @@ interface Props {
 
 export function CustomerBalanceDialog({ customerId, onClose }: Props) {
   const [data, setData] = useState<BalanceData | null>(null);
-  const [loading, setLoading] = useState(false);
+  const currentData = data?.customerId === customerId ? data : null;
 
   useEffect(() => {
-    if (customerId == null) {
-      setData(null);
-      return;
-    }
-    setLoading(true);
+    if (customerId == null) return;
+
+    let cancelled = false;
     fetch(`/api/customers/${customerId}/balance`)
       .then((r) => r.json())
       .then((json) => {
+        if (cancelled) return;
         if (json.success) setData(json.data);
         else toast.error("خطأ في جلب الرصيد");
       })
-      .catch(() => toast.error("خطأ في الاتصال"))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (!cancelled) toast.error("خطأ في الاتصال");
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [customerId]);
 
   return (
@@ -94,11 +98,11 @@ export function CustomerBalanceDialog({ customerId, onClose }: Props) {
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>
-            رصيد العميل {data ? `— ${data.customerName}` : ""}
+            رصيد العميل {currentData ? `— ${currentData.customerName}` : ""}
           </DialogTitle>
         </DialogHeader>
 
-        {loading || !data ? (
+        {!currentData ? (
           <div className="space-y-3">
             {Array.from({ length: 4 }).map((_, i) => (
               <Skeleton key={i} className="h-5 w-full" />
@@ -110,20 +114,20 @@ export function CustomerBalanceDialog({ customerId, onClose }: Props) {
               <Card>
                 <CardContent className="pt-4 pb-3 text-center">
                   <p className="text-xs text-muted-foreground mb-1">إجمالي المدفوع</p>
-                  <p className="font-mono text-lg font-bold">${formatAmount(data.totalPaid)}</p>
+                  <p className="font-mono text-lg font-bold">${formatAmount(currentData.totalPaid)}</p>
                 </CardContent>
               </Card>
               <Card>
                 <CardContent className="pt-4 pb-3 text-center">
                   <p className="text-xs text-muted-foreground mb-1">إجمالي الموزّع</p>
-                  <p className="font-mono text-lg font-bold">${formatAmount(data.totalAllocated)}</p>
+                  <p className="font-mono text-lg font-bold">${formatAmount(currentData.totalAllocated)}</p>
                 </CardContent>
               </Card>
               <Card>
                 <CardContent className="pt-4 pb-3 text-center">
                   <p className="text-xs text-muted-foreground mb-1">رصيد غير مخصّص</p>
                   <p className="font-mono text-lg font-bold text-primary">
-                    ${formatAmount(data.unallocatedCredit)}
+                    ${formatAmount(currentData.unallocatedCredit)}
                   </p>
                 </CardContent>
               </Card>
@@ -131,9 +135,9 @@ export function CustomerBalanceDialog({ customerId, onClose }: Props) {
 
             <div>
               <h4 className="text-sm font-semibold mb-2">
-                أوامر البيع ({data.orderBalances.length})
+                أوامر البيع ({currentData.orderBalances.length})
               </h4>
-              {data.orderBalances.length === 0 ? (
+              {currentData.orderBalances.length === 0 ? (
                 <p className="text-sm text-muted-foreground">لا توجد أوامر بيع</p>
               ) : (
                 <div className="rounded-lg border overflow-x-auto">
@@ -149,7 +153,7 @@ export function CustomerBalanceDialog({ customerId, onClose }: Props) {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {data.orderBalances.map((ob) => (
+                      {currentData.orderBalances.map((ob) => (
                         <TableRow key={ob.orderNumber}>
                           <TableCell className="font-mono text-sm">
                             {ob.orderNumber}

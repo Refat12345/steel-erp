@@ -72,22 +72,26 @@ interface Props {
 
 export function PaymentDetailDialog({ paymentId, onClose }: Props) {
   const [data, setData] = useState<PaymentDetailData | null>(null);
-  const [loading, setLoading] = useState(false);
+  const currentData = data?.id === paymentId ? data : null;
 
   useEffect(() => {
-    if (paymentId == null) {
-      setData(null);
-      return;
-    }
-    setLoading(true);
+    if (paymentId == null) return;
+
+    let cancelled = false;
     fetch(`/api/payments/${paymentId}`)
       .then((r) => r.json())
       .then((json) => {
+        if (cancelled) return;
         if (json.success) setData(json.data);
         else toast.error("خطأ في جلب تفاصيل الدفعة");
       })
-      .catch(() => toast.error("خطأ في الاتصال"))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (!cancelled) toast.error("خطأ في الاتصال");
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [paymentId]);
 
   return (
@@ -97,7 +101,7 @@ export function PaymentDetailDialog({ paymentId, onClose }: Props) {
           <DialogTitle>تفاصيل الدفعة #{paymentId}</DialogTitle>
         </DialogHeader>
 
-        {loading || !data ? (
+        {!currentData ? (
           <div className="space-y-3">
             {Array.from({ length: 5 }).map((_, i) => (
               <Skeleton key={i} className="h-5 w-full" />
@@ -109,46 +113,46 @@ export function PaymentDetailDialog({ paymentId, onClose }: Props) {
               <div>
                 <span className="text-muted-foreground">العميل</span>
                 <p className="font-medium">
-                  {data.customer.fullName}{" "}
-                  <span className="text-xs text-muted-foreground">({data.customer.code})</span>
+                  {currentData.customer.fullName}{" "}
+                  <span className="text-xs text-muted-foreground">({currentData.customer.code})</span>
                 </p>
               </div>
               <div>
                 <span className="text-muted-foreground">المبلغ</span>
-                <p className="font-mono font-semibold">${formatAmount(data.amount)}</p>
+                <p className="font-mono font-semibold">${formatAmount(currentData.amount)}</p>
               </div>
               <div>
                 <span className="text-muted-foreground">طريقة الدفع</span>
-                <p>{methodLabels[data.method] ?? data.method}</p>
+                <p>{methodLabels[currentData.method] ?? currentData.method}</p>
               </div>
               <div>
                 <span className="text-muted-foreground">تاريخ الدفع</span>
-                <p>{new Date(data.paymentDate).toLocaleDateString("ar-SA")}</p>
+                <p>{new Date(currentData.paymentDate).toLocaleDateString("ar-SA")}</p>
               </div>
-              {data.referenceNumber && (
+              {currentData.referenceNumber && (
                 <div>
                   <span className="text-muted-foreground">رقم المرجع</span>
-                  <p>{data.referenceNumber}</p>
+                  <p>{currentData.referenceNumber}</p>
                 </div>
               )}
               <div>
                 <span className="text-muted-foreground">بواسطة</span>
-                <p>{data.creator.fullName}</p>
+                <p>{currentData.creator.fullName}</p>
               </div>
             </div>
 
-            {data.notes && (
+            {currentData.notes && (
               <div className="text-sm">
                 <span className="text-muted-foreground">ملاحظات</span>
-                <p className="mt-0.5">{data.notes}</p>
+                <p className="mt-0.5">{currentData.notes}</p>
               </div>
             )}
 
             <div>
               <h4 className="text-sm font-semibold mb-2">
-                التوزيعات على أوامر البيع ({data.allocations.length})
+                التوزيعات على أوامر البيع ({currentData.allocations.length})
               </h4>
-              {data.allocations.length === 0 ? (
+              {currentData.allocations.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   لا توجد توزيعات — المبلغ كامل كرصيد غير مخصّص للعميل
                 </p>
@@ -163,7 +167,7 @@ export function PaymentDetailDialog({ paymentId, onClose }: Props) {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {data.allocations.map((a) => (
+                      {currentData.allocations.map((a) => (
                         <TableRow key={a.id}>
                           <TableCell className="font-mono text-sm">
                             {a.salesOrder.orderNumber}
