@@ -88,6 +88,7 @@ interface TruckRequestItemData {
 interface TruckDetail {
   id: number;
   customerId: number | null;
+  destinationId: number | null;
   plateNumber: string;
   driverName: string;
   salesOrderNumber: string | null;
@@ -102,6 +103,7 @@ interface TruckDetail {
   version: number;
   createdAt: string;
   customer: { id: number; fullName: string; code: string } | null;
+  destination: { id: number; name: string; details: string | null } | null;
   creator: { id: number; fullName: string; username: string };
   closer: { id: number; fullName: string; username: string } | null;
   sessions: WeighSessionItem[];
@@ -172,6 +174,18 @@ export function ScaleOperationView({ truckId }: { truckId: number }) {
       })
       .catch(() => {});
   }, [fetchTruck]);
+
+  // useEffect(() => {
+  //   fetchTruck();
+  //   if (canSession ) {
+  //     fetch("/api/sizes")
+  //       .then((r) => r.json())
+  //       .then((j) => {
+  //         if (j.success) setSizes(j.data);
+  //       })
+  //       .catch(() => {});
+  //   }
+  // }, [fetchTruck, canSession]);
 
   const doAction = async (
     url: string,
@@ -281,6 +295,16 @@ export function ScaleOperationView({ truckId }: { truckId: number }) {
         )}
         <InfoCard label="رقم اللوحة" value={truck.plateNumber} />
         <InfoCard label="السائق" value={truck.driverName} />
+        <InfoCard
+          label="الوجهة"
+          value={
+            truck.destination
+              ? truck.destination.details
+                ? `${truck.destination.name} - ${truck.destination.details}`
+                : truck.destination.name
+              : "—"
+          }
+        />
         <InfoCard
           label="وزن الفارغ"
           value={tare != null ? `${tare.toLocaleString("ar-SY")} كغ` : "—"}
@@ -470,7 +494,13 @@ export function ScaleOperationView({ truckId }: { truckId: number }) {
           <Link href={`/scale/${truck.id}/print`} target="_blank">
             <Button variant="outline">
               <Printer className="h-4 w-4 me-1" />
-              طباعة كرت القبان
+              طباعة (داخلي)
+            </Button>
+          </Link>
+          <Link href={`/scale/${truck.id}/print?format=driver`} target="_blank">
+            <Button variant="outline">
+              <Printer className="h-4 w-4 me-1" />
+              طباعة نسخة السائق
             </Button>
           </Link>
         </div>

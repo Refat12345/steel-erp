@@ -2,10 +2,13 @@ import { ScaleCardPrint } from "@/components/scale/scale-card-print";
 
 export default async function ScaleCardPrintPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ format?: string }>;
 }) {
   const { id } = await params;
+  const { format } = await searchParams;
   const truckId = parseInt(id, 10);
 
   if (isNaN(truckId)) {
@@ -16,5 +19,7 @@ export default async function ScaleCardPrintPage({
     );
   }
 
-  return <ScaleCardPrint truckId={truckId} />;
+  const variant = format === "driver" ? "driver" : "internal";
+
+  return <ScaleCardPrint truckId={truckId} variant={variant} />;
 }

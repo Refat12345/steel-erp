@@ -8,7 +8,7 @@ const prisma = new PrismaClient();
 /**
  * When set (`1` or `true`), seed wipes all operational data then re-applies
  * RBAC + sizes + system user + admin only — no demo customers/contracts/SOs.
- * Use with `npx prisma migrate reset --force` via `npm run db:reset-admin`.
+ * Use after full DB wipe via `npm run db:reset-admin` (runs reset-full-db + this flag).
  */
 const SEED_ADMIN_ONLY =
   process.env.SEED_ADMIN_ONLY === "1" ||
@@ -79,6 +79,7 @@ async function main() {
     { code: "logistics", displayName: "اللوجستيك" },
     { code: "scale_operator", displayName: "عامل القبان الخارجي" },
     { code: "internal_loader", displayName: "عامل التحميل الداخلي" },
+    { code: "manager", displayName: "صاحب المصنع (قراءة فقط)" },
   ];
 
   for (const role of roles) {
@@ -202,6 +203,25 @@ async function main() {
       "scale.loading_complete",
       "scale.reopen_before_gross",
     ],
+    // Read-only "owner / general manager" role. Sees every operational
+    // surface (dashboard, contracts, sales orders, trucks queue, finance,
+    // reports, audit) but holds NO mutation/state-change permission and
+    // NO admin permission. Achieves "view everything, change nothing"
+    // without any source-code change in module guards because every
+    // server gate keys off permission codes, not role names.
+    manager: [
+      "dashboard.view",
+      "contract.view",
+      "salesorder.view",
+      "truck.view_queue",
+      "truck.view_approved",
+      "payment.view",
+      "reports.view",
+      "report.daily_trucks",
+      "report.customer_balance",
+      "report.salesorder_status",
+      "report.audit",
+    ],
   };
 
   for (const [roleCode, permCodes] of Object.entries(rolePermissions)) {
@@ -253,6 +273,33 @@ async function main() {
   }
   console.log("  ✓ Sizes seeded");
 
+  // ─── Destination Lookup ────────────────────────────────────────
+  const destinations = [
+    { name: "دمشق", details: "المدينة والمناطق المحيطة", isActive: true, sortOrder: 1 },
+    { name: "ريف دمشق", details: "المنطقة الصناعية والمستودعات", isActive: true, sortOrder: 2 },
+    { name: "حمص", details: "المنطقة الوسطى", isActive: true, sortOrder: 3 },
+    { name: "حماة", details: "المنطقة الوسطى", isActive: true, sortOrder: 4 },
+    { name: "حلب", details: "المنطقة الشمالية", isActive: true, sortOrder: 5 },
+    { name: "اللاذقية", details: "الساحل", isActive: true, sortOrder: 6 },
+    { name: "طرطوس", details: "الساحل", isActive: true, sortOrder: 7 },
+    { name: "درعا", details: "المنطقة الجنوبية", isActive: true, sortOrder: 8 },
+    { name: "السويداء", details: "المنطقة الجنوبية", isActive: true, sortOrder: 9 },
+    { name: "إدلب", details: "المنطقة الشمالية", isActive: true, sortOrder: 10 },
+    { name: "الحسكة", details: "المنطقة الشرقية", isActive: true, sortOrder: 11 },
+    { name: "دير الزور", details: "المنطقة الشرقية", isActive: true, sortOrder: 12 },
+    { name: "الرقة", details: "المنطقة الشرقية", isActive: true, sortOrder: 13 },
+    { name: "القنيطرة", details: "المنطقة الجنوبية", isActive: true, sortOrder: 14 },
+  ];
+
+  for (const destination of destinations) {
+    await prisma.destination.upsert({
+      where: { name: destination.name },
+      update: destination,
+      create: destination,
+    });
+  }
+  console.log("  ✓ Destinations seeded");
+
   // ─── System User (non-loginable, for FK references) ──────────
   const systemUser = await prisma.user.upsert({
     where: { username: "system" },
@@ -271,7 +318,14 @@ async function main() {
   const adminPassword = await hash("admin123", 10);
   await prisma.user.upsert({
     where: { username: "admin" },
-    update: {},
+    update: SEED_ADMIN_ONLY
+      ? {
+          passwordHash: adminPassword,
+          fullName: "المدير العام",
+          roleCode: "admin",
+          isActive: true,
+        }
+      : {},
     create: {
       username: "admin",
       passwordHash: adminPassword,
@@ -296,12 +350,18 @@ async function main() {
   const demoUsers: Array<{
     username: string;
     fullName: string;
-    roleCode: "finance" | "logistics" | "scale_operator" | "internal_loader";
+    roleCode:
+      | "finance"
+      | "logistics"
+      | "scale_operator"
+      | "internal_loader"
+      | "manager";
   }> = [
     { username: "finance", fullName: "موظف المالية (تجريبي)", roleCode: "finance" },
     { username: "logistics", fullName: "موظف اللوجستيك (تجريبي)", roleCode: "logistics" },
     { username: "scale", fullName: "عامل القبان الخارجي (تجريبي)", roleCode: "scale_operator" },
     { username: "loader", fullName: "عامل التحميل الداخلي (تجريبي)", roleCode: "internal_loader" },
+    { username: "manager", fullName: "صاحب المصنع (قراءة فقط)", roleCode: "manager" },
   ];
   for (const u of demoUsers) {
     await prisma.user.upsert({

@@ -199,6 +199,21 @@ model Customer {
   @@map("customers")
 }
 
+model Destination {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  details   String?
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  truckOperations TruckOperation[]
+
+  @@index([isActive, sortOrder])
+  @@map("destinations")
+}
+
 model MasterContract {
   contractNumber String         @id @map("contract_number") // YY-CC
   customerId     Int            @map("customer_id")
@@ -388,6 +403,7 @@ model SizeLookup {
 model TruckOperation {
   id               Int          @id @default(autoincrement())
   customerId       Int?         @map("customer_id")
+  destinationId    Int?         @map("destination_id")
   plateNumber      String       @map("plate_number")
   driverName       String       @map("driver_name")
   salesOrderNumber String?      @map("sales_order_number")
@@ -418,6 +434,7 @@ model TruckOperation {
   createdById      Int          @map("created_by_id")
 
   customer     Customer?   @relation("TruckCustomer", fields: [customerId], references: [id])
+  destination  Destination? @relation(fields: [destinationId], references: [id])
   salesOrder   SalesOrder? @relation(fields: [salesOrderNumber], references: [orderNumber])
   creator      User        @relation("TruckCreator", fields: [createdById], references: [id])
   closer       User?       @relation("TruckCloser", fields: [closedById], references: [id])
@@ -427,6 +444,7 @@ model TruckOperation {
   requestItems TruckRequestItem[]
 
   @@index([customerId])
+  @@index([destinationId])
   @@index([plateNumber])
   @@index([status])
   @@index([salesOrderNumber])

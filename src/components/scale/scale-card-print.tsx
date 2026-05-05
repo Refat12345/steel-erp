@@ -36,6 +36,7 @@ interface TruckDetail {
   closedAt: string | null;
   createdAt: string;
   customer: { id: number; fullName: string; code: string } | null;
+  destination: { id: number; name: string; details: string | null } | null;
   creator: { fullName: string };
   closer: { fullName: string } | null;
   sessions: WeighSessionItem[];
@@ -48,7 +49,14 @@ interface TruckDetail {
   } | null;
 }
 
-export function ScaleCardPrint({ truckId }: { truckId: number }) {
+export function ScaleCardPrint({
+  truckId,
+  variant = "internal",
+}: {
+  truckId: number;
+  variant?: "internal" | "driver";
+}) {
+  const isDriver = variant === "driver";
   const [truck, setTruck] = useState<TruckDetail | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -93,31 +101,77 @@ export function ScaleCardPrint({ truckId }: { truckId: number }) {
   return (
     <>
       {/* Screen-only toolbar */}
-      <div className="print:hidden flex items-center gap-3 mb-4">
+      <div className="print:hidden flex items-center gap-3 mb-4 flex-wrap">
         <Link href={`/scale/${truck.id}`}>
           <Button variant="ghost" size="sm">
             <ArrowRight className="h-4 w-4 me-1" />
             العودة
           </Button>
         </Link>
-        <Button onClick={() => window.print()}>
-          <Printer className="h-4 w-4 me-1" />
-          طباعة
-        </Button>
+        <div className="flex items-center gap-2 ms-auto">
+          <Link
+            href={`/scale/${truck.id}/print`}
+            className={variant === "internal" ? "pointer-events-none" : ""}
+          >
+            <Button
+              variant={variant === "internal" ? "secondary" : "outline"}
+              size="sm"
+              disabled={variant === "internal"}
+            >
+              نسخة داخلية
+            </Button>
+          </Link>
+          <Link
+            href={`/scale/${truck.id}/print?format=driver`}
+            className={variant === "driver" ? "pointer-events-none" : ""}
+          >
+            <Button
+              variant={variant === "driver" ? "secondary" : "outline"}
+              size="sm"
+              disabled={variant === "driver"}
+            >
+              نسخة السائق
+            </Button>
+          </Link>
+          <Button onClick={() => window.print()}>
+            <Printer className="h-4 w-4 me-1" />
+            طباعة
+          </Button>
+        </div>
       </div>
 
       {/* Printable card */}
-      <div className="scale-card mx-auto max-w-[210mm] bg-white text-black p-6 print:p-4 print:text-[11pt] print:leading-tight border print:border-0 rounded-lg print:rounded-none">
+      <div className={`scale-card scale-card--${variant} mx-auto max-w-[210mm] bg-white text-black p-6 print:p-3 print:leading-tight border print:border-0 rounded-lg print:rounded-none ${isDriver ? "print:text-[8pt]" : "print:text-[9pt]"}`}>
         {/* Header */}
-        <div className="text-center border-b-2 border-black pb-3 mb-4">
-          <h1 className="text-xl font-bold print:text-[16pt]">كرت قبان</h1>
-          <p className="text-sm text-gray-600 print:text-[9pt]">
-            مصنع الحديد — نظام إدارة القبان
-          </p>
+        <div className="flex items-center justify-between border-b-2 border-black pb-3 mb-3 print:pb-2 print:mb-2">
+          {/* Logo */}
+          <div className="flex-shrink-0">
+            {/* Place steeltech-logo.png in /public to activate */}
+            <img
+              src="/steeltech-logo.png"
+              alt="SteelTech"
+              className="h-20 print:h-14 w-auto object-contain max-w-[200px] print:max-w-[150px]"
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+            />
+          </div>
+          {/* Title */}
+          <div className="text-center flex-1">
+            <h1 className="text-xl font-bold print:text-[14pt]">كرت قبان</h1>
+            {isDriver && (
+              <p className="text-xs font-semibold text-gray-500 mt-0.5 tracking-wide">
+                — نسخة السائق —
+              </p>
+            )}
+            <p className="text-xs text-gray-500 print:text-[7pt]">
+              نظام إدارة القبان
+            </p>
+          </div>
+          {/* Spacer to balance logo */}
+          <div className="flex-shrink-0 w-20 print:w-14" aria-hidden />
         </div>
 
         {/* Card Number + Date */}
-        <div className="flex justify-between items-center mb-4 text-sm">
+        <div className="flex justify-between items-center mb-3 print:mb-2 text-sm">
           <div>
             <span className="font-bold">رقم الكرت: </span>
             <span className="font-mono">{truck.id}</span>
@@ -133,7 +187,7 @@ export function ScaleCardPrint({ truckId }: { truckId: number }) {
         </div>
 
         {/* Truck Info */}
-        <table className="w-full text-sm mb-4">
+        <table className="w-full text-sm mb-3 print:mb-2">
           <tbody>
             {truck.customer && (
               <tr>
@@ -149,6 +203,16 @@ export function ScaleCardPrint({ truckId }: { truckId: number }) {
               <td className="font-bold py-1 pe-4 w-1/4">السائق:</td>
               <td className="py-1">{truck.driverName}</td>
             </tr>
+            <tr>
+              <td className="font-bold py-1 pe-4">الوجهة:</td>
+              <td className="py-1" colSpan={3}>
+                {truck.destination
+                  ? truck.destination.details
+                    ? `${truck.destination.name} - ${truck.destination.details}`
+                    : truck.destination.name
+                  : "—"}
+              </td>
+            </tr>
             {truck.salesOrder && (
               <tr>
                 <td className="font-bold py-1 pe-4">أمر البيع:</td>
@@ -162,7 +226,7 @@ export function ScaleCardPrint({ truckId }: { truckId: number }) {
 
         {/* Request Items */}
         {truck.requestItems && truck.requestItems.length > 0 && (
-          <div className="mb-4">
+          <div className="mb-3 print:mb-2">
             <h3 className="font-bold text-sm mb-2">تفاصيل الطلبية</h3>
             <div className="border border-black rounded">
               <table className="w-full text-sm">
@@ -186,7 +250,7 @@ export function ScaleCardPrint({ truckId }: { truckId: number }) {
         )}
 
         {/* Weight Summary */}
-        <div className="border border-black rounded mb-4">
+        <div className="border border-black rounded mb-3 print:mb-2">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-100 print:bg-gray-200">
@@ -236,74 +300,80 @@ export function ScaleCardPrint({ truckId }: { truckId: number }) {
           </table>
         </div>
 
-        {/* Timing Summary */}
-        <div className="border border-black rounded mb-4">
-          <div className="bg-gray-100 print:bg-gray-200 px-3 py-1.5 border-b border-black">
-            <h3 className="text-sm font-bold">الأزمنة</h3>
-          </div>
-          <table className="w-full text-sm">
-            <tbody>
-              <tr className="border-b border-gray-300">
-                <td className="py-1.5 px-3 w-1/2">
-                  وقت الانتظار (التسجيل → دخول القبان)
-                </td>
-                <td className="py-1.5 px-3 font-semibold">
-                  {formatDuration(waitMs)}
-                </td>
-              </tr>
-              <tr className="border-b border-gray-300 bg-emerald-50 print:bg-gray-50">
-                <td className="py-1.5 px-3 font-bold">
-                  مدة التحميل (الفارغ → المحمّل)
-                </td>
-                <td className="py-1.5 px-3 font-bold">
-                  {formatDuration(loadingMs)}
-                </td>
-              </tr>
-              <tr>
-                <td className="py-1.5 px-3">
-                  المدة الكلية (التسجيل → الإغلاق)
-                </td>
-                <td className="py-1.5 px-3 font-semibold">
-                  {formatDuration(totalMs)}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        {/* Internal Sessions */}
-        {truck.sessions.length > 0 && (
-          <div className="mb-4">
-            <h3 className="font-bold text-sm mb-2">
-              الوزنات الداخلية ({truck.sessions.length} وزنة)
-            </h3>
-            <div className="border border-black rounded">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-100 print:bg-gray-200">
-                    <th className="py-1.5 px-2 text-start border-b border-black w-10">#</th>
-                    <th className="py-1.5 px-2 text-start border-b border-black">القياس</th>
-                    <th className="py-1.5 px-2 text-start border-b border-black">الربطات</th>
-                    <th className="py-1.5 px-2 text-start border-b border-black">الوزن (طن)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {truck.sessions.map((s) => (
-                    <tr key={s.id} className="border-b border-gray-200">
-                      <td className="py-1 px-2 font-mono">{s.sessionNumber}</td>
-                      <td className="py-1 px-2">{s.size?.displayName ?? "—"}</td>
-                      <td className="py-1 px-2">{s.bundleCount ?? "—"}</td>
-                      <td className="py-1 px-2 font-mono">{Number(s.weightTons).toFixed(3)}</td>
-                    </tr>
-                  ))}
-                  <tr className="bg-gray-50 font-bold">
-                    <td colSpan={3} className="py-1.5 px-2">المجموع الكلي (كل الوزنات)</td>
-                    <td className="py-1.5 px-2 font-mono">{totalSessionsTons.toFixed(3)} طن</td>
-                  </tr>
-                </tbody>
-              </table>
+        {/* Timing Summary — internal only */}
+        {!isDriver && (
+          <div className="border border-black rounded mb-3 print:mb-2">
+            <div className="bg-gray-100 print:bg-gray-200 px-3 py-1.5 border-b border-black">
+              <h3 className="text-sm font-bold">الأزمنة</h3>
             </div>
-            <div className="mt-3">
+            <table className="w-full text-sm">
+              <tbody>
+                <tr className="border-b border-gray-300">
+                  <td className="py-1.5 px-3 w-1/2">
+                    وقت الانتظار (التسجيل → دخول القبان)
+                  </td>
+                  <td className="py-1.5 px-3 font-semibold">
+                    {formatDuration(waitMs)}
+                  </td>
+                </tr>
+                <tr className="border-b border-gray-300 bg-emerald-50 print:bg-gray-50">
+                  <td className="py-1.5 px-3 font-bold">
+                    مدة التحميل (الفارغ → المحمّل)
+                  </td>
+                  <td className="py-1.5 px-3 font-bold">
+                    {formatDuration(loadingMs)}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-1.5 px-3">
+                    المدة الكلية (التسجيل → الإغلاق)
+                  </td>
+                  <td className="py-1.5 px-3 font-semibold">
+                    {formatDuration(totalMs)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Internal Sessions — internal copy shows all sessions + aggregate; driver copy shows aggregate only */}
+        {truck.sessions.length > 0 && (
+          <div className="mb-3 print:mb-2">
+            {!isDriver && (
+              <>
+                <h3 className="font-bold text-sm mb-2">
+                  الوزنات الداخلية ({truck.sessions.length} وزنة)
+                </h3>
+                <div className="border border-black rounded mb-3">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-100 print:bg-gray-200">
+                        <th className="py-1.5 px-2 text-start border-b border-black w-10">#</th>
+                        <th className="py-1.5 px-2 text-start border-b border-black">القياس</th>
+                        <th className="py-1.5 px-2 text-start border-b border-black">الربطات</th>
+                        <th className="py-1.5 px-2 text-start border-b border-black">الوزن (طن)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {truck.sessions.map((s) => (
+                        <tr key={s.id} className="border-b border-gray-200">
+                          <td className="py-1 px-2 font-mono">{s.sessionNumber}</td>
+                          <td className="py-1 px-2">{s.size?.displayName ?? "—"}</td>
+                          <td className="py-1 px-2">{s.bundleCount ?? "—"}</td>
+                          <td className="py-1 px-2 font-mono">{Number(s.weightTons).toFixed(3)}</td>
+                        </tr>
+                      ))}
+                      <tr className="bg-gray-50 font-bold">
+                        <td colSpan={3} className="py-1.5 px-2">المجموع الكلي (كل الوزنات)</td>
+                        <td className="py-1.5 px-2 font-mono">{totalSessionsTons.toFixed(3)} طن</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+            <div>
               <h3 className="font-bold text-sm mb-2">الإجمالي حسب القياس</h3>
               <div className="border border-black rounded">
                 <table className="w-full text-sm">
@@ -311,7 +381,9 @@ export function ScaleCardPrint({ truckId }: { truckId: number }) {
                     <tr className="bg-gray-100 print:bg-gray-200">
                       <th className="py-1.5 px-2 text-start border-b border-black">القياس</th>
                       <th className="py-1.5 px-2 text-start border-b border-black">إجمالي الربطات</th>
-                      <th className="py-1.5 px-2 text-start border-b border-black">إجمالي الوزن (طن)</th>
+                      {!isDriver && (
+                        <th className="py-1.5 px-2 text-start border-b border-black">إجمالي الوزن (طن)</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -323,7 +395,9 @@ export function ScaleCardPrint({ truckId }: { truckId: number }) {
                             ? row.totalBundles.toLocaleString("ar-SY")
                             : "—"}
                         </td>
-                        <td className="py-1 px-2 font-mono font-bold">{row.totalTons.toFixed(3)}</td>
+                        {!isDriver && (
+                          <td className="py-1 px-2 font-mono font-bold">{row.totalTons.toFixed(3)}</td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -333,31 +407,37 @@ export function ScaleCardPrint({ truckId }: { truckId: number }) {
           </div>
         )}
 
-        {/* Cross Verification */}
-        <div className="border border-dashed border-gray-400 rounded p-3 mb-4 text-sm">
-          <h3 className="font-bold mb-1">المقارنة (للتحقق فقط)</h3>
-          <div className="grid grid-cols-3 gap-2">
-            <div>
-              <span className="text-gray-600">صافي القبان: </span>
-              <span className="font-mono font-bold">{bridgeNetTons.toFixed(3)} طن</span>
-            </div>
-            <div>
-              <span className="text-gray-600">مجموع الداخلي: </span>
-              <span className="font-mono font-bold">{totalSessionsTons.toFixed(3)} طن</span>
-            </div>
-            <div>
-              <span className="text-gray-600">الفرق: </span>
-              <span className={`font-mono font-bold ${Math.abs(discrepancyTons) > 0.5 ? "text-red-600" : ""}`}>
-                {discrepancyTons.toFixed(3)} طن
-              </span>
+        {/* Cross Verification — internal only */}
+        {!isDriver && (
+          <div className="border border-dashed border-gray-400 rounded p-3 print:p-2 mb-3 print:mb-2 text-sm">
+            <h3 className="font-bold mb-1">المقارنة (للتحقق فقط)</h3>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <span className="text-gray-600">صافي القبان: </span>
+                <span className="font-mono font-bold">{bridgeNetTons.toFixed(3)} طن</span>
+              </div>
+              <div>
+                <span className="text-gray-600">مجموع الداخلي: </span>
+                <span className="font-mono font-bold">{totalSessionsTons.toFixed(3)} طن</span>
+              </div>
+              <div>
+                <span className="text-gray-600">الفرق: </span>
+                <span
+                  className={`font-mono font-bold ${Math.abs(discrepancyTons) > 0.5 ? "text-red-600" : ""}`}
+                >
+                  {discrepancyTons.toFixed(3)} طن
+                </span>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Footer */}
         <div className="flex justify-between items-end text-xs text-gray-600 border-t border-gray-300 pt-3">
           <div className="space-y-0.5">
-            <div>المشغّل: {truck.closer?.fullName ?? truck.creator.fullName}</div>
+            {!isDriver && (
+              <div>المشغّل: {truck.closer?.fullName ?? truck.creator.fullName}</div>
+            )}
             {truck.closedAt && (
               <div>وقت الإغلاق: {new Date(truck.closedAt).toLocaleString("ar-SY")}</div>
             )}
@@ -369,7 +449,7 @@ export function ScaleCardPrint({ truckId }: { truckId: number }) {
         </div>
 
         {/* Signature Lines */}
-        <div className="mt-8 flex justify-around text-sm print:mt-12">
+        <div className="mt-8 flex justify-around text-sm print:mt-6">
           <div className="text-center">
             <div className="w-32 border-b border-black mb-1" />
             <div>عامل القبان</div>
@@ -392,7 +472,9 @@ export function ScaleCardPrint({ truckId }: { truckId: number }) {
           nav, header, aside, .print\\:hidden { display: none !important; }
           main { padding: 0 !important; }
           .scale-card { box-shadow: none; border: none; }
-          @page { size: A4 portrait; margin: 10mm; }
+          /* Internal: A4 with tighter margins */
+          .scale-card--internal { font-size: 9pt; }
+          @page { size: ${isDriver ? "A5" : "A4"} portrait; margin: ${isDriver ? "5mm" : "6mm"}; }
         }
       `}</style>
     </>

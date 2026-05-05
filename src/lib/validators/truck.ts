@@ -14,6 +14,7 @@ const requestItemSchema = z.object({
 
 export const truckRegisterSchema = z.object({
   customerId: z.number().int().positive("الزبون مطلوب").optional().nullable(),
+  destinationId: z.number().int().positive("الوجهة غير صالحة").optional().nullable(),
   plateNumber: z
     .string()
     .min(1, "رقم اللوحة مطلوب")

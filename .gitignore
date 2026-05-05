@@ -45,3 +45,6 @@ next-env.d.ts
 
 # uploads
 /uploads
+
+# local database dumps
+/backups/

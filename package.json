@@ -20,7 +20,10 @@
     "prod:stop": "pm2 stop steel-erp",
     "prod:logs": "pm2 logs steel-erp",
     "prod:restart": "pm2 restart steel-erp",
-    "reset-passwords": "npx tsx scripts/reset-demo-passwords.ts"
+    "reset-passwords": "npx tsx scripts/reset-demo-passwords.ts",
+    "demo:reset-db": "npx tsx scripts/reset-full-db.ts",
+    "demo:seed": "npx tsx scripts/seed-full-demo.ts",
+    "demo:full-reset": "npx tsx scripts/reset-full-db.ts && npx tsx scripts/seed-full-demo.ts"
   },
   "prisma": {
     "seed": "npx tsx prisma/seed.ts"

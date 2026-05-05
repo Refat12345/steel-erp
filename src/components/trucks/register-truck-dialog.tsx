@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Trash2, Plus } from "lucide-react";
 import { createClientIdempotencyKey } from "@/lib/browser-idempotency-key";
+import { DestinationSelect } from "@/components/destinations/destination-select";
 
 interface Customer {
   id: number;
@@ -53,6 +54,7 @@ let rowKeyCounter = 0;
 
 export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
   const [customerId, setCustomerId] = useState("");
+  const [destinationId, setDestinationId] = useState<number | null>(null);
   const [plateNumber, setPlateNumber] = useState("");
   const [driverName, setDriverName] = useState("");
   const [notes, setNotes] = useState("");
@@ -87,6 +89,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
 
   const reset = () => {
     setCustomerId("");
+    setDestinationId(null);
     setPlateNumber("");
     setDriverName("");
     setNotes("");
@@ -170,6 +173,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
         },
         body: JSON.stringify({
           customerId: Number(customerId),
+          destinationId,
           plateNumber: plateNumber.trim(),
           driverName: driverName.trim(),
           notes: notes.trim() || undefined,
@@ -219,6 +223,16 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                 </SelectContent>
               </Select>
             )}
+          </div>
+
+          {/* Destination */}
+          <div className="space-y-2">
+            <Label>الوجهة (اختياري)</Label>
+            <DestinationSelect
+              value={destinationId}
+              onValueChange={setDestinationId}
+              disabled={saving}
+            />
           </div>
 
           {/* Plate + Driver */}

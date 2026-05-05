@@ -44,6 +44,7 @@ export interface RequestItemInput {
 
 export interface RegisterTruckInput {
   customerId?: number | null;
+  destinationId?: number | null;
   plateNumber: string;
   driverName: string;
   salesOrderNumber?: string | null;
@@ -83,6 +84,14 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
     if (data.customerId != null && so.contract.customerId !== data.customerId) {
       throw new ServiceError("أمر البيع لا يخص الزبون المحدد");
     }
+  }
+
+  if (data.destinationId) {
+    const destination = await prisma.destination.findUnique({
+      where: { id: data.destinationId },
+    });
+    if (!destination) throw new ServiceError("الوجهة غير موجودة", "NOT_FOUND");
+    if (!destination.isActive) throw new ServiceError("الوجهة غير نشطة");
   }
 
   if (data.requestItems?.length) {
@@ -126,6 +135,7 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
           const created = await tx.truckOperation.create({
             data: {
               customerId: data.customerId || null,
+              destinationId: data.destinationId || null,
               plateNumber: normalizedPlate,
               driverName: data.driverName.trim(),
               salesOrderNumber: data.salesOrderNumber || null,
@@ -156,6 +166,7 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
               previousValue: null,
               newValue: {
                 customerId: data.customerId ?? null,
+                destinationId: data.destinationId ?? null,
                 plateNumber: created.plateNumber,
                 driverName: created.driverName,
                 salesOrderNumber: created.salesOrderNumber,
@@ -976,6 +987,7 @@ export async function cancelOperation(truckId: number, reason: string, userId: n
 
 const DETAIL_INCLUDE = {
   customer: { select: { id: true, fullName: true, code: true } },
+  destination: { select: { id: true, name: true, details: true } },
   requestItems: {
     orderBy: { size: { sortOrder: "asc" as const } },
     include: { size: { select: { id: true, code: true, displayName: true, isBundleType: true } } },
@@ -1052,6 +1064,7 @@ export async function listOperations(
       take: pagination.pageSize,
       include: {
         customer: { select: { id: true, fullName: true, code: true } },
+        destination: { select: { id: true, name: true, details: true } },
         creator: { select: { id: true, fullName: true } },
         _count: { select: { sessions: true } },
       },
