@@ -1,0 +1,118 @@
+---
+description: Production server safety — Hostinger VPS rules for SSH, secrets, deploys, DB, backups, and audit log
+alwaysApply: true
+---
+
+# Production Server Safety Rules — Steel ERP (Hostinger VPS)
+
+Applies to: Ubuntu 24.04 LTS at `/opt/steel-erp` running Next.js (PM2) + Nginx + PostgreSQL 16. Reference: `DEPLOYMENT.md`, `scripts/deploy.sh`, and `.github/workflows/ci.yml`.
+
+These rules govern any action taken on the production server (`erp.company.com`). They are intentionally strict for **state-changing** actions and lenient for **read-only** diagnostics.
+
+## 1. Read-only vs mutating commands
+
+- **Allowed without confirmation** (read-only):
+  `sudo systemctl status`, `sudo cat`, `sudo journalctl`, `sudo nginx -t`, `sudo ufw status`, `sudo -u postgres psql -c "SELECT…"`, `pm2 status`, `pm2 logs`, `git status`, `df`, `free`, `du`, `stat`, `ls`.
+- **Requires explicit user confirmation** (mutating):
+  `sudo systemctl restart/reload/stop/start`, `sudo apt install/remove/upgrade`, `sudo nano/vi`, `sudo ufw allow/deny`, `sudo rm`, `sudo chmod`, `sudo chown`, `pm2 restart/reload/kill`, `crontab -e`, edits under `/etc/`.
+- Before deleting any file: copy to `<file>.bak.$(date +%Y%m%d-%H%M%S)` in the same directory or under `/opt/steel-erp/backups/`. **Never use `/tmp` for backups** — `systemd-tmpfiles` may clear it.
+
+## 2. Secrets handling (zero-leak)
+
+- Never `cat`, `echo`, `tail`, `grep`, or print the contents of `.env*`, `/opt/steel-erp/scripts/.backup-env`, `/opt/steel-erp/state/last-pre-deploy.env`, `~/.ssh/id_*`, `~/.pgpass`, or any rclone config to terminal, chat, logs, PRs, or CHANGES.md. Use `stat`, `wc -l`, `grep -c <key>=` to verify presence without revealing values.
+- All secret files MUST be `chmod 600`, owner `deploy:deploy`. Verify with `stat -c '%a %U:%G' <file>`.
+- Never reuse dev `NEXTAUTH_SECRET`, DB password, or B2 keys in production.
+- Rotating `NEXTAUTH_SECRET` invalidates **all active sessions**. Schedule it during a maintenance window and warn users — never rotate casually.
+- Never commit `.env.production`, `.backup-env`, `*.dump`, `*.dump.gz`, or `*.sql` from the server.
+
+## 3. Environment & branch invariants (pre-flight)
+
+Before any deploy, migration, or `npm run build`, all must hold:
+
+- `pwd` is `/opt/steel-erp/app`.
+- `git status` is clean and current branch is `main`.
+- `df -h /` shows ≥ 15% free (≥ 2 GB on / for builds and `pg_dump`).
+- `free -h` shows MemAvailable ≥ 300 MB. KVM 2 is tight; `next build` can OOM the running app.
+- `pm2 status` shows `steel-erp` `online` (so we have a known-good baseline to compare against post-deploy).
+- Server identity confirmed: Ubuntu 24.04, IP matches the `CHANGES.md` header.
+
+If any check fails → halt and surface to user.
+
+## 4. Long-running operations MUST run in tmux
+
+Any operation expected to take > 30 s MUST run inside `tmux new -s <name>`:
+
+- `pg_restore`, `pg_dump` of full DB, `prisma migrate deploy` on heavy schemas
+- `npm ci && next build`, `apt upgrade`, restore drills, `rclone sync`
+
+SSH disconnects mid-operation are silent killers. tmux is non-negotiable for these.
+
+## 5. PM2 & deploy
+
+- The canonical deploy entrypoint is `/opt/steel-erp/scripts/deploy.sh` (symlink to `app/scripts/deploy.sh`). Never run `git pull && npm run build && pm2 reload` manually as separate commands — it bypasses the lock, backup verification, health check, and audit log.
+- Use `pm2 reload steel-erp` for code updates. `pm2 restart steel-erp` is a fallback when the process is in a bad state. Never `pm2 kill` without confirmation.
+- The `ecosystem.config.cjs` in the repo runs `instances: 1` — `pm2 reload` is functionally a fast restart with brief downtime. Do not switch to cluster mode without first verifying RAM headroom.
+- Health check after every deploy/restart MUST be `curl -sf http://localhost:3000/api/health` returning 200 with `dbConnected: true`. The home page is **not** a valid health check.
+- Rollback rule: if health check fails twice with 30 s between, `deploy.sh` auto-reverts the working tree and rebuilds. **If a Prisma migration ran, code-rollback alone is not safe** — the script will warn and the operator must decide whether to restore the DB from the verified pre-deploy backup.
+
+## 6. Nginx & system config edits
+
+- Never `systemctl reload nginx` or `systemctl restart nginx` without `sudo nginx -t` succeeding first.
+- Before editing `/etc/nginx/sites-available/steel-erp`, `/etc/postgresql/16/main/*.conf`, `/etc/ssh/sshd_config`, or any file under `/etc/`: copy to `<file>.bak.$(date +%Y%m%d-%H%M%S)`.
+- Never modify `sshd_config`, `~/.ssh/authorized_keys`, or UFW rules without a step-by-step explanation and explicit approval.
+- Certbot renewals are automatic; manual `certbot renew` is allowed but must be followed by `sudo nginx -t && sudo systemctl reload nginx`.
+
+## 7. Database safety
+
+- **Forbidden on production** — never run any of these against `steel_erp_prod`:
+  `prisma migrate reset`, `prisma migrate dev`, `prisma db push`, `prisma db execute`,
+  `npm run db:reset`, `npm run db:migrate`, `npm run demo:reset-db`, `npm run demo:seed`, `npm run demo:full-reset`, `npm run reset-passwords`,
+  `seed-full-demo.ts`, `reset-full-db.ts`, any other reset/seed script,
+  ad-hoc `DROP DATABASE`, `TRUNCATE`, or unbounded `DELETE FROM <table>`.
+- **Allowed** for schema changes: `npx prisma migrate deploy` only.
+- Never connect to prod DB from a local laptop directly. If absolutely needed, use SSH tunnel: `ssh -L 5433:localhost:5432 deploy@…` and connect to `localhost:5433`.
+- A pre-migration backup is **verified successful** only when **all four hold**:
+  1. Local `db_*.dump.gz` exists and size ≥ 1 MB.
+  2. `gunzip -t <file>` returns 0.
+  3. `rclone lsf b2:steel-erp-backups/daily/` lists the same filename.
+  4. The last log line in `/var/log/steel-erp-backup.log` is `=== Backup completed successfully ===`.
+- If any of those fail → abort the migration. Do not retry without diagnosing.
+- Test restore (per `DEPLOYMENT.md` §9) at least once a month — an untested backup is not a backup.
+
+## 8. Network / system invariants (must always be true)
+
+- `sudo ufw status` shows `active` and allows **only** `22/tcp`, `80/tcp`, `443/tcp`. Anything else → halt and ask user.
+- `fail2ban` is `active (running)`.
+- PostgreSQL `listen_addresses = 'localhost'` and port 5432 is **not** in any UFW rule.
+- `sshd_config` has `PermitRootLogin no` and `PasswordAuthentication no`.
+- If firewall is `inactive` → stop, alert user before any external-facing action.
+
+## 9. Disk & log hygiene
+
+- Never `rm` files in `/var/log/`, `~/.pm2/logs/`, or `/opt/steel-erp/backups/` manually.
+- `pm2-logrotate` and `/etc/logrotate.d/nginx` MUST stay enabled.
+- If `df -h /` < 15% free: investigate before any deploy.
+  Useful: `du -sh /var/log/* | sort -h`, `du -sh ~/.pm2/logs/*`, `sudo journalctl --disk-usage`.
+
+## 10. CI / automation
+
+- The `.github/workflows/ci.yml` workflow gates PRs and pushes to `main`. It runs `prisma validate`, `tsc --noEmit`, `npm run lint`, and `npm test` against a dummy `DATABASE_URL` — it never connects to a real database.
+- Auto-deploy on `push` is **forbidden** for this app. Any future deploy automation MUST use `workflow_dispatch` (manual trigger) with concurrency lock and a maintenance-window guard mirroring `deploy.sh`.
+- CI MUST NOT run any forbidden script from §7. The workflow contains a guard step that fails if such a script is referenced.
+
+## 11. Audit log (`/opt/steel-erp/CHANGES.md`)
+
+Every **mutating** action (config edit, package install/remove, UFW change, Prisma migration, env change, certbot renewal, user/permission change, manual data fix) MUST be appended in this exact format:
+
+```
+## YYYY-MM-DD HH:MM Asia/Damascus
+- Action: <one-line summary>
+- Reason: <why>
+- Commands: <commands run, secrets redacted>
+- Result: <success / output snippet / errors>
+- Rollback: <how to undo>
+```
+
+`scripts/deploy.sh` writes this entry automatically on success and on failure. Manual mutating actions outside the script must be logged the same way.
+
+Read-only diagnostics are not logged. The file is **append-only** — never edit historical entries.

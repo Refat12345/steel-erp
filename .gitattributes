@@ -1,0 +1,27 @@
+# Auto-detect text files and normalise line endings on commit.
+* text=auto eol=lf
+
+# Shell scripts MUST be LF — CRLF breaks them on Linux.
+*.sh   text eol=lf
+*.bash text eol=lf
+
+# YAML / config files used by Linux tooling.
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# Windows-only scripts keep CRLF.
+*.ps1  text eol=crlf
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+
+# Binary types — never normalise.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.pptx binary
+*.xlsx binary
+*.dump binary
+*.gz   binary

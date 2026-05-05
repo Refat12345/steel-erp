@@ -1,0 +1,65 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# One run per ref. Newer commits supersede older runs on the same branch/PR.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint, typecheck, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # Block any accidental network calls to a real DB by giving Prisma a bogus
+    # URL. Schema validation and unit tests do not need a live database.
+    env:
+      DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci?schema=public"
+      DIRECT_URL: "postgresql://ci:ci@localhost:5432/ci?schema=public"
+      NEXTAUTH_SECRET: "ci-only-not-a-real-secret"
+      NEXTAUTH_URL: "http://localhost:3000"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Guard against forbidden npm scripts in CI
+        # Defence in depth: this workflow does not call destructive scripts,
+        # but if a future edit ever does, fail loudly.
+        run: |
+          set -euo pipefail
+          for forbidden in "db:reset" "db:migrate" "demo:reset-db" "demo:seed" "demo:full-reset" "reset-passwords"; do
+            if grep -q "npm run $forbidden\|npm $forbidden" "$GITHUB_WORKFLOW" 2>/dev/null; then
+              echo "Forbidden script '$forbidden' referenced in workflow"
+              exit 1
+            fi
+          done
+
+      - name: Install dependencies
+        # `postinstall` runs `prisma generate`, which only reads the schema file
+        # and does not connect to the database.
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
