@@ -40,8 +40,7 @@ describe("paymentCreateSchema", () => {
   });
 
   it("rejects missing customerId", () => {
-    const data = validBase();
-    delete (data as any).customerId;
+    const { customerId: _customerId, ...data } = validBase();
     const result = paymentCreateSchema.safeParse(data);
     expect(result.success).toBe(false);
   });

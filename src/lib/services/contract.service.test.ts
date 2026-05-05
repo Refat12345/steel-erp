@@ -38,7 +38,8 @@ beforeEach(() => {
   // implementations. clearAllMocks does not clear the once-queue, which let
   // queued values bleed between tests and hide bugs.
   vi.resetAllMocks();
-  mockPrisma.$transaction.mockImplementation(async (fn: any) => fn(mockPrisma));
+  type TxFn = (tx: typeof mockPrisma) => unknown | Promise<unknown>;
+  mockPrisma.$transaction.mockImplementation(async (fn: TxFn) => fn(mockPrisma));
   mockPrisma.auditLog.create.mockResolvedValue({});
   mockPrisma.contractAttachment.create.mockResolvedValue({ id: 1 });
   // Sensible defaults so individual tests only mock what they actually use.

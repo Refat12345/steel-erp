@@ -702,7 +702,7 @@ async function main() {
     const cust = customers[randInt(0, customers.length - 1)]!;
     const registrar = pickLogistics();
     const createdAt = randomFactoryTimestamp();
-    let t0 = createdAt;
+    const t0 = createdAt;
     const driverName = driverPool[randInt(0, driverPool.length - 1)]!;
 
     const auditBatch: Array<{

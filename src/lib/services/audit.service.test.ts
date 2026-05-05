@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Prisma } from "@prisma/client";
 
 const mockPrisma = vi.hoisted(() => ({
   auditLog: {
@@ -24,7 +25,7 @@ describe("audit.service", () => {
     it("creates an audit log entry with the correct data", async () => {
       mockPrisma.auditLog.create.mockResolvedValue({ id: 1 });
 
-      await logAudit(mockPrisma as any, {
+      await logAudit(mockPrisma as unknown as Prisma.TransactionClient, {
         userId: 5,
         action: "create",
         entityType: "Customer",
@@ -46,7 +47,7 @@ describe("audit.service", () => {
     it("passes undefined details when not provided", async () => {
       mockPrisma.auditLog.create.mockResolvedValue({ id: 2 });
 
-      await logAudit(mockPrisma as any, {
+      await logAudit(mockPrisma as unknown as Prisma.TransactionClient, {
         userId: 1,
         action: "update",
         entityType: "MasterContract",

@@ -32,7 +32,8 @@ import { ServiceError } from "./errors";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockPrisma.$transaction.mockImplementation(async (fn: any) => fn(mockPrisma));
+  type TxFn = (tx: typeof mockPrisma) => unknown | Promise<unknown>;
+  mockPrisma.$transaction.mockImplementation(async (fn: TxFn) => fn(mockPrisma));
   mockPrisma.auditLog.create.mockResolvedValue({});
 });
 
