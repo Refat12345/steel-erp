@@ -19,25 +19,12 @@ const UPLOAD_DIR = path.join(process.cwd(), "uploads", "trucks");
  *   1. Content-Length header check BEFORE reading the body (below).
  *   2. Stream-size check after FormData parsing (in case body is sent
  *      chunked without a length header, e.g. some mobile clients).
- *   3. Indirect cap via Next.js body size limit (route.ts config).
  *
  * Reading a multi-hundred-MB body only to reject it afterwards is a trivial
  * DoS vector: this pre-check rejects oversized uploads within milliseconds.
  */
 const MAX_FILE_SIZE = 15 * 1024 * 1024;
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
-
-/**
- * Next.js App Router body size limit. Requests exceeding this are rejected
- * with 413 by the framework before even reaching the handler.
- */
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: `${MAX_FILE_SIZE}b`,
-    },
-  },
-};
 
 export async function POST(
   req: NextRequest,
