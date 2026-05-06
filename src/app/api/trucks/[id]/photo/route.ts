@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { writeFile, mkdir, unlink } from "fs/promises";
 import path from "path";
+import { randomUUID } from "crypto";
 import {
   getApiSession,
   unauthorized,
@@ -24,7 +25,33 @@ const UPLOAD_DIR = path.join(process.cwd(), "uploads", "trucks");
  * DoS vector: this pre-check rejects oversized uploads within milliseconds.
  */
 const MAX_FILE_SIZE = 15 * 1024 * 1024;
-const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+type DetectedImageType = {
+  mimeType: "image/jpeg" | "image/png";
+  extension: "jpg" | "png";
+};
+
+function detectImageType(buffer: Buffer): DetectedImageType | null {
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return { mimeType: "image/jpeg", extension: "jpg" };
+  }
+
+  if (
+    buffer.length >= 8 &&
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0d &&
+    buffer[5] === 0x0a &&
+    buffer[6] === 0x1a &&
+    buffer[7] === 0x0a
+  ) {
+    return { mimeType: "image/png", extension: "png" };
+  }
+
+  return null;
+}
 
 export async function POST(
   req: NextRequest,
@@ -82,19 +109,19 @@ export async function POST(
       },
     );
   }
-  if (!ALLOWED_TYPES.includes(file.type)) {
-    return badRequest("نوع الملف غير مسموح — يُقبل JPEG أو PNG أو WebP");
-  }
 
   await mkdir(UPLOAD_DIR, { recursive: true });
 
-  const timestamp = Date.now();
-  const ext = file.name.split(".").pop() || "jpg";
-  const fileName = `truck_${truckId}_${timestamp}.${ext}`;
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const detectedType = detectImageType(buffer);
+  if (!detectedType) {
+    return badRequest("نوع الملف غير مسموح — يُقبل JPEG أو PNG فقط");
+  }
+
+  const fileName = `${randomUUID()}.${detectedType.extension}`;
   const filePath = path.join(UPLOAD_DIR, fileName);
   const relativePath = `uploads/trucks/${fileName}`;
 
-  const buffer = Buffer.from(await file.arrayBuffer());
   await writeFile(filePath, buffer);
 
   try {
