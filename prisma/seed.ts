@@ -79,7 +79,7 @@ async function main() {
     { code: "logistics", displayName: "اللوجستيك" },
     { code: "scale_operator", displayName: "عامل القبان الخارجي" },
     { code: "internal_loader", displayName: "عامل التحميل الداخلي" },
-    { code: "manager", displayName: "صاحب المصنع (قراءة فقط)" },
+    { code: "manager", displayName: "صاحب المصنع" },
   ];
 
   for (const role of roles) {
@@ -361,7 +361,7 @@ async function main() {
     { username: "logistics", fullName: "موظف اللوجستيك (تجريبي)", roleCode: "logistics" },
     { username: "scale", fullName: "عامل القبان الخارجي (تجريبي)", roleCode: "scale_operator" },
     { username: "loader", fullName: "عامل التحميل الداخلي (تجريبي)", roleCode: "internal_loader" },
-    { username: "manager", fullName: "صاحب المصنع (قراءة فقط)", roleCode: "manager" },
+    { username: "manager", fullName: "صاحب المصنع", roleCode: "manager" },
   ];
   for (const u of demoUsers) {
     await prisma.user.upsert({
