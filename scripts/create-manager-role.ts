@@ -29,8 +29,8 @@ async function main() {
   try {
     await prisma.role.upsert({
       where: { code: "manager" },
-      update: { displayName: "صاحب المصنع (قراءة فقط)" },
-      create: { code: "manager", displayName: "صاحب المصنع (قراءة فقط)" },
+      update: { displayName: "صاحب المصنع" },
+      create: { code: "manager", displayName: "صاحب المصنع" },
     });
 
     for (const code of READ_ONLY_PERMISSIONS) {
