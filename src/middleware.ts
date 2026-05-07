@@ -125,6 +125,19 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|api/auth|api/health).*)",
+    // Exclude:
+    //   - Next.js asset paths
+    //   - favicon
+    //   - /api/auth/*       — NextAuth handles its own session flows
+    //   - /api/health       — public liveness probe (PM2 + monitoring)
+    //   - /api/maintenance/cleanup-idempotency
+    //       This endpoint is invoked by an unauthenticated cron job that
+    //       presents `Authorization: Bearer <CLEANUP_SECRET>`. The route
+    //       handler itself enforces (a) a constant-time bearer match against
+    //       CLEANUP_SECRET, OR (b) an admin session with `user.manage`. So
+    //       the endpoint remains protected even though middleware is skipped.
+    //       Without this exemption, the bearer-only cron path is rejected
+    //       at Layer 1 with 401 before the handler ever runs.
+    "/((?!_next/static|_next/image|favicon.ico|api/auth|api/health|api/maintenance/cleanup-idempotency).*)",
   ],
 };

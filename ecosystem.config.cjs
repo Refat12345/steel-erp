@@ -10,6 +10,9 @@ module.exports = {
       autorestart: true,
       watch: false,
       max_memory_restart: "512M",
+      // Env file values (DATABASE_URL, NEXTAUTH_SECRET, CLEANUP_SECRET, …)
+      // are loaded by Next.js itself via @next/env at `next start`. We only
+      // pin the always-true production knobs here.
       env: {
         NODE_ENV: "production",
         PORT: 3000,
