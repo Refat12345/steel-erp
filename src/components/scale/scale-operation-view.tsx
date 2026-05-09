@@ -48,6 +48,8 @@ import {
 import Link from "next/link";
 import { buildFileViewUrl } from "@/lib/uploaded-file-url";
 import { aggregateWeighSessionsBySize } from "@/lib/weigh-session-aggregate";
+import { getDisplayGradeLabel } from "@/lib/truck-grade";
+import type { SalesOrderGrade } from "@prisma/client";
 import { compressImage } from "@/lib/compress-image";
 import {
   durationBetween,
@@ -109,10 +111,11 @@ interface TruckDetail {
   sessions: WeighSessionItem[];
   photos: TruckPhoto[];
   requestItems: TruckRequestItemData[];
+  operationalGrade: SalesOrderGrade | null;
   salesOrder: {
     orderNumber: string;
     kind: string;
-    grade: string | null;
+    grade: SalesOrderGrade | null;
     totalQtyTons: string;
     contract: { customer: { id: number; fullName: string; code: string } };
   } | null;
@@ -305,6 +308,9 @@ export function ScaleOperationView({ truckId }: { truckId: number }) {
               : "—"
           }
         />
+        {getDisplayGradeLabel(truck) && (
+          <InfoCard label="النخب" value={getDisplayGradeLabel(truck)!} />
+        )}
         <InfoCard
           label="وزن الفارغ"
           value={tare != null ? `${tare.toLocaleString("ar-SY")} كغ` : "—"}

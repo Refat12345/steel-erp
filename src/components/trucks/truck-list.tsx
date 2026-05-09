@@ -33,12 +33,15 @@ import {
 } from "lucide-react";
 import { RegisterTruckDialog } from "./register-truck-dialog";
 import { durationBetween, formatDurationCompact } from "@/lib/format-duration";
+import { getDisplayGradeLabel } from "@/lib/truck-grade";
+import type { SalesOrderGrade } from "@prisma/client";
 
 interface TruckListItem {
   id: number;
   plateNumber: string;
   driverName: string;
   status: string;
+  operationalGrade: SalesOrderGrade | null;
   tareWeightKg: string | null;
   grossWeightKg: string | null;
   tareTime: string | null;
@@ -145,7 +148,7 @@ export function TruckList() {
 
       {/* Table */}
       <div className="rounded-lg border overflow-x-auto">
-        <Table className="min-w-[740px]">
+        <Table className="min-w-[820px]">
           <TableHeader>
             <TableRow>
               <TableHead className="w-[60px]">#</TableHead>
@@ -153,6 +156,7 @@ export function TruckList() {
               <TableHead>رقم اللوحة</TableHead>
               <TableHead>السائق</TableHead>
               <TableHead>الحالة</TableHead>
+              <TableHead>النخب</TableHead>
               <TableHead>الفارغ (كغ)</TableHead>
               <TableHead>المحمّل (كغ)</TableHead>
               <TableHead>الوزنات</TableHead>
@@ -165,7 +169,7 @@ export function TruckList() {
             {loading
               ? Array.from({ length: 5 }).map((_, i) => (
                   <TableRow key={i}>
-                    {Array.from({ length: 11 }).map((_, j) => (
+                    {Array.from({ length: 12 }).map((_, j) => (
                       <TableCell key={j}>
                         <Skeleton className="h-4 w-full" />
                       </TableCell>
@@ -174,7 +178,7 @@ export function TruckList() {
                 ))
               : data.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
                       لا توجد عمليات
                     </TableCell>
                   </TableRow>
@@ -209,6 +213,9 @@ export function TruckList() {
                         <TableCell>{truck.driverName}</TableCell>
                         <TableCell>
                           <Badge variant={st.variant}>{st.label}</Badge>
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {getDisplayGradeLabel(truck) ?? "—"}
                         </TableCell>
                         <TableCell className="font-mono text-sm">
                           {truck.tareWeightKg

@@ -3,7 +3,7 @@ import { logAudit } from "./audit.service";
 import { ServiceError } from "./errors";
 import { withRetry } from "./tx-retry";
 import { logger } from "@/lib/logger";
-import { Prisma, type TruckStatus } from "@prisma/client";
+import { Prisma, type TruckStatus, type SalesOrderGrade } from "@prisma/client";
 import type { PaginationParams, PaginatedResult } from "@/lib/api-utils";
 import Decimal from "decimal.js";
 import {
@@ -50,6 +50,7 @@ export interface RegisterTruckInput {
   salesOrderNumber?: string | null;
   notes?: string | null;
   requestItems?: RequestItemInput[];
+  operationalGrade?: SalesOrderGrade | null;
 }
 
 export async function registerTruck(data: RegisterTruckInput, userId: number) {
@@ -140,6 +141,7 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
               driverName: data.driverName.trim(),
               salesOrderNumber: data.salesOrderNumber || null,
               notes: data.notes?.trim() || null,
+              operationalGrade: data.operationalGrade ?? null,
               status: "Queued",
               createdById: userId,
             },
@@ -170,6 +172,7 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
                 plateNumber: created.plateNumber,
                 driverName: created.driverName,
                 salesOrderNumber: created.salesOrderNumber,
+                operationalGrade: created.operationalGrade ?? null,
                 requestItems: data.requestItems ?? null,
               },
             } as Prisma.InputJsonValue,
