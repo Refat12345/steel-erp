@@ -26,6 +26,7 @@ export const truckRegisterSchema = z.object({
   salesOrderNumber: z.string().max(20).optional().or(z.literal("")),
   notes: z.string().max(2000).optional().or(z.literal("")),
   requestItems: z.array(requestItemSchema).optional(),
+  operationalGrade: z.enum(["FIRST", "SECOND"]).optional().nullable(),
 });
 
 // Hard rails on weights come from `weight-bounds.ts` so validator, service,

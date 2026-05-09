@@ -7,6 +7,8 @@ import { Printer, ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { aggregateWeighSessionsBySize } from "@/lib/weigh-session-aggregate";
 import { durationBetween, formatDuration } from "@/lib/format-duration";
+import { getDisplayGradeLabel } from "@/lib/truck-grade";
+import type { SalesOrderGrade } from "@prisma/client";
 
 interface WeighSessionItem {
   id: number;
@@ -41,10 +43,11 @@ interface TruckDetail {
   closer: { fullName: string } | null;
   sessions: WeighSessionItem[];
   requestItems: TruckRequestItemPrint[];
+  operationalGrade: SalesOrderGrade | null;
   salesOrder: {
     orderNumber: string;
     kind: string;
-    grade: string | null;
+    grade: SalesOrderGrade | null;
     contract: { customer: { fullName: string; code: string } };
   } | null;
 }
@@ -219,6 +222,12 @@ export function ScaleCardPrint({
                 <td className="py-1">{truck.salesOrder.orderNumber}</td>
                 <td className="font-bold py-1 pe-4">العميل:</td>
                 <td className="py-1">{truck.salesOrder.contract.customer.fullName}</td>
+              </tr>
+            )}
+            {getDisplayGradeLabel(truck) && (
+              <tr>
+                <td className="font-bold py-1 pe-4">النخب:</td>
+                <td className="py-1" colSpan={3}>{getDisplayGradeLabel(truck)}</td>
               </tr>
             )}
           </tbody>

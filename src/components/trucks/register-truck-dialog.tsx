@@ -22,6 +22,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Trash2, Plus } from "lucide-react";
 import { createClientIdempotencyKey } from "@/lib/browser-idempotency-key";
+import { GRADE_LABELS } from "@/lib/truck-grade";
+import type { SalesOrderGrade } from "@prisma/client";
 import { DestinationSelect } from "@/components/destinations/destination-select";
 
 interface Customer {
@@ -60,6 +62,9 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
   const [notes, setNotes] = useState("");
   const [requestItems, setRequestItems] = useState<RequestItemRow[]>([]);
   const [saving, setSaving] = useState(false);
+  // UI-only: controls grade field visibility. Not persisted to DB.
+  const [isRebarLoad, setIsRebarLoad] = useState(false);
+  const [operationalGrade, setOperationalGrade] = useState<SalesOrderGrade | "">("");
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [sizes, setSizes] = useState<SizeOption[]>([]);
@@ -94,6 +99,8 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
     setDriverName("");
     setNotes("");
     setRequestItems([]);
+    setIsRebarLoad(false);
+    setOperationalGrade("");
   };
 
   const addRequestItem = () => {
@@ -178,6 +185,9 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
           driverName: driverName.trim(),
           notes: notes.trim() || undefined,
           requestItems: items.length > 0 ? items : undefined,
+          // Only send grade when load type is explicitly REBAR and a grade is chosen.
+          // Clears automatically when isRebarLoad is false (no stale value sent).
+          operationalGrade: isRebarLoad && operationalGrade ? operationalGrade : undefined,
         }),
       });
       const json = await res.json();
@@ -234,6 +244,56 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
               disabled={saving}
             />
           </div>
+
+          {/* Load type — UI-only toggle to show/hide grade */}
+          <div className="space-y-2">
+            <Label>نوع الحمل (اختياري)</Label>
+            <Select
+              value={isRebarLoad ? "REBAR" : "OTHER"}
+              onValueChange={(v) => {
+                const rebar = v === "REBAR";
+                setIsRebarLoad(rebar);
+                // Clear grade immediately when kind changes away from REBAR
+                // so no stale value survives in the payload.
+                if (!rebar) setOperationalGrade("");
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="اختر نوع الحمل" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="OTHER">غير مبروم</SelectItem>
+                <SelectItem value="REBAR">مبروم</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Grade — visible only when load type is REBAR */}
+          {isRebarLoad && (
+            <div className="space-y-2">
+              <Label>النخب (اختياري)</Label>
+              <Select
+                value={operationalGrade}
+                onValueChange={(v) =>
+                  setOperationalGrade((v as SalesOrderGrade | "") ?? "")
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="اختر النخب" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">لا يوجد</SelectItem>
+                  {(Object.entries(GRADE_LABELS) as [SalesOrderGrade, string][]).map(
+                    ([key, label]) => (
+                      <SelectItem key={key} value={key}>
+                        {label}
+                      </SelectItem>
+                    ),
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {/* Plate + Driver */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

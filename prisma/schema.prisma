@@ -425,6 +425,12 @@ model TruckOperation {
   /// with `loadingConfirmedAt` inside `confirmLoadingComplete`. Required for
   /// audit / dispute traceability.
   loaderId         Int?         @map("loader_id")
+  /// Operational grade declared by logistics at registration time.
+  /// Used as a temporary display source until a SalesOrder is linked.
+  /// Priority rule: salesOrder.grade takes precedence when present.
+  /// This field is intentionally named to distinguish it from the
+  /// contract-authoritative grade on SalesOrder.
+  operationalGrade SalesOrderGrade? @map("operational_grade")
   /// Optimistic-lock counter. Incremented on every correction of tare/gross
   /// so two operators editing the same record simultaneously are detected
   /// instead of silently overwriting each other.
