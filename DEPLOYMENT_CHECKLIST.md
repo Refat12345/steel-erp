@@ -3,6 +3,8 @@
 Operational checklist for a **single-instance production deployment** of the Truck & Scale module and the surrounding app.
 
 > For the full VPS + Nginx + PostgreSQL setup (Arabic walkthrough), see [`DEPLOYMENT.md`](./DEPLOYMENT.md). This file focuses on the artefacts introduced by the concurrency / idempotency hardening work and lists exactly what must be true before flipping the production switch.
+>
+> Once the server is live, day-to-day deploys, logs, and ops live in [`RUNBOOK.md`](./RUNBOOK.md). Rollback and disaster recovery procedures live in [`docs/DISASTER-RECOVERY.md`](./docs/DISASTER-RECOVERY.md).
 
 ---
 

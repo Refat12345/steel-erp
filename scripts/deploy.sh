@@ -24,10 +24,15 @@ set -euo pipefail
 
 APP_DIR="/opt/steel-erp/app"
 STATE_DIR="/opt/steel-erp/state"
-BACKUP_SCRIPT="/opt/steel-erp/scripts/backup.sh"
-LOCAL_BACKUP_DIR="/tmp/steel-erp-backups"
+# Single source of truth: scripts/backup-db.sh in this repo. It produces both
+# the DB dump and the uploads tarball, and pushes both off-site to B2.
+# We invoke it via `sudo -n` because backup-db.sh internally uses
+# `sudo -u postgres pg_dump`. See DEPLOYMENT.md for the sudoers.d entry.
+BACKUP_SCRIPT="${APP_DIR}/scripts/backup-db.sh"
+LOCAL_BACKUP_DIR="/opt/steel-erp/backups/daily"
 B2_REMOTE="b2:steel-erp-backups"
-LOCK_FILE="/tmp/steel-erp-deploy.lock"
+B2_DAILY_PREFIX="daily"
+LOCK_FILE="/var/lock/steel-erp-deploy.lock"
 LOG_FILE="/var/log/steel-erp-deploy.log"
 CHANGES_FILE="/opt/steel-erp/CHANGES.md"
 PM2_APP_NAME="steel-erp"
@@ -89,6 +94,12 @@ check_preflight() {
   require_cmd curl
   require_cmd rclone
   require_cmd flock
+  require_cmd sudo
+
+  # We need passwordless sudo for backup-db.sh specifically. Verify up front
+  # so we fail in pre-flight rather than in the middle of run_backup_and_verify.
+  sudo -n -l "$BACKUP_SCRIPT" >/dev/null 2>&1 \
+    || die "Missing sudoers entry for $(whoami) to run $BACKUP_SCRIPT (see DEPLOYMENT.md)"
 
   cd "$APP_DIR"
 
@@ -126,30 +137,60 @@ check_preflight() {
 }
 
 run_backup_and_verify() {
-  log "Running backup before deploy"
-  "$BACKUP_SCRIPT" >> "$LOG_FILE" 2>&1 \
+  log "Running backup before deploy ($BACKUP_SCRIPT via sudo)"
+  sudo -n "$BACKUP_SCRIPT" >> "$LOG_FILE" 2>&1 \
     || die "Backup script failed — see $LOG_FILE"
 
-  # Pick the most recently created backup file.
-  BACKUP_FILE=$(ls -1t "$LOCAL_BACKUP_DIR"/db_*.dump.gz 2>/dev/null | head -1 || true)
-  [ -n "$BACKUP_FILE" ] || die "No backup file found in $LOCAL_BACKUP_DIR"
-  [ -s "$BACKUP_FILE" ] || die "Backup file is empty: $BACKUP_FILE"
+  # Locate the most recent DB dump produced by this run.
+  BACKUP_FILE_DB=$(ls -1t "$LOCAL_BACKUP_DIR"/db_*.dump.gz 2>/dev/null | head -1 || true)
+  [ -n "$BACKUP_FILE_DB" ] || die "No DB dump found in $LOCAL_BACKUP_DIR"
+  [ -s "$BACKUP_FILE_DB" ] || die "DB dump is empty: $BACKUP_FILE_DB"
 
-  local size
-  size=$(stat -c '%s' "$BACKUP_FILE")
-  [ "$size" -ge "$MIN_BACKUP_BYTES" ] \
-    || die "Backup unrealistically small: ${size} bytes (floor: ${MIN_BACKUP_BYTES})"
+  local db_size
+  db_size=$(stat -c '%s' "$BACKUP_FILE_DB")
+  [ "$db_size" -ge "$MIN_BACKUP_BYTES" ] \
+    || die "DB dump unrealistically small: ${db_size} bytes (floor: ${MIN_BACKUP_BYTES})"
 
-  gunzip -t "$BACKUP_FILE" \
-    || die "Backup gzip integrity check failed: $BACKUP_FILE"
+  gunzip -t "$BACKUP_FILE_DB" \
+    || die "DB dump gzip integrity check failed: $BACKUP_FILE_DB"
 
-  local b2_key
-  b2_key=$(basename "$BACKUP_FILE")
-  rclone lsf "${B2_REMOTE}/daily/" 2>/dev/null | grep -Fxq "$b2_key" \
-    || die "Backup not found off-site at ${B2_REMOTE}/daily/${b2_key}"
+  B2_KEY_DB=$(basename "$BACKUP_FILE_DB")
+  rclone lsf "${B2_REMOTE}/${B2_DAILY_PREFIX}/" 2>/dev/null | grep -Fxq "$B2_KEY_DB" \
+    || die "DB dump not found off-site at ${B2_REMOTE}/${B2_DAILY_PREFIX}/${B2_KEY_DB}"
 
-  B2_KEY="$b2_key"
-  log "Backup verified: $BACKUP_FILE (${size} bytes, off-site OK)"
+  log "DB dump verified: $BACKUP_FILE_DB (${db_size} bytes, off-site OK)"
+
+  # Locate the matching uploads tarball. backup-db.sh produces it with the
+  # SAME timestamp as the DB dump, so we extract that timestamp and look
+  # for the exact pair instead of just "the newest" (which could mismatch
+  # if anything wrote to the dir concurrently).
+  local ts
+  ts=$(basename "$BACKUP_FILE_DB" | sed -nE 's/^db_[A-Za-z0-9_]+_([0-9]{8}-[0-9]{6})\.dump\.gz$/\1/p')
+  [ -n "$ts" ] || die "Could not parse timestamp from $BACKUP_FILE_DB"
+
+  BACKUP_FILE_UPLOADS="${LOCAL_BACKUP_DIR}/uploads_${ts}.tar.gz"
+  if [ -s "$BACKUP_FILE_UPLOADS" ]; then
+    local upl_size
+    upl_size=$(stat -c '%s' "$BACKUP_FILE_UPLOADS")
+    gunzip -t "$BACKUP_FILE_UPLOADS" \
+      || die "Uploads tarball gzip integrity check failed: $BACKUP_FILE_UPLOADS"
+
+    B2_KEY_UPLOADS=$(basename "$BACKUP_FILE_UPLOADS")
+    rclone lsf "${B2_REMOTE}/${B2_DAILY_PREFIX}/" 2>/dev/null | grep -Fxq "$B2_KEY_UPLOADS" \
+      || die "Uploads tarball not found off-site at ${B2_REMOTE}/${B2_DAILY_PREFIX}/${B2_KEY_UPLOADS}"
+
+    log "Uploads archive verified: $BACKUP_FILE_UPLOADS (${upl_size} bytes, off-site OK)"
+  else
+    # backup-db.sh logs a WARNING when uploads dir doesn't exist; mirror it
+    # here so the deploy log itself records the absence (no silent gap).
+    log "WARNING: uploads tarball uploads_${ts}.tar.gz not present — backup-db.sh skipped uploads (uploads dir missing?)"
+    BACKUP_FILE_UPLOADS=""
+    B2_KEY_UPLOADS=""
+  fi
+
+  # Backwards-compat aliases for any consumer still reading the old names.
+  BACKUP_FILE="$BACKUP_FILE_DB"
+  B2_KEY="$B2_KEY_DB"
 }
 
 snapshot_pre_state() {
@@ -160,10 +201,18 @@ snapshot_pre_state() {
 
   # Shell-sourceable state file. Keep it flat and key=value for portability
   # (no jq dependency). Do NOT put secrets here.
+  # BACKUP_FILE / B2_KEY remain as aliases of the DB pair for any older tooling
+  # that reads them; new tooling should prefer the *_DB / *_UPLOADS keys.
   cat > "$STATE_DIR/last-pre-deploy.env" <<EOF
 PREV_SHA="$PREV_SHA"
-BACKUP_FILE="$BACKUP_FILE"
-B2_KEY="$B2_KEY"
+BACKUP_FILE_DB="$BACKUP_FILE_DB"
+BACKUP_FILE_UPLOADS="${BACKUP_FILE_UPLOADS:-}"
+B2_KEY_DB="$B2_KEY_DB"
+B2_KEY_UPLOADS="${B2_KEY_UPLOADS:-}"
+B2_REMOTE="$B2_REMOTE"
+B2_DAILY_PREFIX="$B2_DAILY_PREFIX"
+BACKUP_FILE="$BACKUP_FILE_DB"
+B2_KEY="$B2_KEY_DB"
 PM2_PRE_STATE="$STATE_DIR/pm2-pre-${PREV_SHA}.json"
 DEPLOY_USER="$(whoami)"
 DEPLOY_START="$(date -Iseconds)"
@@ -236,11 +285,17 @@ on_error() {
       log "Code has been reverted but the DB schema is on the new version."
       log "If the new code expected the new schema and you need to roll back the DB:"
       log "  1. pm2 stop $PM2_APP_NAME"
-      log "  2. pg_restore -U steel_erp -d steel_erp_prod -h localhost --clean --no-owner --no-acl <(gunzip -c $BACKUP_FILE)"
-      log "  3. pm2 start $PM2_APP_NAME"
+      log "  2. pg_restore -U steel_erp -d steel_erp_prod -h localhost --clean --no-owner --no-acl <(gunzip -c ${BACKUP_FILE_DB:-<MISSING>})"
+      if [ -n "${BACKUP_FILE_UPLOADS:-}" ]; then
+        log "  3. (uploads) sudo tar -xzf ${BACKUP_FILE_UPLOADS} -C ${APP_DIR}"
+        log "  4. pm2 start $PM2_APP_NAME"
+      else
+        log "  3. pm2 start $PM2_APP_NAME"
+      fi
+      log "See docs/DISASTER-RECOVERY.md §4 for the full procedure."
     fi
 
-    append_changes "Deploy attempt $PREV_SHA → $NEW_SHA" "FAILED at line $line — auto-reverted code" "Already reverted to $PREV_SHA. DB rollback may still be needed if MIGRATIONS_APPLIED=1."
+    append_changes "Deploy attempt $PREV_SHA → $NEW_SHA" "FAILED at line $line — auto-reverted code" "Already reverted to $PREV_SHA. DB+uploads rollback may still be needed if MIGRATIONS_APPLIED=1 (see DISASTER-RECOVERY.md §4)."
   fi
 
   exit "$exit_code"
@@ -337,8 +392,13 @@ cmd_rollback() {
   if [ -n "$migs" ]; then
     log "WARNING: Migrations exist between $PREV_SHA and $current_sha:"
     echo "$migs" | tee -a "$LOG_FILE"
-    log "This rollback reverts CODE only. The DB will remain on the newer schema."
-    log "If the old code is incompatible, restore the DB manually from $BACKUP_FILE."
+    log "This rollback reverts CODE only. The DB and uploads remain on the newer state."
+    log "If the old code is incompatible, restore manually from:"
+    log "  DB:      ${BACKUP_FILE_DB:-${BACKUP_FILE:-<MISSING>}}"
+    if [ -n "${BACKUP_FILE_UPLOADS:-}" ]; then
+      log "  Uploads: ${BACKUP_FILE_UPLOADS}"
+    fi
+    log "See docs/DISASTER-RECOVERY.md §4 for the full procedure."
   fi
 
   git reset --hard "$PREV_SHA"
