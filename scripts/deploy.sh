@@ -95,6 +95,7 @@ check_preflight() {
   require_cmd rclone
   require_cmd flock
   require_cmd sudo
+  require_cmd jq
 
   # We need passwordless sudo for backup-db.sh specifically. Verify up front
   # so we fail in pre-flight rather than in the middle of run_backup_and_verify.
@@ -126,12 +127,20 @@ check_preflight() {
     || die "Available RAM too low: ${ram_free_mb}M (need ≥ ${MIN_RAM_FREE_MB}M)"
 
   # PM2 must currently report the app as online so we have a known baseline.
-  if ! pm2 jlist | grep -q "\"name\":\"${PM2_APP_NAME}\""; then
+  # Status lives at .pm2_env.status in `pm2 jlist`, not at the top level —
+  # parse the JSON properly via jq instead of fragile sed.
+  local pm2_jlist pm2_status
+  pm2_jlist=$(pm2 jlist 2>/dev/null) || die "pm2 jlist failed"
+
+  if ! printf '%s' "$pm2_jlist" | jq -e --arg n "$PM2_APP_NAME" \
+        'any(.[]; .name == $n)' >/dev/null; then
     die "PM2 has no app named '$PM2_APP_NAME' — start it manually first"
   fi
-  local pm2_status
-  pm2_status=$(pm2 jlist | sed -n "s/.*\"name\":\"${PM2_APP_NAME}\"[^}]*\"status\":\"\([^\"]*\)\".*/\1/p" | head -1)
-  [ "$pm2_status" = "online" ] || die "PM2 reports '$PM2_APP_NAME' as '$pm2_status' (expected 'online'). Investigate before deploying."
+
+  pm2_status=$(printf '%s' "$pm2_jlist" | jq -r --arg n "$PM2_APP_NAME" \
+                 '[.[] | select(.name == $n)] | first | .pm2_env.status // empty')
+  [ "$pm2_status" = "online" ] \
+    || die "PM2 reports '$PM2_APP_NAME' as '${pm2_status:-<unknown>}' (expected 'online'). Investigate before deploying."
 
   log "Pre-flight OK (disk=${disk_free_mb}M, ram=${ram_free_mb}M, branch=$current_branch)"
 }
