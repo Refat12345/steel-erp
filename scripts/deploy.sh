@@ -40,7 +40,12 @@ HEALTH_URL="http://localhost:3000/api/health"
 
 MIN_DISK_FREE_MB=2048           # require ≥ 2 GB free on /
 MIN_RAM_FREE_MB=300             # require ≥ 300 MB available RAM
-MIN_BACKUP_BYTES=$((1024 * 1024)) # 1 MB sanity floor for the backup file
+# Sanity floor for the DB dump: catches an obviously-broken pg_dump (zero
+# bytes, header-only, etc.) without rejecting a legitimately small early-
+# launch DB. backup-db.sh has its own 1 KB floor, so this is the second
+# layer. Override with MIN_BACKUP_BYTES=… for environments that should
+# enforce a stricter minimum (e.g. mature production with known-large data).
+MIN_BACKUP_BYTES="${MIN_BACKUP_BYTES:-$((10 * 1024))}"
 HEALTH_RETRIES=2
 HEALTH_RETRY_SLEEP=30
 NODE_BUILD_HEAP_MB=1024         # cap `next build` heap to fit KVM 2

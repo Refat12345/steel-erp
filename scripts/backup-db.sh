@@ -42,6 +42,22 @@ if [ -r /opt/steel-erp/scripts/.backup-env ]; then
 fi
 
 # ─── Configuration ────────────────────────────────────────────────────────────
+# Resolve which DB to back up (priority order):
+#   1. BACKUP_DB_NAME env (explicit override — wins over everything)
+#   2. DATABASE_URL in /opt/steel-erp/app/.env.production (auto-detect, so the
+#      backup ALWAYS matches the DB the app actually talks to — this is what
+#      caught us when DATABASE_URL was pointed at steel_erp_uat by mistake but
+#      backup was still dumping steel_erp_prod)
+#   3. Hard-coded fallback "steel_erp_prod"
+APP_ENV_FILE="${BACKUP_APP_ENV_FILE:-/opt/steel-erp/app/.env.production}"
+if [ -z "${BACKUP_DB_NAME:-}" ] && [ -r "${APP_ENV_FILE}" ]; then
+  # Pull the DB name out of DATABASE_URL without echoing the full URL (no
+  # secrets in logs). Strip surrounding quotes if any.
+  BACKUP_DB_NAME=$(grep -E '^DATABASE_URL=' "${APP_ENV_FILE}" \
+                   | head -1 \
+                   | sed -E 's/^[^=]+=//; s/^"//; s/"$//' \
+                   | grep -oE 'steel_erp_[a-z_]+' || true)
+fi
 DB_NAME="${BACKUP_DB_NAME:-steel_erp_prod}"
 DB_USER_PEER="${BACKUP_DB_USER:-postgres}"
 UPLOADS_DIR="${BACKUP_UPLOADS_DIR:-/opt/steel-erp/app/uploads}"
