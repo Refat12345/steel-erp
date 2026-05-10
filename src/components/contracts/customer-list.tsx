@@ -113,14 +113,20 @@ export function CustomerList() {
         <Table className="min-w-[640px]">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-24">الرمز</TableHead>
-              <TableHead>الاسم</TableHead>
-              <TableHead>اسم الأب</TableHead>
-              <TableHead>الرقم الوطني</TableHead>
-              <TableHead>الهاتف</TableHead>
-              <TableHead className="w-20">العقود</TableHead>
-              <TableHead className="w-20">الحالة</TableHead>
-              {canEditCustomer && <TableHead className="w-16" />}
+              <TableHead className="w-24 text-start">الرمز</TableHead>
+              <TableHead className="text-start">الاسم</TableHead>
+              <TableHead className="text-start">اسم الأب</TableHead>
+              <TableHead dir="ltr" className="w-[10.5rem] max-w-[10.5rem] text-start">
+                الرقم الوطني
+              </TableHead>
+              <TableHead dir="ltr" className="w-36 max-w-36 text-start">
+                الهاتف
+              </TableHead>
+              <TableHead className="w-20 text-center">العقود</TableHead>
+              <TableHead className="min-w-[5rem] text-center">الحالة</TableHead>
+              {canEditCustomer && (
+                <TableHead className="w-16 text-center" aria-label="تعديل" />
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -153,23 +159,26 @@ export function CustomerList() {
             ) : (
               customers.map((c) => (
                 <TableRow key={c.id}>
-                  <TableCell className="font-mono text-xs">{c.code}</TableCell>
-                  <TableCell className="font-medium">{c.fullName}</TableCell>
-                  <TableCell>{c.fatherName}</TableCell>
-                  <TableCell dir="ltr" className="text-left font-mono text-xs">
+                  <TableCell className="text-start font-mono text-xs">{c.code}</TableCell>
+                  <TableCell className="text-start font-medium">{c.fullName}</TableCell>
+                  <TableCell className="text-start">{c.fatherName}</TableCell>
+                  <TableCell
+                    dir="ltr"
+                    className="w-[10.5rem] max-w-[10.5rem] text-start font-mono text-xs tabular-nums break-all"
+                  >
                     {c.nationalId}
                   </TableCell>
-                  <TableCell dir="ltr" className="text-left text-xs">
+                  <TableCell dir="ltr" className="w-36 max-w-36 text-start text-xs tabular-nums">
                     {c.phonePrimary}
                   </TableCell>
                   <TableCell className="text-center">{c._count.contracts}</TableCell>
-                  <TableCell>
+                  <TableCell className="text-center">
                     <Badge variant={c.isActive ? "default" : "secondary"}>
                       {c.isActive ? "نشط" : "معطّل"}
                     </Badge>
                   </TableCell>
                   {canEditCustomer && (
-                    <TableCell>
+                    <TableCell className="text-center">
                       <Button
                         variant="ghost"
                         size="icon-sm"
