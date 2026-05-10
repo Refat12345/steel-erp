@@ -3,6 +3,8 @@
 دليل عربي كامل خطوة بخطوة لنشر نظام Steel ERP على VPS بيئة إنتاج حقيقية.
 مصمّم لمهندس برمجيات ما عنده خبرة سابقة بـ DevOps، ويمشي مع **اشتراك Hostinger VPS KVM 2** و**تهيئة السيرفر لحالك** (بدون شخص شبكات منفصل).
 
+> **بعد ما السيرفر بيشتغل:** للعمليات اليومية ودورة النشر استخدم [`RUNBOOK.md`](./RUNBOOK.md). للتعامل مع الفشل والـ rollback واستعادة قاعدة البيانات راجع [`docs/DISASTER-RECOVERY.md`](./docs/DISASTER-RECOVERY.md). هذا الملف يغطي **أول إعداد** للسيرفر فقط.
+
 ### الوضع الحالي للسيرفر (آخر حالة معروفة — سياق لـ Cursor والمتابعة)
 
 > **أمان:** لا تضع كلمة مرور قاعدة البيانات أو أسراراً في هذا الملف أو في Git؛ احفظها في `.env.production` على السيرفر فقط.
@@ -804,108 +806,107 @@ Quit: q
 rclone ls b2:steel-erp-backups   # لازم ما يعطي خطأ (فاضي طبيعي)
 ```
 
-#### 4. سكربت الـ backup
+#### 4. سكربت الـ backup الموحّد (`scripts/backup-db.sh`)
+
+السكربت الرسمي اللي بيعمل **كل شي** موجود مع الكود في الريبو على المسار:
+
+```
+/opt/steel-erp/app/scripts/backup-db.sh
+```
+
+شو يعمل بالضبط:
+
+1. `pg_dump --format=custom` → gzip → `/opt/steel-erp/backups/daily/db_<DB>_<TS>.dump.gz` ثم `gunzip -t` للتحقق.
+2. `tar -czf /opt/steel-erp/backups/daily/uploads_<TS>.tar.gz` لمجلد الرفع، ثم `gzip -t` و `tar -tzf`.
+3. **`rclone copy`** للملفين إلى `b2:steel-erp-backups/daily/` ثم **`rclone lsf` للتأكد** أن كل ملف ظهر فعلاً (هذه هي النقطة الرابعة من تحقق `production-safety.mdc` §7).
+4. أيام الأحد: نسخة موازية تحت `weekly/` محلياً وعلى B2.
+5. تنظيم الاحتفاظ محلياً + على B2 حسب `BACKUP_KEEP_DAYS` (افتراضي 7) و `BACKUP_KEEP_WEEKLY` (افتراضي 4 أسابيع).
+
+**ما تنشئ سكربت `backup.sh` يدوي.** هذا الملف الواحد كافٍ.
+
+#### 5. اعتمادات في `/opt/steel-erp/scripts/.backup-env` (اختياري لكن مُوصى به)
+
+السكربت يقرأ هذا الملف **إذا وُجد** قبل تطبيق المتغيرات الافتراضية، فلا أسرار في Git ولا تعديل للسكربت ذاته.
 
 ```bash
 sudo mkdir -p /opt/steel-erp/scripts
 sudo chown deploy:deploy /opt/steel-erp/scripts
-nano /opt/steel-erp/scripts/backup.sh
+sudoedit /opt/steel-erp/scripts/.backup-env
 ```
 
-المحتوى:
+محتوى نموذجي (عدّل حسب حاجتك):
 
 ```bash
-#!/bin/bash
-set -euo pipefail
+# Optional overrides (no secrets needed for pg_dump — uses peer auth as postgres)
+export BACKUP_DB_NAME="steel_erp_prod"
+export BACKUP_UPLOADS_DIR="/opt/steel-erp/app/uploads"
+export B2_REMOTE="b2:steel-erp-backups"
+export BACKUP_KEEP_DAYS=7
+export BACKUP_KEEP_WEEKLY=4
 
-# Config
-DB_NAME="steel_erp_prod"
-DB_USER="steel_erp"
-BACKUP_DIR="/tmp/steel-erp-backups"
-B2_REMOTE="b2:steel-erp-backups"
-RETENTION_DAYS=30
-LOG_FILE="/var/log/steel-erp-backup.log"
-
-# Setup
-mkdir -p "$BACKUP_DIR"
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="$BACKUP_DIR/db_${DATE}.dump.gz"
-
-log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
-}
-
-log "=== Backup started ==="
-
-# 1. Dump the database (compressed)
-log "Dumping database..."
-PGPASSWORD="$DB_PASSWORD" pg_dump -U "$DB_USER" -h localhost -Fc "$DB_NAME" | gzip > "$BACKUP_FILE"
-
-BACKUP_SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
-log "Backup created: $BACKUP_FILE ($BACKUP_SIZE)"
-
-# 2. Upload to Backblaze
-log "Uploading to Backblaze B2..."
-rclone copy "$BACKUP_FILE" "$B2_REMOTE/daily/" --log-file="$LOG_FILE" --log-level INFO
-
-# 3. Keep local copy for 3 days only
-log "Cleaning local backups older than 3 days..."
-find "$BACKUP_DIR" -name "db_*.dump.gz" -mtime +3 -delete
-
-# 4. Delete remote backups older than RETENTION_DAYS
-log "Cleaning remote backups older than $RETENTION_DAYS days..."
-rclone delete "$B2_REMOTE/daily/" --min-age "${RETENTION_DAYS}d" --log-file="$LOG_FILE"
-
-log "=== Backup completed successfully ==="
+# If rclone config sits at a non-default path, point to it:
+# export RCLONE_CONFIG="/root/.config/rclone/rclone.conf"
 ```
 
 ```bash
-sudo chmod +x /opt/steel-erp/scripts/backup.sh
+sudo chmod 600 /opt/steel-erp/scripts/.backup-env
+sudo chown root:root /opt/steel-erp/scripts/.backup-env
 sudo touch /var/log/steel-erp-backup.log
 sudo chown deploy:deploy /var/log/steel-erp-backup.log
 ```
 
-#### 5. حفظ password بأمان (مش بالسكربت)
+> **ملاحظة أمان:** `pg_dump` يستخدم **peer authentication** عبر `sudo -u postgres`، فلا تحتاج تخزين كلمة سر القاعدة في `.backup-env`. لو حاجتك مختلفة، استخدم `~/.pgpass` بصلاحيات 600 — ممنوع `PGPASSWORD` في ملفات env إنتاجية.
+
+#### 6. سماح للمستخدم `deploy` بتشغيل السكربت كـ root (sudoers)
+
+`backup-db.sh` يحتاج root (لأنه ينادي `sudo -u postgres pg_dump` وقد يكتب على `/var/log`). و`scripts/deploy.sh` يستدعيه عبر `sudo -n`. أضف ملفاً واحداً تحت `sudoers.d`:
 
 ```bash
-nano /opt/steel-erp/scripts/.backup-env
+sudo visudo -f /etc/sudoers.d/steel-erp-backup
 ```
 
-المحتوى:
+محتوى الملف بالضبط (سطر واحد):
+
 ```
-export DB_PASSWORD='YOUR_POSTGRES_PASSWORD'
+deploy ALL=(root) NOPASSWD: /opt/steel-erp/app/scripts/backup-db.sh
 ```
 
 ```bash
-chmod 600 /opt/steel-erp/scripts/.backup-env
+sudo chmod 440 /etc/sudoers.d/steel-erp-backup
+sudo visudo -c   # لازم: parsed OK
 ```
 
-عدّل السكربت ليستورد هالـ env:
+اختبار سريع (لازم يطبع المسار بدون كلمة سر):
 
 ```bash
-sed -i '2i source /opt/steel-erp/scripts/.backup-env' /opt/steel-erp/scripts/backup.sh
+sudo -n -l /opt/steel-erp/app/scripts/backup-db.sh
 ```
 
-#### 6. اختبار يدوي
+#### 7. اختبار يدوي
 
 ```bash
-/opt/steel-erp/scripts/backup.sh
-# تابع الناتج - لازم ينتهي بـ "Backup completed successfully"
+sudo /opt/steel-erp/app/scripts/backup-db.sh
+# لازم ينتهي بـ "=== Backup completed successfully ==="
+# ولازم يطبع "Off-site OK: b2:steel-erp-backups/daily/db_…dump.gz"
+# و"Off-site OK: b2:steel-erp-backups/daily/uploads_…tar.gz"
 
-# تحقق إنه وصل Backblaze
-rclone ls b2:steel-erp-backups/daily/
+ls -lh /opt/steel-erp/backups/daily/ | tail
+rclone lsf b2:steel-erp-backups/daily/ | tail
 ```
 
-#### 7. جدولة cron (يومياً الساعة 2:00 صباحاً)
+#### 8. جدولة cron (يومياً 02:00)
 
 ```bash
-crontab -e
+sudo tee /etc/cron.d/steel-erp-backup > /dev/null <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MAILTO=""
+0 2 * * * root /opt/steel-erp/app/scripts/backup-db.sh >> /var/log/steel-erp-backup.log 2>&1
+EOF
+sudo chmod 644 /etc/cron.d/steel-erp-backup
 ```
 
-أضف سطر:
-```cron
-0 2 * * * /opt/steel-erp/scripts/backup.sh >> /var/log/steel-erp-backup.log 2>&1
-```
+> **في حالة UAT/dev بدون B2:** صدّر `SKIP_B2=1` (مرة واحدة في `.backup-env` أو على سطر الـ cron). **ممنوع** على إنتاج — ينسف ضمانة "verified backup" المفروضة في `production-safety.mdc` §7.
 
 ### اختبار الاستعادة (restore) - لا تتخطّى هاي الخطوة
 
@@ -989,66 +990,28 @@ tail -100 /var/log/steel-erp-backup.log   # آخر backups نجحت
 
 ## 11. المرحلة 7: سكربت الـ Deployment للتحديثات
 
-### للبداية (بسيط ومضمون)
+### السكربت الرسمي (الوحيد المسموح للإنتاج)
+
+السكربت الكامل موجود في الريبو: **[`scripts/deploy.sh`](scripts/deploy.sh)**. لا تنشئ نسخة "بسيطة" يدوية — السكربت في الريبو هو الذي:
+
+- يأخذ قفل `flock` لمنع التداخل.
+- يفرض نافذة الصيانة 07:00–18:00 Asia/Damascus (`FORCE=1` للطوارئ فقط).
+- ينفّذ pre-flight (شجرة git نظيفة، فرع `main`، قرص ≥ 2 GB، RAM ≥ 300 MB، PM2 online، وجود sudoers).
+- يستدعي **`backup-db.sh` عبر `sudo -n`** ويتحقق من الملفين (DB + uploads) محلياً وعلى B2.
+- يحفظ snapshot الحالة في `/opt/steel-erp/state/last-pre-deploy.env` مع `PREV_SHA` و`BACKUP_FILE_DB` و`B2_KEY_DB` و`BACKUP_FILE_UPLOADS` و`B2_KEY_UPLOADS`.
+- يعمل `git pull --ff-only`، Prisma migrations (إن وُجدت)، build، `pm2 reload`، ثم health check على `/api/health`.
+- عند الفشل: يعمل `git reset --hard PREV_SHA` تلقائياً ويذكر الأمر اليدوي لاستعادة DB + uploads.
+- يكتب سطراً في `CHANGES.md` على نجاح أو فشل.
+
+### إعداد الـ symlink الخارجي (مرة واحدة)
+
+`deploy.sh` عند rollback يعمل `git reset --hard` على شجرة الكود — لازم يكون السكربت **خارج** الشجرة حتى ما يختفي وسط التراجع:
 
 ```bash
-nano /opt/steel-erp/scripts/deploy.sh
-```
-
-```bash
-#!/bin/bash
-set -euo pipefail
-
-APP_DIR="/opt/steel-erp/app"
-LOG_FILE="/var/log/steel-erp-deploy.log"
-
-log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
-}
-
-log "=== Deploy started ==="
-
-cd "$APP_DIR"
-
-# 1. Backup قبل أي تغيير
-log "Running backup before deploy..."
-/opt/steel-erp/scripts/backup.sh
-
-# 2. Pull latest code
-log "Pulling latest code..."
-git fetch origin
-git checkout main
-git pull origin main
-
-# 3. Install dependencies
-log "Installing dependencies..."
-npm ci
-
-# 4. Run migrations
-log "Running Prisma migrations..."
-npx prisma generate
-npx prisma migrate deploy
-
-# 5. Build
-log "Building..."
-npm run build
-
-# 6. Restart (zero-downtime مع PM2)
-log "Restarting app..."
-pm2 reload steel-erp
-
-# 7. Health check
-sleep 5
-if curl -sf http://localhost:3000 > /dev/null; then
-  log "=== Deploy successful ==="
-else
-  log "!!! Deploy FAILED - app is not responding !!!"
-  exit 1
-fi
-```
-
-```bash
-chmod +x /opt/steel-erp/scripts/deploy.sh
+sudo mkdir -p /opt/steel-erp/scripts
+sudo chown deploy:deploy /opt/steel-erp/scripts
+sudo ln -sf /opt/steel-erp/app/scripts/deploy.sh /opt/steel-erp/scripts/deploy.sh
+sudo chmod +x /opt/steel-erp/app/scripts/deploy.sh
 sudo touch /var/log/steel-erp-deploy.log
 sudo chown deploy:deploy /var/log/steel-erp-deploy.log
 ```
@@ -1057,12 +1020,14 @@ sudo chown deploy:deploy /var/log/steel-erp-deploy.log
 
 ```bash
 ssh deploy@erp.company.com
-/opt/steel-erp/scripts/deploy.sh
+/opt/steel-erp/scripts/deploy.sh deploy     # نشر عادي
+/opt/steel-erp/scripts/deploy.sh rollback   # تراجع للكود السابق المحفوظ في state
+FORCE=1 /opt/steel-erp/scripts/deploy.sh deploy   # طوارئ خارج النافذة (لازم تسجيل في CHANGES.md)
 ```
 
 ### (متقدم، لاحقاً) GitHub Actions
 
-لما تستقر، ممكن تعمل auto-deploy عند push على main. بس للبداية خلي الـ deployment يدوي حتى تتحكم بالوقت اللي بيصير فيه.
+ممنوع auto-deploy على push (انظر `production-safety.mdc` §10). أي workflow مستقبلي لازم يكون `workflow_dispatch` يدوي مع نفس قفل/نافذة `deploy.sh`.
 
 ---
 
