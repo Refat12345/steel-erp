@@ -40,6 +40,7 @@ export function NewContractForm() {
   const { data: session, status: sessionStatus } = useSession();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const customerComboRef = useRef<HTMLDivElement>(null);
 
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [customerSearch, setCustomerSearch] = useState("");
@@ -82,6 +83,21 @@ export function NewContractForm() {
     }, 200);
     return () => clearTimeout(timer);
   }, [customerSearch]);
+
+  useEffect(() => {
+    if (!showCustomerDropdown) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      const root = customerComboRef.current;
+      const target = event.target as Node | null;
+      if (root && target && !root.contains(target)) {
+        setShowCustomerDropdown(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [showCustomerDropdown]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.files?.[0];
@@ -226,7 +242,7 @@ export function NewContractForm() {
                 </Button>
               </div>
             ) : (
-              <div className="relative isolate">
+              <div ref={customerComboRef} className="relative isolate">
                 <div className="relative">
                   <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none z-10" />
                   <Input
@@ -237,8 +253,16 @@ export function NewContractForm() {
                       setShowCustomerDropdown(true);
                     }}
                     onFocus={() => setShowCustomerDropdown(true)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        setShowCustomerDropdown(false);
+                      }
+                    }}
                     className="pr-9"
                     autoComplete="off"
+                    aria-expanded={showCustomerDropdown}
+                    aria-haspopup="listbox"
                   />
                 </div>
                 {showCustomerDropdown && (

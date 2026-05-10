@@ -101,19 +101,23 @@ export function ContractList() {
         )}
       </div>
 
-      {/* Table */}
-      <div className="rounded-lg border overflow-x-auto">
-        <Table className="min-w-[640px]">
+      {/* Table — single horizontal scroll inside <Table>; avoid nested overflow+x table-fixed RTL glitches */}
+      <div className="rounded-lg border">
+        <Table className="w-full min-w-[800px]">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-28">رقم العقد</TableHead>
-              <TableHead>العميل</TableHead>
-              <TableHead className="w-28">رمز العميل</TableHead>
-              <TableHead className="w-28">الهاتف</TableHead>
-              <TableHead className="w-36">تاريخ الإنشاء</TableHead>
-              <TableHead className="w-24">المرفقات</TableHead>
-              <TableHead className="w-20">الحالة</TableHead>
-              <TableHead className="w-16" />
+              <TableHead className="w-[7.5rem] text-start">رقم العقد</TableHead>
+              <TableHead className="w-[11rem] max-w-[11rem] text-start">العميل</TableHead>
+              <TableHead className="w-[7.5rem] text-start">رمز العميل</TableHead>
+              <TableHead dir="ltr" className="w-36 max-w-36 text-start">
+                الهاتف
+              </TableHead>
+              <TableHead dir="ltr" className="w-36 max-w-36 text-start">
+                تاريخ الإنشاء
+              </TableHead>
+              <TableHead className="w-12 text-center">المرفقات</TableHead>
+              <TableHead className="w-20 text-center">الحالة</TableHead>
+              <TableHead className="w-16 text-center" aria-label="عرض" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -141,37 +145,49 @@ export function ContractList() {
                 const st = statusMap[c.status] || statusMap.active;
                 return (
                   <TableRow key={c.contractNumber}>
-                    <TableCell className="font-mono font-semibold">
+                    <TableCell className="w-[7.5rem] text-start font-mono text-sm font-semibold">
                       {c.contractNumber}
                     </TableCell>
-                    <TableCell className="font-medium">
-                      {c.customer.fullName}
+                    <TableCell className="w-[11rem] max-w-[11rem] text-start font-medium">
+                      <span className="block truncate" title={c.customer.fullName}>
+                        {c.customer.fullName}
+                      </span>
                     </TableCell>
-                    <TableCell className="font-mono text-xs">
+                    <TableCell className="w-[7.5rem] text-start font-mono text-xs">
                       {c.customer.code}
                     </TableCell>
-                    <TableCell dir="ltr" className="text-left text-xs">
+                    <TableCell
+                      dir="ltr"
+                      className="w-36 max-w-36 text-start text-xs tabular-nums"
+                    >
                       {c.customer.phonePrimary}
                     </TableCell>
-                    <TableCell className="text-xs">
+                    <TableCell
+                      dir="ltr"
+                      className="w-36 max-w-36 text-start font-mono text-xs tabular-nums"
+                    >
                       {new Date(c.createdAt).toLocaleDateString("ar-SA")}
                     </TableCell>
-                    <TableCell className="text-center">
-                      {c._count.attachments}
+                    <TableCell className="w-12 text-center align-middle tabular-nums">
+                      <div className="flex justify-center">{c._count.attachments}</div>
                     </TableCell>
-                    <TableCell>
-                      <Badge variant={st.variant}>{st.label}</Badge>
+                    <TableCell className="w-20 text-center align-middle">
+                      <div className="flex justify-center">
+                        <Badge variant={st.variant}>{st.label}</Badge>
+                      </div>
                     </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() =>
-                          router.push(`/contracts/${c.contractNumber}`)
-                        }
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                      </Button>
+                    <TableCell className="w-16 text-center align-middle">
+                      <div className="flex justify-center">
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() =>
+                            router.push(`/contracts/${c.contractNumber}`)
+                          }
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 );
