@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
+import { formatAuditDetails } from "@/lib/audit-details";
 
 type AuditAction = "create" | "update" | "status_change" | "upload" | "delete";
 
@@ -45,17 +46,6 @@ const actionLabelMap: Record<AuditAction, string> = {
   upload: "رفع ملف",
   delete: "حذف",
 };
-
-function renderDetails(details: unknown): string {
-  if (details == null) return "—";
-  if (typeof details === "string") return details;
-  try {
-    const text = JSON.stringify(details);
-    return text.length > 80 ? `${text.slice(0, 80)}...` : text;
-  } catch {
-    return "—";
-  }
-}
 
 export function AuditLogList() {
   const [rows, setRows] = useState<AuditLogRow[]>([]);
@@ -238,7 +228,7 @@ export function AuditLogList() {
                   <TableCell className="font-mono text-xs">{row.entityType}</TableCell>
                   <TableCell className="font-mono text-xs">{row.entityId}</TableCell>
                   <TableCell className="max-w-[340px] truncate text-xs text-muted-foreground">
-                    {renderDetails(row.details)}
+                    {formatAuditDetails(row.action, row.details)}
                   </TableCell>
                 </TableRow>
               ))
