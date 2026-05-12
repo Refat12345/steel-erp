@@ -53,13 +53,31 @@ export interface RegisterTruckInput {
   operationalGrade?: SalesOrderGrade | null;
 }
 
-export async function registerTruck(data: RegisterTruckInput, userId: number) {
+export interface UpdateTruckInput {
+  customerId?: number | null;
+  destinationId?: number | null;
+  plateNumber?: string;
+  driverName?: string;
+  salesOrderNumber?: string | null;
+  notes?: string | null;
+  requestItems?: RequestItemInput[];
+  operationalGrade?: SalesOrderGrade | null;
+}
+
+async function validateTruckReferences(
+  tx: TxClient,
+  data: {
+    customerId?: number | null;
+    destinationId?: number | null;
+    salesOrderNumber?: string | null;
+  },
+) {
   if (data.customerId) {
-    const customer = await prisma.customer.findUnique({ where: { id: data.customerId } });
+    const customer = await tx.customer.findUnique({ where: { id: data.customerId } });
     if (!customer) throw new ServiceError("الزبون غير موجود", "NOT_FOUND");
     if (!customer.isActive) throw new ServiceError("الزبون غير نشط");
 
-    const activeContract = await prisma.masterContract.findFirst({
+    const activeContract = await tx.masterContract.findFirst({
       where: { customerId: data.customerId, status: "active" },
       select: { contractNumber: true },
     });
@@ -71,7 +89,7 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
   }
 
   if (data.salesOrderNumber) {
-    const so = await prisma.salesOrder.findUnique({
+    const so = await tx.salesOrder.findUnique({
       where: { orderNumber: data.salesOrderNumber },
       include: { contract: { select: { status: true, customerId: true } } },
     });
@@ -88,27 +106,31 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
   }
 
   if (data.destinationId) {
-    const destination = await prisma.destination.findUnique({
+    const destination = await tx.destination.findUnique({
       where: { id: data.destinationId },
     });
     if (!destination) throw new ServiceError("الوجهة غير موجودة", "NOT_FOUND");
     if (!destination.isActive) throw new ServiceError("الوجهة غير نشطة");
   }
+}
 
-  if (data.requestItems?.length) {
-    const sizeIds = data.requestItems.map((i) => i.sizeId);
-    const uniqueIds = new Set(sizeIds);
-    if (uniqueIds.size !== sizeIds.length) {
-      throw new ServiceError("لا يمكن تكرار نفس القياس في الطلبية");
-    }
-    const sizes = await prisma.sizeLookup.findMany({
-      where: { id: { in: sizeIds }, isActive: true },
-    });
-    if (sizes.length !== sizeIds.length) {
-      throw new ServiceError("أحد القياسات غير صالح أو غير نشط");
-    }
+async function validateTruckRequestItems(tx: TxClient, requestItems?: RequestItemInput[]) {
+  if (!requestItems?.length) return;
+
+  const sizeIds = requestItems.map((i) => i.sizeId);
+  const uniqueIds = new Set(sizeIds);
+  if (uniqueIds.size !== sizeIds.length) {
+    throw new ServiceError("لا يمكن تكرار نفس القياس في الطلبية");
   }
+  const sizes = await tx.sizeLookup.findMany({
+    where: { id: { in: sizeIds }, isActive: true },
+  });
+  if (sizes.length !== sizeIds.length) {
+    throw new ServiceError("أحد القياسات غير صالح أو غير نشط");
+  }
+}
 
+export async function registerTruck(data: RegisterTruckInput, userId: number) {
   const TERMINAL_STATUSES: TruckStatus[] = ["Completed", "Cancelled"];
   const normalizedPlate = data.plateNumber.trim();
 
@@ -117,6 +139,9 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
     truck = await withRetry(() =>
       prisma.$transaction(
         async (tx: TxClient) => {
+          await validateTruckReferences(tx, data);
+          await validateTruckRequestItems(tx, data.requestItems);
+
           const existingOpen = await tx.truckOperation.findFirst({
             where: {
               plateNumber: normalizedPlate,
@@ -204,6 +229,201 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
 
   logger.info({ truckId: truck.id, plate: truck.plateNumber }, "truck registered");
   return truck;
+}
+
+// ─── Update Before Weigh ───────────────────────────────────────────
+
+export async function updateTruckBeforeWeigh(
+  truckId: number,
+  data: UpdateTruckInput,
+  expectedVersion: number,
+  userId: number,
+) {
+  const TERMINAL_STATUSES: TruckStatus[] = ["Completed", "Cancelled"];
+
+  return withRetry(() =>
+    prisma.$transaction(
+      async (tx: TxClient) => {
+        const locked = await tx.$queryRaw<{ id: number }[]>`
+          SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
+        `;
+        if (locked.length === 0) {
+          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        }
+
+        const truck = await tx.truckOperation.findUnique({
+          where: { id: truckId },
+          include: {
+            requestItems: {
+              orderBy: { sizeId: "asc" },
+              select: { sizeId: true, bundleCount: true, requestedTons: true },
+            },
+          },
+        });
+        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+
+        if (truck.version !== expectedVersion) {
+          throw new ServiceError(
+            "تم تعديل السجل من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
+            "CONFLICT",
+          );
+        }
+
+        if (truck.status !== "Queued" && truck.status !== "Approved") {
+          throw new ServiceError(
+            "لا يمكن تعديل الشاحنة بعد بدء الوزن. يجب إلغاء العملية وإعادة تسجيلها إذا لزم الأمر.",
+          );
+        }
+
+        if (truck.status === "Approved") {
+          const forbiddenFields: (keyof UpdateTruckInput)[] = [
+            "customerId",
+            "destinationId",
+            "plateNumber",
+            "driverName",
+            "salesOrderNumber",
+            "notes",
+            "operationalGrade",
+          ];
+          const attempted = forbiddenFields.some((field) => data[field] !== undefined);
+          if (attempted) {
+            throw new ServiceError(
+              "بعد اعتماد الشاحنة يمكن تعديل تفاصيل الطلبية فقط. تغيير بيانات التسجيل يتطلب إلغاء الشاحنة وإعادة تسجيلها.",
+            );
+          }
+        }
+
+        const nextCustomerId = data.customerId !== undefined ? data.customerId : truck.customerId;
+        const nextDestinationId = data.destinationId !== undefined ? data.destinationId : truck.destinationId;
+        const nextSalesOrderNumber =
+          data.salesOrderNumber !== undefined ? data.salesOrderNumber : truck.salesOrderNumber;
+        const nextPlateNumber =
+          data.plateNumber !== undefined ? data.plateNumber.trim() : truck.plateNumber;
+        const nextDriverName =
+          data.driverName !== undefined ? data.driverName.trim() : truck.driverName;
+        const nextNotes = data.notes !== undefined ? data.notes?.trim() || null : truck.notes;
+
+        if (truck.status === "Queued") {
+          await validateTruckReferences(tx, {
+            customerId: nextCustomerId,
+            destinationId: nextDestinationId,
+            salesOrderNumber: nextSalesOrderNumber,
+          });
+
+          if (nextPlateNumber !== truck.plateNumber) {
+            const existingOpen = await tx.truckOperation.findFirst({
+              where: {
+                id: { not: truckId },
+                plateNumber: nextPlateNumber,
+                status: { notIn: TERMINAL_STATUSES },
+              },
+              select: { id: true, status: true },
+            });
+            if (existingOpen) {
+              throw new ServiceError(
+                `يوجد عملية مفتوحة لنفس رقم اللوحة (عملية #${existingOpen.id})`,
+                "CONFLICT",
+              );
+            }
+          }
+        }
+
+        if (data.requestItems !== undefined) {
+          await validateTruckRequestItems(tx, data.requestItems);
+          // Slice 4 pre-validation filters should be invoked here once the
+          // shared validation service exists; until then Approved edits are
+          // still gated by status, permission, and catalog constraints.
+        }
+
+        const previousValue = {
+          status: truck.status,
+          customerId: truck.customerId,
+          destinationId: truck.destinationId,
+          plateNumber: truck.plateNumber,
+          driverName: truck.driverName,
+          salesOrderNumber: truck.salesOrderNumber,
+          notes: truck.notes,
+          operationalGrade: truck.operationalGrade,
+          requestItems: truck.requestItems.map((item) => ({
+            sizeId: item.sizeId,
+            bundleCount: item.bundleCount,
+            requestedTons: item.requestedTons ? Number(item.requestedTons) : null,
+          })),
+        };
+
+        const updateData: Prisma.TruckOperationUpdateInput = {
+          version: { increment: 1 },
+        };
+
+        if (truck.status === "Queued") {
+          updateData.customer = nextCustomerId
+            ? { connect: { id: nextCustomerId } }
+            : { disconnect: true };
+          updateData.destination = nextDestinationId
+            ? { connect: { id: nextDestinationId } }
+            : { disconnect: true };
+          updateData.salesOrder = nextSalesOrderNumber
+            ? { connect: { orderNumber: nextSalesOrderNumber } }
+            : { disconnect: true };
+          updateData.plateNumber = nextPlateNumber;
+          updateData.driverName = nextDriverName;
+          updateData.notes = nextNotes;
+          updateData.operationalGrade =
+            data.operationalGrade !== undefined ? data.operationalGrade : truck.operationalGrade;
+        }
+
+        const updated = await tx.truckOperation.update({
+          where: { id: truckId },
+          data: updateData,
+        });
+
+        if (data.requestItems !== undefined) {
+          await tx.truckRequestItem.deleteMany({ where: { truckOperationId: truckId } });
+          if (data.requestItems.length > 0) {
+            await tx.truckRequestItem.createMany({
+              data: data.requestItems.map((item) => ({
+                truckOperationId: truckId,
+                sizeId: item.sizeId,
+                bundleCount: item.bundleCount ?? null,
+                requestedTons: item.requestedTons ?? null,
+              })),
+            });
+          }
+        }
+
+        await logAudit(tx, {
+          userId,
+          action: "update",
+          entityType: "TruckOperation",
+          entityId: String(truckId),
+          details: {
+            event: "truck_updated_before_weigh",
+            previousValue,
+            newValue: {
+              status: updated.status,
+              customerId: updated.customerId,
+              destinationId: updated.destinationId,
+              plateNumber: updated.plateNumber,
+              driverName: updated.driverName,
+              salesOrderNumber: updated.salesOrderNumber,
+              notes: updated.notes,
+              operationalGrade: updated.operationalGrade,
+              requestItems: data.requestItems ?? previousValue.requestItems,
+            },
+          } as unknown as Prisma.InputJsonValue,
+        });
+
+        logger.info({ truckId, status: truck.status }, "truck updated before weigh");
+        const reloaded = await tx.truckOperation.findUnique({
+          where: { id: truckId },
+          include: DETAIL_INCLUDE,
+        });
+        if (!reloaded) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        return reloaded;
+      },
+      { isolationLevel: "Serializable" },
+    ),
+  );
 }
 
 // ─── Enter Tare ────────────────────────────────────────────────────
@@ -1037,6 +1257,11 @@ export interface TruckListFilters {
 
 export type TruckListItem = Prisma.TruckOperationGetPayload<{
   include: {
+    customer: { select: { id: true; fullName: true; code: true } };
+    destination: { select: { id: true; name: true; details: true } };
+    requestItems: {
+      include: { size: { select: { id: true; code: true; displayName: true; isBundleType: true } } };
+    };
     creator: { select: { id: true; fullName: true } };
     _count: { select: { sessions: true } };
   };
@@ -1068,6 +1293,10 @@ export async function listOperations(
       include: {
         customer: { select: { id: true, fullName: true, code: true } },
         destination: { select: { id: true, name: true, details: true } },
+        requestItems: {
+          orderBy: { size: { sortOrder: "asc" as const } },
+          include: { size: { select: { id: true, code: true, displayName: true, isBundleType: true } } },
+        },
         creator: { select: { id: true, fullName: true } },
         _count: { select: { sessions: true } },
       },

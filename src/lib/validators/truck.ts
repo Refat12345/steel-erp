@@ -29,6 +29,10 @@ export const truckRegisterSchema = z.object({
   operationalGrade: z.enum(["FIRST", "SECOND"]).optional().nullable(),
 });
 
+export const truckUpdateSchema = truckRegisterSchema.partial().extend({
+  expectedVersion: z.number().int().nonnegative("الإصدار المتوقّع غير صالح"),
+});
+
 // Hard rails on weights come from `weight-bounds.ts` so validator, service,
 // and UI error messages stay in lockstep. `.finite()` rejects `Infinity`
 // and `NaN` before the positive/min/max checks fire.
