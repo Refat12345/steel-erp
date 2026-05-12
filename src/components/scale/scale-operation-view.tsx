@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import { createClientIdempotencyKey } from "@/lib/browser-idempotency-key";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -359,11 +358,11 @@ export function ScaleOperationView({ truckId }: { truckId: number }) {
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
-              <Table className="min-w-[320px]">
+              <Table className="min-w-[360px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>القياس</TableHead>
-                    <TableHead>عدد الربطات</TableHead>
+                    <TableHead>الكمية المطلوبة</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -371,7 +370,13 @@ export function ScaleOperationView({ truckId }: { truckId: number }) {
                     <TableRow key={item.id}>
                       <TableCell>{item.size.displayName}</TableCell>
                       <TableCell className="font-mono">
-                        {item.bundleCount ?? "—"}
+                        {item.size.isBundleType
+                          ? item.bundleCount != null
+                            ? `${item.bundleCount} ربطة`
+                            : "—"
+                          : item.requestedTons != null
+                            ? `${Number(item.requestedTons).toFixed(3)} طن`
+                            : "—"}
                       </TableCell>
                     </TableRow>
                   ))}

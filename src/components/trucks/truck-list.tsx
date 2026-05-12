@@ -30,17 +30,24 @@ import {
   Scale,
   ChevronLeft,
   ChevronRight,
+  Pencil,
 } from "lucide-react";
 import { RegisterTruckDialog } from "./register-truck-dialog";
+import { EditTruckDialog, type EditableTruck } from "./edit-truck-dialog";
 import { durationBetween, formatDurationCompact } from "@/lib/format-duration";
 import { getDisplayGradeLabel } from "@/lib/truck-grade";
 import type { SalesOrderGrade } from "@prisma/client";
 
-interface TruckListItem {
+interface TruckListItem extends EditableTruck {
   id: number;
   plateNumber: string;
   driverName: string;
   status: string;
+  version: number;
+  customerId: number | null;
+  destinationId: number | null;
+  salesOrderNumber: string | null;
+  notes: string | null;
   operationalGrade: SalesOrderGrade | null;
   tareWeightKg: string | null;
   grossWeightKg: string | null;
@@ -78,8 +85,11 @@ export function TruckList() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [plateSearch, setPlateSearch] = useState("");
   const [showRegister, setShowRegister] = useState(false);
+  const [editingTruck, setEditingTruck] = useState<TruckListItem | null>(null);
 
   const canRegister = sessionHasPermission(session, "truck.register");
+  const canEditQueued = sessionHasPermission(session, "truck.edit_queued");
+  const canEditApproved = sessionHasPermission(session, "truck.edit_approved");
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -148,7 +158,7 @@ export function TruckList() {
 
       {/* Table */}
       <div className="rounded-lg border overflow-x-auto">
-        <Table className="min-w-[820px]">
+        <Table className="min-w-[900px]">
           <TableHeader>
             <TableRow>
               <TableHead className="w-[60px]">#</TableHead>
@@ -162,7 +172,7 @@ export function TruckList() {
               <TableHead>الوزنات</TableHead>
               <TableHead>مدة التحميل</TableHead>
               <TableHead>التاريخ</TableHead>
-              <TableHead className="w-[60px]" />
+              <TableHead className="w-[96px]" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -255,16 +265,33 @@ export function TruckList() {
                           {new Date(truck.createdAt).toLocaleDateString("ar-SY")}
                         </TableCell>
                         <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              router.push(`/scale/${truck.id}`);
-                            }}
-                          >
-                            <Scale className="h-4 w-4" />
-                          </Button>
+                          <div className="flex items-center gap-1">
+                            {((truck.status === "Queued" && canEditQueued) ||
+                              (truck.status === "Approved" && canEditApproved)) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                title="تعديل"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingTruck(truck);
+                                }}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="فتح عملية الوزن"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                router.push(`/scale/${truck.id}`);
+                              }}
+                            >
+                              <Scale className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -307,6 +334,14 @@ export function TruckList() {
       <RegisterTruckDialog
         open={showRegister}
         onOpenChange={setShowRegister}
+        onSuccess={fetchData}
+      />
+      <EditTruckDialog
+        truck={editingTruck}
+        open={editingTruck !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingTruck(null);
+        }}
         onSuccess={fetchData}
       />
     </div>

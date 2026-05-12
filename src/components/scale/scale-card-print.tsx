@@ -22,7 +22,8 @@ interface WeighSessionItem {
 interface TruckRequestItemPrint {
   id: number;
   bundleCount: number | null;
-  size: { displayName: string };
+  requestedTons: string | null;
+  size: { displayName: string; isBundleType: boolean };
 }
 
 interface TruckDetail {
@@ -242,14 +243,22 @@ export function ScaleCardPrint({
                 <thead>
                   <tr className="bg-gray-100 print:bg-gray-200">
                     <th className="py-1.5 px-2 text-start border-b border-black">القياس</th>
-                    <th className="py-1.5 px-2 text-start border-b border-black">عدد الربطات</th>
+                    <th className="py-1.5 px-2 text-start border-b border-black">الكمية المطلوبة</th>
                   </tr>
                 </thead>
                 <tbody>
                   {truck.requestItems.map((item) => (
                     <tr key={item.id} className="border-b border-gray-200">
                       <td className="py-1 px-2">{item.size.displayName}</td>
-                      <td className="py-1 px-2 font-mono">{item.bundleCount ?? "—"}</td>
+                      <td className="py-1 px-2 font-mono">
+                        {item.size.isBundleType
+                          ? item.bundleCount != null
+                            ? `${item.bundleCount} ربطة`
+                            : "—"
+                          : item.requestedTons != null
+                            ? `${Number(item.requestedTons).toFixed(3)} طن`
+                            : "—"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

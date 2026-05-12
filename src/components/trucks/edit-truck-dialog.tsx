@@ -1,30 +1,30 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from "@/components/ui/dialog";
 import {
   Select,
-  SelectTrigger,
-  SelectValue,
   SelectContent,
   SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Trash2, Plus } from "lucide-react";
+import { DestinationSelect } from "@/components/destinations/destination-select";
 import { createClientIdempotencyKey } from "@/lib/browser-idempotency-key";
 import { GRADE_LABELS } from "@/lib/truck-grade";
+import { Plus, Trash2 } from "lucide-react";
 import type { SalesOrderGrade } from "@prisma/client";
-import { DestinationSelect } from "@/components/destinations/destination-select";
 
 interface Customer {
   id: number;
@@ -41,13 +41,32 @@ interface SizeOption {
 
 interface RequestItemRow {
   key: number;
-  /** Size catalog `code` (e.g. "8mm"); maps to numeric id only when submitting. */
   sizeCode: string;
   bundleCount: string;
   requestedTons: string;
 }
 
+export interface EditableTruck {
+  id: number;
+  status: string;
+  version: number;
+  customerId: number | null;
+  destinationId: number | null;
+  plateNumber: string;
+  driverName: string;
+  salesOrderNumber: string | null;
+  notes: string | null;
+  operationalGrade: SalesOrderGrade | null;
+  requestItems: {
+    sizeId: number;
+    bundleCount: number | null;
+    requestedTons: string | null;
+    size: { id: number; code: string; displayName: string; isBundleType: boolean };
+  }[];
+}
+
 interface Props {
+  truck: EditableTruck | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
@@ -55,21 +74,22 @@ interface Props {
 
 let rowKeyCounter = 0;
 
-export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
+export function EditTruckDialog({ truck, open, onOpenChange, onSuccess }: Props) {
   const [customerId, setCustomerId] = useState("");
   const [destinationId, setDestinationId] = useState<number | null>(null);
   const [plateNumber, setPlateNumber] = useState("");
   const [driverName, setDriverName] = useState("");
   const [notes, setNotes] = useState("");
   const [requestItems, setRequestItems] = useState<RequestItemRow[]>([]);
-  const [saving, setSaving] = useState(false);
-  // UI-only: controls grade field visibility. Not persisted to DB.
   const [isRebarLoad, setIsRebarLoad] = useState(false);
   const [operationalGrade, setOperationalGrade] = useState<SalesOrderGrade | "">("");
-
+  const [saving, setSaving] = useState(false);
+  const [loadingRef, setLoadingRef] = useState(true);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [sizes, setSizes] = useState<SizeOption[]>([]);
-  const [loadingRef, setLoadingRef] = useState(true);
+
+  const requestItemsOnly = truck?.status === "Approved";
+  const canSubmit = truck?.status === "Queued" || truck?.status === "Approved";
 
   const fetchReferenceData = useCallback(async () => {
     setLoadingRef(true);
@@ -93,16 +113,35 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
     if (open) fetchReferenceData();
   }, [open, fetchReferenceData]);
 
-  const reset = () => {
-    setCustomerId("");
-    setDestinationId(null);
-    setPlateNumber("");
-    setDriverName("");
-    setNotes("");
-    setRequestItems([]);
-    setIsRebarLoad(false);
-    setOperationalGrade("");
-  };
+  useEffect(() => {
+    if (!truck || !open) return;
+    setCustomerId(truck.customerId ? String(truck.customerId) : "");
+    setDestinationId(truck.destinationId);
+    setPlateNumber(truck.plateNumber);
+    setDriverName(truck.driverName);
+    setNotes(truck.notes ?? "");
+    setIsRebarLoad(Boolean(truck.operationalGrade));
+    setOperationalGrade(truck.operationalGrade ?? "");
+    setRequestItems(
+      truck.requestItems.map((item) => ({
+        key: ++rowKeyCounter,
+        sizeCode: item.size.code,
+        bundleCount: item.bundleCount ? String(item.bundleCount) : "",
+        requestedTons: item.requestedTons ? String(item.requestedTons) : "",
+      })),
+    );
+  }, [truck, open]);
+
+  const customerSelectItems = useMemo(
+    () =>
+      customers.map((c) => ({
+        value: String(c.id),
+        label: `${c.fullName} (${c.code})`,
+      })),
+    [customers],
+  );
+
+  const usedSizeCodes = new Set(requestItems.map((r) => r.sizeCode).filter(Boolean));
 
   const addRequestItem = () => {
     setRequestItems((prev) => [
@@ -121,41 +160,24 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
     value: string,
   ) => {
     setRequestItems((prev) =>
-      prev.map((r) =>
-        r.key === key
+      prev.map((row) =>
+        row.key === key
           ? {
-              ...r,
+              ...row,
               [field]: value,
               ...(field === "sizeCode" ? { bundleCount: "", requestedTons: "" } : {}),
             }
-          : r,
+          : row,
       ),
     );
   };
 
-  const usedSizeCodes = new Set(
-    requestItems.map((r) => r.sizeCode).filter(Boolean),
-  );
-
-  /** Lets Select.Value show the customer name; Base UI renders raw `value` without `items`. */
-  const customerSelectItems = useMemo(
-    () =>
-      customers.map((c) => ({
-        value: String(c.id),
-        label: `${c.fullName} (${c.code})`,
-      })),
-    [customers],
-  );
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!truck) return;
 
-    if (!customerId) {
-      toast.error("يرجى اختيار الزبون");
-      return;
-    }
-    if (!plateNumber.trim() || !driverName.trim()) {
-      toast.error("رقم اللوحة واسم السائق مطلوبان");
+    if (!requestItemsOnly && (!customerId || !plateNumber.trim() || !driverName.trim())) {
+      toast.error("الزبون ورقم اللوحة واسم السائق مطلوبة");
       return;
     }
 
@@ -164,15 +186,15 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
       bundleCount: number | null;
       requestedTons: number | null;
     }[] = [];
-    for (const r of requestItems.filter((x) => x.sizeCode)) {
-      const sz = sizes.find((s) => s.code === r.sizeCode);
-      if (!sz) {
+    for (const row of requestItems.filter((x) => x.sizeCode)) {
+      const size = sizes.find((s) => s.code === row.sizeCode);
+      if (!size) {
         toast.error("قياس غير صالح، أعد تحميل الصفحة والمحاولة");
         return;
       }
-      const bundleCount = r.bundleCount ? Number(r.bundleCount) : null;
-      const requestedTons = r.requestedTons ? Number(r.requestedTons) : null;
-      if (sz.isBundleType) {
+      const bundleCount = row.bundleCount ? Number(row.bundleCount) : null;
+      const requestedTons = row.requestedTons ? Number(row.requestedTons) : null;
+      if (size.isBundleType) {
         if (bundleCount === null || bundleCount < 1) {
           toast.error("عدد الربطات مطلوب ويجب أن يكون 1 على الأقل");
           return;
@@ -182,40 +204,45 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
         return;
       }
       items.push({
-        sizeId: sz.id,
-        bundleCount: sz.isBundleType ? bundleCount : null,
-        requestedTons: sz.isBundleType ? null : requestedTons,
+        sizeId: size.id,
+        bundleCount: size.isBundleType ? bundleCount : null,
+        requestedTons: size.isBundleType ? null : requestedTons,
       });
     }
 
     setSaving(true);
     try {
-      const res = await fetch("/api/trucks", {
-        method: "POST",
+      const payload = requestItemsOnly
+        ? {
+            expectedVersion: truck.version,
+            requestItems: items,
+          }
+        : {
+            expectedVersion: truck.version,
+            customerId: Number(customerId),
+            destinationId,
+            plateNumber: plateNumber.trim(),
+            driverName: driverName.trim(),
+            notes: notes.trim() || undefined,
+            operationalGrade: isRebarLoad && operationalGrade ? operationalGrade : null,
+            requestItems: items,
+          };
+
+      const res = await fetch(`/api/trucks/${truck.id}`, {
+        method: "PATCH",
         headers: {
           "Content-Type": "application/json",
           "Idempotency-Key": createClientIdempotencyKey(),
         },
-        body: JSON.stringify({
-          customerId: Number(customerId),
-          destinationId,
-          plateNumber: plateNumber.trim(),
-          driverName: driverName.trim(),
-          notes: notes.trim() || undefined,
-          requestItems: items.length > 0 ? items : undefined,
-          // Only send grade when load type is explicitly REBAR and a grade is chosen.
-          // Clears automatically when isRebarLoad is false (no stale value sent).
-          operationalGrade: isRebarLoad && operationalGrade ? operationalGrade : undefined,
-        }),
+        body: JSON.stringify(payload),
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success("تم تسجيل الشاحنة بنجاح");
-      reset();
+      toast.success("تم تعديل الشاحنة بنجاح");
       onOpenChange(false);
       onSuccess();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "خطأ في التسجيل");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "خطأ في تعديل الشاحنة");
     } finally {
       setSaving(false);
     }
@@ -225,10 +252,15 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>تسجيل شاحنة جديدة</DialogTitle>
+          <DialogTitle>تعديل الشاحنة #{truck?.id}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Customer */}
+          {requestItemsOnly && (
+            <p className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
+              الشاحنة معتمدة، لذلك يمكن تعديل تفاصيل الطلبية فقط قبل بدء الوزن.
+            </p>
+          )}
+
           <div className="space-y-2">
             <Label>الزبون *</Label>
             {loadingRef ? (
@@ -238,6 +270,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                 items={customerSelectItems}
                 value={customerId}
                 onValueChange={(v) => setCustomerId(v ?? "")}
+                disabled={requestItemsOnly || saving}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="اختر الزبون" />
@@ -253,17 +286,15 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
             )}
           </div>
 
-          {/* Destination */}
           <div className="space-y-2">
             <Label>الوجهة (اختياري)</Label>
             <DestinationSelect
               value={destinationId}
               onValueChange={setDestinationId}
-              disabled={saving}
+              disabled={requestItemsOnly || saving}
             />
           </div>
 
-          {/* Load type — UI-only toggle to show/hide grade */}
           <div className="space-y-2">
             <Label>نوع الحمل (اختياري)</Label>
             <Select
@@ -271,10 +302,9 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
               onValueChange={(v) => {
                 const rebar = v === "REBAR";
                 setIsRebarLoad(rebar);
-                // Clear grade immediately when kind changes away from REBAR
-                // so no stale value survives in the payload.
                 if (!rebar) setOperationalGrade("");
               }}
+              disabled={requestItemsOnly || saving}
             >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="اختر نوع الحمل" />
@@ -286,7 +316,6 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
             </Select>
           </div>
 
-          {/* Grade — visible only when load type is REBAR */}
           {isRebarLoad && (
             <div className="space-y-2">
               <Label>النخب (اختياري)</Label>
@@ -295,6 +324,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                 onValueChange={(v) =>
                   setOperationalGrade((v as SalesOrderGrade | "") ?? "")
                 }
+                disabled={requestItemsOnly || saving}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="اختر النخب" />
@@ -313,30 +343,27 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
             </div>
           )}
 
-          {/* Plate + Driver */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label htmlFor="plateNumber">رقم اللوحة *</Label>
+              <Label htmlFor="editPlateNumber">رقم اللوحة *</Label>
               <Input
-                id="plateNumber"
+                id="editPlateNumber"
                 value={plateNumber}
                 onChange={(e) => setPlateNumber(e.target.value)}
-                placeholder="مثال: دمشق 123456"
-                autoFocus
+                disabled={requestItemsOnly || saving}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="driverName">اسم السائق *</Label>
+              <Label htmlFor="editDriverName">اسم السائق *</Label>
               <Input
-                id="driverName"
+                id="editDriverName"
                 value={driverName}
                 onChange={(e) => setDriverName(e.target.value)}
-                placeholder="الاسم الكامل"
+                disabled={requestItemsOnly || saving}
               />
             </div>
           </div>
 
-          {/* Request Items */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label>تفاصيل الطلبية</Label>
@@ -345,18 +372,12 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                 variant="outline"
                 size="sm"
                 onClick={addRequestItem}
-                disabled={loadingRef}
+                disabled={loadingRef || saving}
               >
                 <Plus className="h-4 w-4 ml-1" />
                 إضافة قياس
               </Button>
             </div>
-
-            {requestItems.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                لم يتم إضافة تفاصيل للطلبية بعد (اختياري)
-              </p>
-            )}
 
             <div className="space-y-2">
               {requestItems.map((row) => {
@@ -371,6 +392,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                       onValueChange={(v) =>
                         updateRequestItem(row.key, "sizeCode", v ?? "")
                       }
+                      disabled={saving}
                     >
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="القياس" />
@@ -399,6 +421,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                           updateRequestItem(row.key, "requestedTons", e.target.value)
                         }
                         placeholder="طن"
+                        disabled={saving}
                       />
                     ) : (
                       <Input
@@ -409,6 +432,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                           updateRequestItem(row.key, "bundleCount", e.target.value)
                         }
                         placeholder="ربطات"
+                        disabled={saving}
                       />
                     )}
                     <Button
@@ -417,6 +441,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                       size="icon"
                       className="text-destructive"
                       onClick={() => removeRequestItem(row.key)}
+                      disabled={saving}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -426,27 +451,23 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
             </div>
           </div>
 
-          {/* Notes */}
           <div className="space-y-2">
-            <Label htmlFor="notes">ملاحظات (اختياري)</Label>
+            <Label htmlFor="editNotes">ملاحظات (اختياري)</Label>
             <Textarea
-              id="notes"
+              id="editNotes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
+              disabled={requestItemsOnly || saving}
             />
           </div>
 
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-            >
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               إلغاء
             </Button>
-            <Button type="submit" disabled={saving || loadingRef}>
-              {saving ? "جاري التسجيل..." : "تسجيل"}
+            <Button type="submit" disabled={!canSubmit || saving || loadingRef}>
+              {saving ? "جاري الحفظ..." : "حفظ التعديلات"}
             </Button>
           </DialogFooter>
         </form>

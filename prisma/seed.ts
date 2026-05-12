@@ -109,6 +109,7 @@ async function main() {
     // Trucks / Logistics
     { code: "truck.register", displayName: "تسجيل شاحنة", module: "logistics" },
     { code: "truck.edit_queued", displayName: "تعديل شاحنة بالطابور", module: "logistics" },
+    { code: "truck.edit_approved", displayName: "تعديل طلبية شاحنة معتمدة", module: "logistics" },
     { code: "truck.view_queue", displayName: "عرض الطابور", module: "logistics" },
     { code: "truck.view_approved", displayName: "عرض المعتمدة فقط", module: "logistics" },
     // Finance
@@ -195,6 +196,7 @@ async function main() {
       "salesorder.view",
       "truck.register",
       "truck.edit_queued",
+      "truck.edit_approved",
       "truck.view_queue",
     ],
     scale_operator: [

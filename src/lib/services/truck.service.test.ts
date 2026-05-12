@@ -28,6 +28,7 @@ const mockPrisma = vi.hoisted(() => ({
   customer: { findUnique: vi.fn() },
   masterContract: { findFirst: vi.fn() },
   salesOrder: { findUnique: vi.fn() },
+  destination: { findUnique: vi.fn() },
   sizeLookup: { findMany: vi.fn() },
   truckOperation: {
     findFirst: vi.fn(),
@@ -35,7 +36,7 @@ const mockPrisma = vi.hoisted(() => ({
     create: vi.fn(),
     update: vi.fn(),
   },
-  truckRequestItem: { createMany: vi.fn() },
+  truckRequestItem: { createMany: vi.fn(), deleteMany: vi.fn() },
   weighSession: { findMany: vi.fn() },
   truckPhoto: { count: vi.fn() },
   auditLog: { create: vi.fn() },
@@ -56,6 +57,7 @@ vi.mock("./tx-retry", () => ({
 
 import {
   registerTruck,
+  updateTruckBeforeWeigh,
   enterTare,
   confirmLoadingComplete,
   enterGross,
@@ -76,6 +78,111 @@ beforeEach(() => {
   // Default: FOR UPDATE lock resolves "row exists" unless a test overrides.
   mockPrisma.$queryRaw.mockResolvedValue([{ id: 1 }]);
   mockPrisma.auditLog.create.mockResolvedValue({});
+});
+
+// ─── Update Before Weigh ───────────────────────────────────────
+
+describe("updateTruckBeforeWeigh", () => {
+  const queuedTruck = {
+    id: 1,
+    status: "Queued",
+    version: 0,
+    customerId: 1,
+    destinationId: null,
+    plateNumber: "OLD-123",
+    driverName: "Old Driver",
+    salesOrderNumber: null,
+    notes: null,
+    operationalGrade: null,
+    requestItems: [{ sizeId: 1, bundleCount: 10, requestedTons: null }],
+  };
+
+  beforeEach(() => {
+    mockPrisma.customer.findUnique.mockResolvedValue({ id: 1, isActive: true });
+    mockPrisma.masterContract.findFirst.mockResolvedValue({ contractNumber: "26-90" });
+    mockPrisma.sizeLookup.findMany.mockResolvedValue([{ id: 1, isActive: true }]);
+    mockPrisma.truckOperation.findFirst.mockResolvedValue(null);
+    mockPrisma.truckOperation.update.mockResolvedValue({
+      ...queuedTruck,
+      version: 1,
+      plateNumber: "NEW-123",
+      driverName: "New Driver",
+    });
+    mockPrisma.truckRequestItem.deleteMany.mockResolvedValue({ count: 1 });
+    mockPrisma.truckRequestItem.createMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("updates a queued truck, replaces request items, and writes an audit log", async () => {
+    mockPrisma.truckOperation.findUnique
+      .mockResolvedValueOnce(queuedTruck)
+      .mockResolvedValueOnce({
+        ...queuedTruck,
+        version: 1,
+        plateNumber: "NEW-123",
+        driverName: "New Driver",
+      });
+
+    const result = await updateTruckBeforeWeigh(
+      1,
+      {
+        customerId: 1,
+        plateNumber: "NEW-123",
+        driverName: "New Driver",
+        requestItems: [{ sizeId: 1, bundleCount: 12 }],
+      },
+      0,
+      7,
+    );
+
+    expect(result?.version).toBe(1);
+    expect(mockPrisma.truckOperation.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 1 },
+        data: expect.objectContaining({
+          plateNumber: "NEW-123",
+          driverName: "New Driver",
+          version: { increment: 1 },
+        }),
+      }),
+    );
+    expect(mockPrisma.truckRequestItem.deleteMany).toHaveBeenCalledWith({
+      where: { truckOperationId: 1 },
+    });
+    expect(mockPrisma.auditLog.create).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.auditLog.create.mock.calls[0][0].data.details.event).toBe(
+      "truck_updated_before_weigh",
+    );
+  });
+
+  it("rejects edits once first weigh has started", async () => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValueOnce({
+      ...queuedTruck,
+      status: "FirstWeigh",
+    });
+
+    await expect(
+      updateTruckBeforeWeigh(1, { requestItems: [{ sizeId: 1, bundleCount: 12 }] }, 0, 7),
+    ).rejects.toThrow(/بعد بدء الوزن/);
+    expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects changing a queued truck to a plate with another open operation", async () => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValueOnce(queuedTruck);
+    mockPrisma.truckOperation.findFirst.mockResolvedValueOnce({
+      id: 99,
+      status: "Queued",
+    });
+
+    await expect(
+      updateTruckBeforeWeigh(
+        1,
+        { customerId: 1, plateNumber: "DUP-123", driverName: "Driver" },
+        0,
+        7,
+      ),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
+  });
 });
 
 // ─── 1. Register truck ────────────────────────────────────────
