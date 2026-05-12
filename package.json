@@ -23,7 +23,9 @@
     "reset-passwords": "npx tsx scripts/reset-demo-passwords.ts",
     "demo:reset-db": "npx tsx scripts/reset-full-db.ts",
     "demo:seed": "npx tsx scripts/seed-full-demo.ts",
-    "demo:full-reset": "npx tsx scripts/reset-full-db.ts && npx tsx scripts/seed-full-demo.ts"
+    "demo:full-reset": "npx tsx scripts/reset-full-db.ts && npx tsx scripts/seed-full-demo.ts",
+    "rbac:sync": "npx tsx scripts/sync-rbac.ts",
+    "rbac:sync:dry": "npx tsx scripts/sync-rbac.ts --dry-run"
   },
   "prisma": {
     "seed": "npx tsx prisma/seed.ts"
