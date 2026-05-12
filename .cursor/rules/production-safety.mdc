@@ -65,11 +65,13 @@ SSH disconnects mid-operation are silent killers. tmux is non-negotiable for the
 ## 7. Database safety
 
 - **Forbidden on production** — never run any of these against `steel_erp_prod`:
-  `prisma migrate reset`, `prisma migrate dev`, `prisma db push`, `prisma db execute`,
-  `npm run db:reset`, `npm run db:migrate`, `npm run demo:reset-db`, `npm run demo:seed`, `npm run demo:full-reset`, `npm run reset-passwords`,
-  `seed-full-demo.ts`, `reset-full-db.ts`, any other reset/seed script,
-  ad-hoc `DROP DATABASE`, `TRUNCATE`, or unbounded `DELETE FROM <table>`.
+ `prisma migrate reset`, `prisma migrate dev`, `prisma db push`, `prisma db execute`,
+ `npm run db:reset`, `npm run db:migrate`, `npm run db:seed`, `npm run db:reset-admin`,
+ `npm run demo:reset-db`, `npm run demo:seed`, `npm run demo:full-reset`, `npm run reset-passwords`,
+ `prisma/seed.ts`, `seed-full-demo.ts`, `reset-full-db.ts`, `reset-db-admin-only.ts`, any other reset/seed script,
+ ad-hoc `DROP DATABASE`, `TRUNCATE`, or unbounded `DELETE FROM <table>`.
 - **Allowed** for schema changes: `npx prisma migrate deploy` only.
+- **Allowed** for RBAC catalog sync (after a deploy that added/renamed roles, permissions, or role-default mappings in `prisma/rbac-source.ts`): `npm run rbac:sync:dry` then `npm run rbac:sync`. This script touches ONLY `roles`, `permissions`, and `role_default_permissions`; never users, customers, contracts, sales orders, trucks, payments, sessions, or audit log. Pass `-- --delete-stale` ONLY after reviewing the dry-run output — deletion is refused automatically if a stale permission still has overrides or default mappings, and roles are never auto-deleted by this script.
 - Never connect to prod DB from a local laptop directly. If absolutely needed, use SSH tunnel: `ssh -L 5433:localhost:5432 deploy@…` and connect to `localhost:5433`.
 - A pre-migration backup is **verified successful** only when **all four hold**:
   1. Local `db_*.dump.gz` exists and size ≥ 1 MB.
