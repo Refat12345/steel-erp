@@ -1,5 +1,24 @@
 "use client";
 
+/**
+ * ─── ARCHIVED — Sales / Finance Dashboard ─────────────────────────────
+ *
+ * This component renders the original KPI dashboard built around sales
+ * orders, contracts, payments, and top customers by paid amount.
+ *
+ * It is intentionally NOT imported anywhere in v1: the production
+ * rollout starts with the Trucks + Scale modules only, so the live
+ * dashboard at `/` uses `charts-section.operations.tsx` instead.
+ *
+ * To re-enable this view when the finance & sales modules go live,
+ * swap the import in `src/app/(dashboard)/page.tsx`:
+ *   `import { ChartsSection } from "@/components/dashboard/charts-section.sales"`
+ *
+ * Keep the file in sync with `/api/dashboard/stats` if its response
+ * shape ever changes — the matching service is `src/lib/dashboard-stats.ts`.
+ * ─────────────────────────────────────────────────────────────────────
+ */
+
 import { useEffect, useState } from "react";
 import {
   BarChart,

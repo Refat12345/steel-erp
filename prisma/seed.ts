@@ -141,6 +141,16 @@ async function main() {
     { code: "report.audit", displayName: "تقرير التدقيق", module: "reports" },
     // Analytics / Dashboard
     { code: "dashboard.view", displayName: "عرض لوحة المؤشرات والإحصاءات", module: "analytics" },
+    // Stricter add-on permission: when present in addition to `dashboard.view`,
+    // the dashboard payload is expanded with operationally sensitive sections
+    // (live fleet status, stuck trucks, cycle-time averages, cancellation %).
+    // Intended for the General Manager (`admin`). Withheld from the Owner
+    // (`manager`) so they see a calmer "results only" view of the same page.
+    {
+      code: "dashboard.ops.view",
+      displayName: "عرض المؤشرات التشغيلية الحساسة",
+      module: "analytics",
+    },
   ];
 
   for (const perm of permissions) {

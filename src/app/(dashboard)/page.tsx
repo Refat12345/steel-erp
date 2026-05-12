@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { Factory, CalendarDays, LayoutDashboard } from "lucide-react";
-import { ChartsSection } from "@/components/dashboard/charts-section";
+import { ChartsSection } from "@/components/dashboard/charts-section.operations";
 import { resolveUserAuth } from "@/lib/permissions";
 import {
   canAccessDashboard,
