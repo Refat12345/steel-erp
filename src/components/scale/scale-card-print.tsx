@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Printer, ArrowRight } from "lucide-react";
@@ -8,6 +8,10 @@ import Link from "next/link";
 import { aggregateWeighSessionsBySize } from "@/lib/weigh-session-aggregate";
 import { durationBetween, formatDuration } from "@/lib/format-duration";
 import { getDisplayGradeLabel } from "@/lib/truck-grade";
+import {
+  computeA4PrintFitScale,
+  SCALE_CARD_PRINT_HEIGHT_FUDGE,
+} from "@/lib/scale-card-print-fit";
 import type { SalesOrderGrade } from "@prisma/client";
 
 interface WeighSessionItem {
@@ -61,8 +65,12 @@ export function ScaleCardPrint({
   variant?: "internal" | "driver";
 }) {
   const isDriver = variant === "driver";
+  const isInternal = !isDriver;
+  const printBodyClass = `scale-card-print-${variant}`;
   const [truck, setTruck] = useState<TruckDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const printHostRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
 
   const fetchTruck = useCallback(async () => {
     try {
@@ -80,6 +88,75 @@ export function ScaleCardPrint({
   useEffect(() => {
     fetchTruck();
   }, [fetchTruck]);
+
+  const resetPrintFit = useCallback(() => {
+    const card = cardRef.current;
+    const host = printHostRef.current;
+    if (card) {
+      card.classList.remove("scale-card--measure-print", "scale-card--print-fitted");
+      card.style.zoom = "";
+      card.style.transform = "";
+      card.style.transformOrigin = "";
+    }
+    if (host) {
+      host.style.height = "";
+      host.style.overflow = "";
+    }
+  }, []);
+
+  const applyPrintFit = useCallback(() => {
+    const card = cardRef.current;
+    const host = printHostRef.current;
+    if (!card || !host) return;
+
+    resetPrintFit();
+
+    card.classList.add("scale-card--measure-print");
+    const width = card.offsetWidth;
+    const height = Math.max(card.scrollHeight, card.getBoundingClientRect().height);
+    card.classList.remove("scale-card--measure-print");
+
+    const scale = computeA4PrintFitScale(
+      width,
+      height * SCALE_CARD_PRINT_HEIGHT_FUDGE,
+    );
+    if (scale >= 0.999) return;
+
+    card.classList.add("scale-card--print-fitted");
+
+    if (typeof CSS !== "undefined" && CSS.supports("zoom", "1")) {
+      card.style.zoom = String(scale);
+      return;
+    }
+
+    card.style.transformOrigin = "top center";
+    card.style.transform = `scale(${scale})`;
+    host.style.height = `${height * scale}px`;
+    host.style.overflow = "hidden";
+  }, [resetPrintFit]);
+
+  useEffect(() => {
+    document.body.classList.add(printBodyClass);
+    const onBeforePrint = () => applyPrintFit();
+    const onAfterPrint = () => resetPrintFit();
+
+    window.addEventListener("beforeprint", onBeforePrint);
+    window.addEventListener("afterprint", onAfterPrint);
+
+    return () => {
+      document.body.classList.remove(printBodyClass);
+      window.removeEventListener("beforeprint", onBeforePrint);
+      window.removeEventListener("afterprint", onAfterPrint);
+      resetPrintFit();
+    };
+  }, [printBodyClass, applyPrintFit, resetPrintFit]);
+
+  const handlePrint = useCallback(() => {
+    applyPrintFit();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => window.print());
+    });
+  }, [applyPrintFit]);
 
   if (loading) {
     return <div className="p-8 text-center text-muted-foreground">جاري التحميل...</div>;
@@ -101,6 +178,15 @@ export function ScaleCardPrint({
   const waitMs = durationBetween(truck.createdAt, truck.tareTime);
   const loadingMs = durationBetween(truck.tareTime, truck.grossTime);
   const totalMs = durationBetween(truck.createdAt, truck.closedAt);
+
+  const sessionsBySize = aggregateWeighSessionsBySize(truck.sessions);
+  const totalAggregateBundles =
+    sessionsBySize.length > 0 &&
+    sessionsBySize.every((row) => row.totalBundles != null)
+      ? sessionsBySize.reduce((sum, row) => sum + (row.totalBundles ?? 0), 0)
+      : null;
+
+  const hostClassName = `scale-card-print-host scale-card-print-host--${variant} mx-auto max-w-[210mm]`;
 
   return (
     <>
@@ -137,15 +223,19 @@ export function ScaleCardPrint({
               نسخة السائق
             </Button>
           </Link>
-          <Button onClick={() => window.print()}>
+          <Button onClick={handlePrint}>
             <Printer className="h-4 w-4 me-1" />
             طباعة
           </Button>
         </div>
       </div>
 
-      {/* Printable card */}
-      <div className={`scale-card scale-card--${variant} mx-auto max-w-[210mm] bg-white text-black p-6 print:p-3 print:leading-tight border print:border-0 rounded-lg print:rounded-none ${isDriver ? "print:text-[8pt]" : "print:text-[9pt]"}`}>
+      {/* Printable card — internal host clips scaled content to one A4 page */}
+      <div ref={printHostRef} className={hostClassName}>
+      <div
+        ref={cardRef}
+        className={`scale-card scale-card--${variant} mx-auto max-w-[210mm] bg-white text-black p-6 print:p-3 print:leading-tight border print:border-0 rounded-lg print:rounded-none ${isDriver ? "print:text-[8pt]" : "print:text-[9pt]"}`}
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b-2 border-black pb-3 mb-3 print:pb-2 print:mb-2">
           {/* Logo */}
@@ -355,45 +445,15 @@ export function ScaleCardPrint({
           </div>
         )}
 
-        {/* Internal Sessions — internal copy shows all sessions + aggregate; driver copy shows aggregate only */}
+        {/* Sessions — internal: totals by size; driver: aggregate without tons */}
         {truck.sessions.length > 0 && (
           <div className="mb-3 print:mb-2">
-            {!isDriver && (
-              <>
-                <h3 className="font-bold text-sm mb-2">
-                  الوزنات الداخلية ({truck.sessions.length} وزنة)
-                </h3>
-                <div className="border border-black rounded mb-3">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-gray-100 print:bg-gray-200">
-                        <th className="py-1.5 px-2 text-start border-b border-black w-10">#</th>
-                        <th className="py-1.5 px-2 text-start border-b border-black">القياس</th>
-                        <th className="py-1.5 px-2 text-start border-b border-black">الربطات</th>
-                        <th className="py-1.5 px-2 text-start border-b border-black">الوزن (طن)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {truck.sessions.map((s) => (
-                        <tr key={s.id} className="border-b border-gray-200">
-                          <td className="py-1 px-2 font-mono">{s.sessionNumber}</td>
-                          <td className="py-1 px-2">{s.size?.displayName ?? "—"}</td>
-                          <td className="py-1 px-2">{s.bundleCount ?? "—"}</td>
-                          <td className="py-1 px-2 font-mono">{Number(s.weightTons).toFixed(3)}</td>
-                        </tr>
-                      ))}
-                      <tr className="bg-gray-50 font-bold">
-                        <td colSpan={3} className="py-1.5 px-2">المجموع الكلي (كل الوزنات)</td>
-                        <td className="py-1.5 px-2 font-mono">{totalSessionsTons.toFixed(3)} طن</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
-            <div>
-              <h3 className="font-bold text-sm mb-2">الإجمالي حسب القياس</h3>
-              <div className="border border-black rounded">
+            <h3 className="font-bold text-sm mb-2">
+              {isDriver
+                ? "الإجمالي حسب القياس"
+                : `الوزنات الداخلية (${truck.sessions.length} وزنة) — الإجمالي حسب القياس`}
+            </h3>
+            <div className="border border-black rounded">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-100 print:bg-gray-200">
@@ -405,7 +465,7 @@ export function ScaleCardPrint({
                     </tr>
                   </thead>
                   <tbody>
-                    {aggregateWeighSessionsBySize(truck.sessions).map((row) => (
+                    {sessionsBySize.map((row) => (
                       <tr key={row.sizeId ?? "none"} className="border-b border-gray-200">
                         <td className="py-1 px-2">{row.displayName}</td>
                         <td className="py-1 px-2 font-mono">
@@ -418,10 +478,20 @@ export function ScaleCardPrint({
                         )}
                       </tr>
                     ))}
+                    {!isDriver && (
+                      <tr className="bg-gray-50 font-bold">
+                        <td className="py-1.5 px-2">المجموع الكلي (كل الوزنات)</td>
+                        <td className="py-1.5 px-2 font-mono">
+                          {totalAggregateBundles != null
+                            ? totalAggregateBundles.toLocaleString("ar-SY")
+                            : "—"}
+                        </td>
+                        <td className="py-1.5 px-2 font-mono">{totalSessionsTons.toFixed(3)} طن</td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
-            </div>
           </div>
         )}
 
@@ -467,10 +537,10 @@ export function ScaleCardPrint({
         </div>
 
         {/* Signature Lines */}
-        <div className="mt-8 flex justify-around text-sm print:mt-6">
+        <div className="mt-8 flex justify-around text-sm print:mt-3">
           <div className="text-center">
             <div className="w-32 border-b border-black mb-1" />
-            <div>عامل القبان</div>
+            <div>موظف القبان</div>
           </div>
           <div className="text-center">
             <div className="w-32 border-b border-black mb-1" />
@@ -478,21 +548,85 @@ export function ScaleCardPrint({
           </div>
           <div className="text-center">
             <div className="w-32 border-b border-black mb-1" />
-            <div>المدير</div>
+            <div>مشرف القبان</div>
           </div>
         </div>
+      </div>
       </div>
 
       {/* Print styles */}
       <style jsx global>{`
+        /* Mirror print typography while measuring on screen */
+        .scale-card--internal.scale-card--measure-print {
+          font-size: 9pt !important;
+          line-height: 1.25 !important;
+          padding: 0.75rem !important;
+        }
+        .scale-card--driver.scale-card--measure-print {
+          font-size: 8pt !important;
+          line-height: 1.25 !important;
+          padding: 0.75rem !important;
+        }
+        .scale-card--internal.scale-card--measure-print th,
+        .scale-card--internal.scale-card--measure-print td,
+        .scale-card--driver.scale-card--measure-print th,
+        .scale-card--driver.scale-card--measure-print td {
+          padding-top: 0.2rem !important;
+          padding-bottom: 0.2rem !important;
+        }
+
         @media print {
-          body { margin: 0; padding: 0; }
-          nav, header, aside, .print\\:hidden { display: none !important; }
-          main { padding: 0 !important; }
-          .scale-card { box-shadow: none; border: none; }
-          /* Internal: A4 with tighter margins */
-          .scale-card--internal { font-size: 9pt; }
-          @page { size: ${isDriver ? "A5" : "A4"} portrait; margin: ${isDriver ? "5mm" : "6mm"}; }
+          body {
+            margin: 0;
+            padding: 0;
+          }
+          nav,
+          header,
+          aside,
+          .print\\:hidden {
+            display: none !important;
+          }
+          main {
+            padding: 0 !important;
+            overflow: visible !important;
+          }
+          .scale-card {
+            box-shadow: none;
+            border: none;
+          }
+          .scale-card-print-host--internal,
+          .scale-card-print-host--driver {
+            overflow: visible !important;
+            page-break-inside: avoid;
+            break-inside: avoid;
+          }
+          .scale-card--internal {
+            font-size: 9pt;
+            line-height: 1.25;
+            page-break-inside: avoid;
+            break-inside: avoid;
+          }
+          .scale-card--driver {
+            font-size: 8pt;
+            line-height: 1.25;
+            page-break-inside: avoid;
+            break-inside: avoid;
+          }
+          .scale-card--internal th,
+          .scale-card--internal td,
+          .scale-card--driver th,
+          .scale-card--driver td {
+            padding-top: 0.15rem;
+            padding-bottom: 0.15rem;
+          }
+          .scale-card--internal h3,
+          .scale-card--driver h3 {
+            margin-bottom: 0.25rem;
+          }
+          @page {
+            size: A4 portrait;
+            margin: 4mm;
+          }
         }
       `}</style>
     </>
