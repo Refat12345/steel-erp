@@ -86,3 +86,112 @@ export function canAccessDashboard(params: {
   if (isAnalyticsRestrictedRole(params.roleCode)) return false;
   return params.permissions.has(DASHBOARD_PERMISSION);
 }
+
+/** Arabic labels for permission module group headers in the admin UI. */
+export const PERMISSION_MODULE_LABELS: Readonly<Record<string, string>> = {
+  contracts: "العقود",
+  sales: "أوامر البيع",
+  logistics: "اللوجستيك والشاحنات",
+  finance: "المالية",
+  scale: "القبان والتحميل",
+  admin: "الإدارة",
+  reports: "التقارير",
+  analytics: "لوحة المؤشرات",
+};
+
+/**
+ * Phase 1: non-admin actors with `user.set_permissions` may only edit
+ * permissions in modules tied to their operational department.
+ * `admin` role bypasses this map entirely.
+ */
+export const ROLE_EDITABLE_PERMISSION_MODULES: Readonly<
+  Record<string, readonly string[]>
+> = {
+  finance: ["finance"],
+  logistics: ["contracts", "sales", "logistics"],
+  scale_operator: ["scale", "logistics"],
+  internal_loader: ["scale", "logistics"],
+  manager: [
+    "contracts",
+    "sales",
+    "logistics",
+    "finance",
+    "scale",
+    "reports",
+    "analytics",
+  ],
+};
+
+const ANALYTICS_PERMISSION_PREFIXES = ["dashboard.", "reports.", "report."] as const;
+
+const RESERVED_UNUSED_PERMISSIONS = new Set(["creditlimit.set"]);
+
+const SENSITIVE_PERMISSIONS = new Set([
+  "forcepass.execute",
+  "user.manage",
+  "user.set_permissions",
+  "settings.edit",
+]);
+
+export function getPermissionModuleLabel(module: string): string {
+  return PERMISSION_MODULE_LABELS[module] ?? module;
+}
+
+/** `null` means all modules (admin actor). */
+export function getEditableModulesForActor(
+  actorRoleCode: string,
+): ReadonlySet<string> | null {
+  if (actorRoleCode === "admin") return null;
+  const modules = ROLE_EDITABLE_PERMISSION_MODULES[actorRoleCode];
+  return modules ? new Set(modules) : new Set();
+}
+
+export function isSensitivePermission(code: string): boolean {
+  return SENSITIVE_PERMISSIONS.has(code);
+}
+
+export function isReservedUnusedPermission(code: string): boolean {
+  return RESERVED_UNUSED_PERMISSIONS.has(code);
+}
+
+function isAnalyticsPermissionCode(code: string): boolean {
+  return ANALYTICS_PERMISSION_PREFIXES.some(
+    (prefix) => code === prefix || code.startsWith(prefix),
+  );
+}
+
+/**
+ * Non-blocking warnings returned to the admin UI after saving overrides.
+ */
+export function collectPermissionOverrideWarnings(params: {
+  targetRoleCode: string;
+  effectiveEnabled: Map<string, boolean>;
+}): string[] {
+  const warnings: string[] = [];
+
+  if (!isAnalyticsRestrictedRole(params.targetRoleCode)) {
+    return warnings;
+  }
+
+  for (const [code, enabled] of params.effectiveEnabled) {
+    if (!enabled) continue;
+    if (!isAnalyticsPermissionCode(code)) continue;
+    warnings.push(
+      `الصلاحية «${code}» مفعّلة لكن دور «${params.targetRoleCode}» محظور من التحليلات والتقارير في النظام ولن يحصل على وصول فعلي.`,
+    );
+  }
+
+  for (const [code, enabled] of params.effectiveEnabled) {
+    if (!enabled) continue;
+    if (code === "dashboard.ops.view" && params.targetRoleCode !== "admin") {
+      warnings.push(
+        "صلاحية المؤشرات التشغيلية الحساسة مخصصة عادةً للمدير العام فقط.",
+      );
+    }
+    if (isReservedUnusedPermission(code)) {
+      warnings.push(`الصلاحية «${code}» محجوزة وغير مستخدمة في الإصدار الحالي.`);
+    }
+  }
+
+  return warnings;
+}
