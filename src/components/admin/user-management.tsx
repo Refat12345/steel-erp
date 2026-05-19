@@ -1,16 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
 import { toast } from "sonner";
 import {
   Plus,
   Search,
   KeyRound,
   Pencil,
+  Shield,
   UserCheck,
   UserX,
   Loader2,
 } from "lucide-react";
+import { sessionHasPermission } from "@/lib/client-permissions";
+import { UserPermissionsDialog } from "@/components/admin/user-permissions-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -58,6 +62,9 @@ interface UserItem {
 }
 
 export function UserManagement() {
+  const { data: session } = useSession();
+  const canSetPermissions = sessionHasPermission(session, "user.set_permissions");
+
   const [users, setUsers] = useState<UserItem[]>([]);
   const [roles, setRoles] = useState<RoleInfo[]>([]);
   const [total, setTotal] = useState(0);
@@ -70,6 +77,7 @@ export function UserManagement() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editUser, setEditUser] = useState<UserItem | null>(null);
   const [resetPwUser, setResetPwUser] = useState<UserItem | null>(null);
+  const [permissionsUser, setPermissionsUser] = useState<UserItem | null>(null);
 
   const PAGE_SIZE = 25;
 
@@ -234,6 +242,21 @@ export function UserManagement() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
+                        {canSetPermissions && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            title={
+                              user.roleCode === "admin"
+                                ? "صلاحيات المدير ثابتة"
+                                : "الصلاحيات"
+                            }
+                            onClick={() => setPermissionsUser(user)}
+                          >
+                            <Shield className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="icon"
@@ -327,6 +350,21 @@ export function UserManagement() {
           onSuccess={() => {
             setEditUser(null);
             void fetchUsers();
+          }}
+        />
+      )}
+
+      {permissionsUser && (
+        <UserPermissionsDialog
+          user={{
+            id: permissionsUser.id,
+            username: permissionsUser.username,
+            fullName: permissionsUser.fullName,
+            roleCode: permissionsUser.roleCode,
+          }}
+          open={!!permissionsUser}
+          onOpenChange={(open) => {
+            if (!open) setPermissionsUser(null);
           }}
         />
       )}
