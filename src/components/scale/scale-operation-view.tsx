@@ -51,10 +51,10 @@ import { getDisplayGradeLabel } from "@/lib/truck-grade";
 import type { SalesOrderGrade } from "@prisma/client";
 import { compressImage } from "@/lib/compress-image";
 import {
-  durationBetween,
   formatDuration,
   formatDurationCompact,
 } from "@/lib/format-duration";
+import type { TruckTimings } from "@/lib/truck-timing";
 
 interface SizeOption {
   id: number;
@@ -101,12 +101,15 @@ interface TruckDetail {
   notes: string | null;
   cancelReason: string | null;
   closedAt: string | null;
+  loadingConfirmedAt: string | null;
+  lastReopenedAt: string | null;
   version: number;
   createdAt: string;
   customer: { id: number; fullName: string; code: string } | null;
   destination: { id: number; name: string; details: string | null } | null;
   creator: { id: number; fullName: string; username: string };
   closer: { id: number; fullName: string; username: string } | null;
+  loader: { id: number; fullName: string; username: string } | null;
   sessions: WeighSessionItem[];
   photos: TruckPhoto[];
   requestItems: TruckRequestItemData[];
@@ -118,6 +121,7 @@ interface TruckDetail {
     totalQtyTons: string;
     contract: { customer: { id: number; fullName: string; code: string } };
   } | null;
+  timings: TruckTimings;
 }
 
 const statusMap: Record<string, { label: string; color: string }> = {
@@ -254,20 +258,7 @@ export function ScaleOperationView({ truckId }: { truckId: number }) {
   const gross = truck.grossWeightKg ? Number(truck.grossWeightKg) : null;
   const bridgeNetKg = tare != null && gross != null ? gross - tare : null;
   const isActive = !["Completed", "Cancelled"].includes(truck.status);
-
-  // Timing calculations
-  const waitMs = durationBetween(truck.createdAt, truck.tareTime);
-  const loadingEndTime = truck.grossTime
-    ?? (truck.status === "Cancelled" ? truck.closedAt : null);
-  const loadingInProgress =
-    truck.tareTime != null && loadingEndTime == null && truck.status !== "Cancelled";
-  const loadingMs = loadingInProgress
-    ? durationBetween(truck.tareTime, new Date())
-    : durationBetween(truck.tareTime, loadingEndTime);
-  const totalMs = durationBetween(
-    truck.createdAt,
-    truck.closedAt ?? (isActive ? new Date() : null),
-  );
+  const timings = truck.timings;
 
   return (
     <div className="space-y-4">
@@ -344,10 +335,7 @@ export function ScaleOperationView({ truckId }: { truckId: number }) {
         grossTime={truck.grossTime}
         closedAt={truck.closedAt}
         status={truck.status}
-        waitMs={waitMs}
-        loadingMs={loadingMs}
-        totalMs={totalMs}
-        loadingInProgress={loadingInProgress}
+        timings={timings}
       />
 
       {/* Request Items (what the customer ordered) */}
@@ -735,20 +723,14 @@ function TimingCard({
   grossTime,
   closedAt,
   status,
-  waitMs,
-  loadingMs,
-  totalMs,
-  loadingInProgress,
+  timings,
 }: {
   createdAt: string;
   tareTime: string | null;
   grossTime: string | null;
   closedAt: string | null;
   status: string;
-  waitMs: number | null;
-  loadingMs: number | null;
-  totalMs: number | null;
-  loadingInProgress: boolean;
+  timings: TruckTimings;
 }) {
   const steps: {
     label: string;
@@ -757,6 +739,7 @@ function TimingCard({
     durationMs?: number | null;
     highlight?: boolean;
     inProgress?: boolean;
+    subtitle?: string;
   }[] = [
     {
       label: "تسجيل في اللوجستك",
@@ -766,15 +749,27 @@ function TimingCard({
       label: "دخول القبان فارغاً",
       time: tareTime,
       durationLabel: "وقت الانتظار",
-      durationMs: waitMs,
+      durationMs: timings.waitMs,
+    },
+    {
+      label: "أول وزنة داخلية",
+      time: timings.firstSessionAt,
+    },
+    {
+      label: "تأكيد اكتمال التحميل",
+      time: timings.loadingConfirmedAt,
+      durationLabel: "مدة التحميل الداخلي",
+      durationMs: timings.internalLoadingMs,
+      inProgress: timings.internalLoadingInProgress,
+      subtitle: timings.loaderName ? `بواسطة: ${timings.loaderName}` : undefined,
     },
     {
       label: "وزن المحمّل (الخروج)",
       time: grossTime,
-      durationLabel: "مدة التحميل",
-      durationMs: loadingMs,
+      durationLabel: "مدة القبان",
+      durationMs: timings.scaleMs,
       highlight: true,
-      inProgress: loadingInProgress,
+      inProgress: timings.scaleInProgress,
     },
   ];
 
@@ -791,28 +786,37 @@ function TimingCard({
         <CardTitle className="text-base">الجدول الزمني للعملية</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Summary metrics */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <MetricBox
             label="وقت الانتظار"
             sublabel="من التسجيل إلى دخول القبان"
-            valueMs={waitMs}
+            valueMs={timings.waitMs}
           />
           <MetricBox
-            label={loadingInProgress ? "مدة التحميل (جارٍ)" : "مدة التحميل"}
+            label={timings.scaleInProgress ? "مدة القبان (جارٍ)" : "مدة القبان"}
             sublabel="من الوزن الفارغ إلى المحمّل"
-            valueMs={loadingMs}
-            emphasize
-            pulse={loadingInProgress}
+            valueMs={timings.scaleMs}
+            emphasize="scale"
+            pulse={timings.scaleInProgress}
+          />
+          <MetricBox
+            label={
+              timings.internalLoadingInProgress
+                ? "مدة التحميل الداخلي (جارٍ)"
+                : "مدة التحميل الداخلي"
+            }
+            sublabel="من أول وزنة إلى تأكيد المحمّل"
+            valueMs={timings.internalLoadingMs}
+            emphasize="internal"
+            pulse={timings.internalLoadingInProgress}
           />
           <MetricBox
             label="المدة الكلية"
             sublabel="من التسجيل إلى الإغلاق"
-            valueMs={totalMs}
+            valueMs={timings.totalMs}
           />
         </div>
 
-        {/* Vertical timeline */}
         <div className="relative ps-6 border-s-2 border-dashed border-muted">
           {steps.map((step, i) => (
             <div key={i} className="relative pb-4 last:pb-0">
@@ -821,7 +825,9 @@ function TimingCard({
                   step.time
                     ? step.highlight
                       ? "bg-emerald-500"
-                      : "bg-sky-500"
+                      : step.inProgress
+                        ? "bg-amber-500 animate-pulse"
+                        : "bg-sky-500"
                     : step.inProgress
                       ? "bg-amber-500 animate-pulse"
                       : "bg-muted-foreground/30"
@@ -832,9 +838,14 @@ function TimingCard({
                 <span className="text-xs text-muted-foreground font-mono">
                   {step.time
                     ? new Date(step.time).toLocaleString("ar-SY")
-                    : "— لم يحصل بعد —"}
+                    : step.inProgress
+                      ? "— في الانتظار —"
+                      : "— لم يحصل بعد —"}
                 </span>
               </div>
+              {step.subtitle && (
+                <div className="mt-0.5 text-xs text-muted-foreground">{step.subtitle}</div>
+              )}
               {step.durationMs != null && step.durationLabel && (
                 <div className="mt-1 text-xs text-muted-foreground">
                   <span>{step.durationLabel}: </span>
@@ -864,17 +875,28 @@ function MetricBox({
   label: string;
   sublabel: string;
   valueMs: number | null;
-  emphasize?: boolean;
+  emphasize?: "scale" | "internal";
   pulse?: boolean;
 }) {
+  const emphasizeClass =
+    emphasize === "scale"
+      ? "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-900"
+      : emphasize === "internal"
+        ? "bg-amber-50 border-amber-200 dark:bg-amber-950/20 dark:border-amber-900"
+        : "bg-muted/30";
+  const valueClass =
+    emphasize === "scale"
+      ? "text-emerald-700 dark:text-emerald-400"
+      : emphasize === "internal"
+        ? "text-amber-700 dark:text-amber-400"
+        : "";
+
   return (
     <div
-      className={`rounded-lg border p-3 ${
-        emphasize ? "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-900" : "bg-muted/30"
-      } ${pulse ? "animate-pulse" : ""}`}
+      className={`rounded-lg border p-3 ${emphasizeClass} ${pulse ? "animate-pulse" : ""}`}
     >
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`text-lg font-bold mt-0.5 font-mono tabular-nums ${emphasize ? "text-emerald-700 dark:text-emerald-400" : ""}`}>
+      <div className={`text-lg font-bold mt-0.5 font-mono tabular-nums ${valueClass}`}>
         {formatDurationCompact(valueMs)}
       </div>
       <div className="text-[10px] text-muted-foreground mt-0.5">{sublabel}</div>

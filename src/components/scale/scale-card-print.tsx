@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Printer, ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { aggregateWeighSessionsBySize } from "@/lib/weigh-session-aggregate";
-import { durationBetween, formatDuration } from "@/lib/format-duration";
+import { formatDuration } from "@/lib/format-duration";
+import type { TruckTimings } from "@/lib/truck-timing";
 import { getDisplayGradeLabel } from "@/lib/truck-grade";
 import {
   computeA4PrintFitScale,
@@ -42,10 +43,12 @@ interface TruckDetail {
   notes: string | null;
   closedAt: string | null;
   createdAt: string;
+  loadingConfirmedAt: string | null;
   customer: { id: number; fullName: string; code: string } | null;
   destination: { id: number; name: string; details: string | null } | null;
   creator: { fullName: string };
   closer: { fullName: string } | null;
+  loader: { fullName: string } | null;
   sessions: WeighSessionItem[];
   requestItems: TruckRequestItemPrint[];
   operationalGrade: SalesOrderGrade | null;
@@ -55,6 +58,7 @@ interface TruckDetail {
     grade: SalesOrderGrade | null;
     contract: { customer: { fullName: string; code: string } };
   } | null;
+  timings: TruckTimings;
 }
 
 export function ScaleCardPrint({
@@ -174,10 +178,8 @@ export function ScaleCardPrint({
   );
   const bridgeNetTons = bridgeNetKg / 1000;
   const discrepancyTons = bridgeNetTons - totalSessionsTons;
-
-  const waitMs = durationBetween(truck.createdAt, truck.tareTime);
-  const loadingMs = durationBetween(truck.tareTime, truck.grossTime);
-  const totalMs = durationBetween(truck.createdAt, truck.closedAt);
+  const { waitMs, scaleMs, internalLoadingMs, totalMs, loaderName, loadingConfirmedAt } =
+    truck.timings;
 
   const sessionsBySize = aggregateWeighSessionsBySize(truck.sessions);
   const totalAggregateBundles =
@@ -426,12 +428,29 @@ export function ScaleCardPrint({
                 </tr>
                 <tr className="border-b border-gray-300 bg-emerald-50 print:bg-gray-50">
                   <td className="py-1.5 px-3 font-bold">
-                    مدة التحميل (الفارغ → المحمّل)
+                    مدة القبان (الفارغ → المحمّل)
                   </td>
                   <td className="py-1.5 px-3 font-bold">
-                    {formatDuration(loadingMs)}
+                    {formatDuration(scaleMs)}
                   </td>
                 </tr>
+                <tr className="border-b border-gray-300">
+                  <td className="py-1.5 px-3">
+                    مدة التحميل الداخلي (أول وزنة → تأكيد المحمّل)
+                  </td>
+                  <td className="py-1.5 px-3 font-semibold">
+                    {formatDuration(internalLoadingMs)}
+                  </td>
+                </tr>
+                {loadingConfirmedAt && loaderName && (
+                  <tr className="border-b border-gray-300">
+                    <td className="py-1.5 px-3">تأكيد المحمّل</td>
+                    <td className="py-1.5 px-3 font-semibold">
+                      {loaderName} —{" "}
+                      {new Date(loadingConfirmedAt).toLocaleString("ar-SY")}
+                    </td>
+                  </tr>
+                )}
                 <tr>
                   <td className="py-1.5 px-3">
                     المدة الكلية (التسجيل → الإغلاق)
