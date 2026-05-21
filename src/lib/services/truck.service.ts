@@ -939,12 +939,14 @@ export async function reopenBeforeGross(truckId: number, userId: number) {
         // protected by the DB CHECK constraint
         // (truck_operations_loading_confirmation_pair_chk), which requires
         // them to be null-together or set-together.
+        const reopenedAt = new Date();
         const updated = await tx.truckOperation.update({
           where: { id: truckId },
           data: {
             status: "OnScale",
             loadingConfirmedAt: null,
             loaderId: null,
+            lastReopenedAt: reopenedAt,
           },
         });
 
@@ -1222,6 +1224,7 @@ const DETAIL_INCLUDE = {
   photos: { orderBy: { capturedAt: "asc" as const } },
   creator: { select: { id: true, fullName: true, username: true } },
   closer: { select: { id: true, fullName: true, username: true } },
+  loader: { select: { id: true, fullName: true, username: true } },
   salesOrder: {
     select: {
       orderNumber: true,

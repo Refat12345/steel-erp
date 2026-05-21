@@ -14,6 +14,7 @@ import {
   getOperationDetail,
   updateTruckBeforeWeigh,
 } from "@/lib/services/truck.service";
+import { computeTruckTimings } from "@/lib/truck-timing";
 
 export async function GET(
   _req: NextRequest,
@@ -33,7 +34,18 @@ export async function GET(
 
   try {
     const truck = await getOperationDetail(truckId);
-    return ok(truck);
+    const timings = computeTruckTimings({
+      createdAt: truck.createdAt,
+      tareTime: truck.tareTime,
+      grossTime: truck.grossTime,
+      closedAt: truck.closedAt,
+      status: truck.status,
+      loadingConfirmedAt: truck.loadingConfirmedAt,
+      lastReopenedAt: truck.lastReopenedAt,
+      sessions: truck.sessions,
+      loader: truck.loader,
+    });
+    return ok({ ...truck, timings });
   } catch (e) {
     return handleServiceError(e);
   }

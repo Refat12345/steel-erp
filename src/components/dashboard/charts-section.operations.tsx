@@ -1068,9 +1068,9 @@ export function ChartsSection() {
               colorRing="oklch(0.720 0.150 65 / 28%)"
             />
             <KpiCard
-              title="زمن التحميل"
+              title="متوسط زمن تأكيد التحميل"
               value={formatMinutes(ops.averages30d.avgLoadingMin)}
-              sub="من الفارغ حتى انتهاء التحميل"
+              sub="من الوزن الفارغ حتى تأكيد المحمّل — 30 يوم"
               icon={Timer}
               color="oklch(0.650 0.190 290)"
               colorBg="oklch(0.650 0.190 290 / 12%)"

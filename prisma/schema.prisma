@@ -425,6 +425,9 @@ model TruckOperation {
   /// with `loadingConfirmedAt` inside `confirmLoadingComplete`. Required for
   /// audit / dispute traceability.
   loaderId         Int?         @map("loader_id")
+  /// Set when loading is reopened before gross. Internal loading duration
+  /// counts from this timestamp (or first session if never reopened).
+  lastReopenedAt   DateTime?    @map("last_reopened_at")
   /// Operational grade declared by logistics at registration time.
   /// Used as a temporary display source until a SalesOrder is linked.
   /// Priority rule: salesOrder.grade takes precedence when present.

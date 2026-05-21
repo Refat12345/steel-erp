@@ -545,6 +545,7 @@ describe("reopenBeforeGross", () => {
     expect(updateCall.data.status).toBe("OnScale");
     expect(updateCall.data.loadingConfirmedAt).toBeNull();
     expect(updateCall.data.loaderId).toBeNull();
+    expect(updateCall.data.lastReopenedAt).toBeInstanceOf(Date);
 
     const audit = mockPrisma.auditLog.create.mock.calls[0][0];
     expect(audit.data.details.event).toBe("session_reopened");
