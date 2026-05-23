@@ -31,6 +31,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Pencil,
+  CalendarDays,
 } from "lucide-react";
 import { RegisterTruckDialog } from "./register-truck-dialog";
 import { EditTruckDialog, type EditableTruck } from "./edit-truck-dialog";
@@ -75,6 +76,20 @@ const statusMap: Record<
 
 const PAGE_SIZE = 25;
 
+function formatLocalDateInput(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function dayFilterParams(date: string): { dateFrom: string; dateTo: string } {
+  return {
+    dateFrom: `${date}T00:00:00.000`,
+    dateTo: `${date}T23:59:59.999`,
+  };
+}
+
 export function TruckList() {
   const { data: session } = useSession();
   const router = useRouter();
@@ -84,8 +99,12 @@ export function TruckList() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [plateSearch, setPlateSearch] = useState("");
+  const [registrationDate, setRegistrationDate] = useState("");
   const [showRegister, setShowRegister] = useState(false);
   const [editingTruck, setEditingTruck] = useState<TruckListItem | null>(null);
+
+  const todayDate = formatLocalDateInput(new Date());
+  const isTodaySelected = registrationDate === todayDate;
 
   const canRegister = sessionHasPermission(session, "truck.register");
   const canEditQueued = sessionHasPermission(session, "truck.edit_queued");
@@ -99,6 +118,11 @@ export function TruckList() {
       params.set("pageSize", String(PAGE_SIZE));
       if (statusFilter && statusFilter !== "all") params.set("status", statusFilter);
       if (plateSearch.trim()) params.set("plateNumber", plateSearch.trim());
+      if (registrationDate) {
+        const { dateFrom, dateTo } = dayFilterParams(registrationDate);
+        params.set("dateFrom", dateFrom);
+        params.set("dateTo", dateTo);
+      }
 
       const res = await fetch(`/api/trucks?${params}`);
       const json = await res.json();
@@ -110,7 +134,7 @@ export function TruckList() {
     } finally {
       setLoading(false);
     }
-  }, [page, statusFilter, plateSearch]);
+  }, [page, statusFilter, plateSearch, registrationDate]);
 
   useEffect(() => {
     fetchData();
@@ -118,14 +142,14 @@ export function TruckList() {
 
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, plateSearch]);
+  }, [statusFilter, plateSearch, registrationDate]);
 
   const totalPages = Math.ceil(total / PAGE_SIZE) || 1;
 
   return (
     <div className="space-y-4">
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-end gap-3">
         <div className="relative flex-1 min-w-[180px]">
           <Search className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -148,6 +172,35 @@ export function TruckList() {
             ))}
           </SelectContent>
         </Select>
+        <div className="space-y-1">
+          <label htmlFor="truck-registration-date" className="text-xs text-muted-foreground">
+            تاريخ التسجيل
+          </label>
+          <div className="flex items-center gap-1">
+            <Input
+              id="truck-registration-date"
+              type="date"
+              className="w-[150px]"
+              value={registrationDate}
+              onChange={(e) => setRegistrationDate(e.target.value)}
+            />
+            <Button
+              type="button"
+              variant={isTodaySelected ? "default" : "outline"}
+              size="sm"
+              className="shrink-0"
+              onClick={() => setRegistrationDate(todayDate)}
+            >
+              <CalendarDays className="h-4 w-4 me-1" />
+              اليوم
+            </Button>
+            {registrationDate && (
+              <Badge variant="secondary" className="h-9 px-3 text-sm tabular-nums shrink-0">
+                {loading ? "…" : `${total.toLocaleString("ar-SY")} شاحنة`}
+              </Badge>
+            )}
+          </div>
+        </div>
         {canRegister && (
           <Button onClick={() => setShowRegister(true)}>
             <Plus className="h-4 w-4 me-1" />
