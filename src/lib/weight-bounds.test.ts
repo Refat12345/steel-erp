@@ -49,4 +49,8 @@ describe("validateGrossWeight — relationship to tare", () => {
   it("accepts a plausible gross on top of tare", () => {
     expect(validateGrossWeight(25_000, 10_000)).toBeNull();
   });
+
+  it("accepts gross at deployment maximum (100 000 kg)", () => {
+    expect(validateGrossWeight(MAX_WEIGHT_KG, 10_000)).toBeNull();
+  });
 });
