@@ -6,8 +6,8 @@
  *      NEVER change per deployment. Used by validators to reject obviously
  *      absurd values (e.g. 0, negative, 10 million) before any other logic.
  *   2. Deployment-specific bounds (tare/gross/net) — configurable via env.
- *      Capture "what weights are plausible at THIS plant" (e.g. 35 t cap for
- *      Syrian road trucks); tighter than the hard rails.
+ *      Capture "what weights are plausible at THIS plant"; tighter than the
+ *      hard rails unless aligned with them (gross defaults to MAX_WEIGHT_KG).
  *
  * All values are in kilograms.
  */
@@ -42,7 +42,7 @@ export const WEIGHT_BOUNDS = {
   TARE_MIN_KG: clampBound("min", envInt("TARE_MIN_KG", 3_000)),
   TARE_MAX_KG: clampBound("max", envInt("TARE_MAX_KG", 35_000)),
   GROSS_MIN_KG: clampBound("min", envInt("GROSS_MIN_KG", 5_000)),
-  GROSS_MAX_KG: clampBound("max", envInt("GROSS_MAX_KG", 70_000)),
+  GROSS_MAX_KG: clampBound("max", envInt("GROSS_MAX_KG", MAX_WEIGHT_KG)),
   NET_MIN_KG: Math.max(1, envInt("NET_MIN_KG", 500)),
 } as const;
 
