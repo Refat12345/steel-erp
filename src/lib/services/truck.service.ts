@@ -11,8 +11,19 @@ import {
   validateGrossWeight,
   validateWeightRange,
 } from "@/lib/weight-bounds";
+import { buildWeighbridgeDiscrepancyAuditFields } from "@/lib/weighbridge-discrepancy";
 
 type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+async function loadInternalTotalTons(tx: TxClient, truckId: number): Promise<number> {
+  const sessions = await tx.weighSession.findMany({
+    where: { truckOperationId: truckId },
+    select: { weightTons: true },
+  });
+  return sessions
+    .reduce((sum, s) => sum.plus(s.weightTons), new Decimal(0))
+    .toNumber();
+}
 
 const VALID_TRANSITIONS: Record<TruckStatus, TruckStatus[]> = {
   Queued: ["FirstWeigh", "Cancelled"],
@@ -585,6 +596,13 @@ export async function correctGross(
         const grossError = validateGrossWeight(newWeightKg, Number(truck.tareWeightKg));
         if (grossError) throw new ServiceError(grossError);
 
+        const internalTotalTons = await loadInternalTotalTons(tx, truckId);
+        const discrepancyFields = buildWeighbridgeDiscrepancyAuditFields({
+          tareKg: Number(truck.tareWeightKg),
+          grossKg: newWeightKg,
+          internalTotalTons,
+        });
+
         const oldWeight = truck.grossWeightKg ? Number(truck.grossWeightKg) : null;
 
         // Optimistic lock — see correctTare for the full rationale.
@@ -614,6 +632,7 @@ export async function correctGross(
             oldGrossWeightKg: oldWeight,
             newGrossWeightKg: newWeightKg,
             expectedVersion,
+            ...discrepancyFields,
           },
         });
 
@@ -1035,6 +1054,13 @@ export async function enterGross(truckId: number, weightKg: number, userId: numb
         const grossError = validateGrossWeight(weightKg, Number(truck.tareWeightKg));
         if (grossError) throw new ServiceError(grossError);
 
+        const internalTotalTons = await loadInternalTotalTons(tx, truckId);
+        const discrepancyFields = buildWeighbridgeDiscrepancyAuditFields({
+          tareKg: Number(truck.tareWeightKg),
+          grossKg: weightKg,
+          internalTotalTons,
+        });
+
         const updated = await tx.truckOperation.update({
           where: { id: truckId },
           data: {
@@ -1062,6 +1088,7 @@ export async function enterGross(truckId: number, weightKg: number, userId: numb
               netWeightKg: weightKg - Number(truck.tareWeightKg),
               loaderId: truck.loaderId,
               loadingConfirmedAt: truck.loadingConfirmedAt,
+              ...discrepancyFields,
             },
           },
         });

@@ -367,6 +367,7 @@ describe("enterGross", () => {
       loadingConfirmedAt: new Date("2026-04-22T10:00:00Z"),
       loaderId: 99,
     });
+    mockPrisma.weighSession.findMany.mockResolvedValue([{ weightTons: 15.05 }]);
     mockPrisma.truckOperation.update.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
       id: 1,
       status: "SecondWeigh",
@@ -387,6 +388,16 @@ describe("enterGross", () => {
     // computed server-side and stamped into the audit record.
     expect(audit.data.details.newValue.netWeightKg).toBe(15_000);
     expect(audit.data.details.newValue.loaderId).toBe(99);
+  });
+
+  it("stamps cross-verification discrepancy fields into gross_recorded audit", async () => {
+    await enterGross(1, 25_300, 7);
+
+    const audit = mockPrisma.auditLog.create.mock.calls[0][0];
+    expect(audit.data.details.newValue.discrepancyKg).toBe(250);
+    expect(audit.data.details.newValue.discrepancyWarning).toBe(true);
+    expect(audit.data.details.newValue.internalTotalTons).toBe(15.05);
+    expect(audit.data.details.newValue.bridgeNetKg).toBe(15_300);
   });
 
   // Part 1 — the workflow-separation rule. This is the single most important

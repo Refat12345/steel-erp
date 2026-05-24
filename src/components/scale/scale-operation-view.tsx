@@ -47,6 +47,10 @@ import {
 import Link from "next/link";
 import { buildFileViewUrl } from "@/lib/uploaded-file-url";
 import { aggregateWeighSessionsBySize } from "@/lib/weigh-session-aggregate";
+import {
+  computeWeighbridgeDiscrepancy,
+  isWeighbridgeDiscrepancyWarning,
+} from "@/lib/weighbridge-discrepancy";
 import { getDisplayGradeLabel } from "@/lib/truck-grade";
 import type { SalesOrderGrade } from "@prisma/client";
 import { compressImage } from "@/lib/compress-image";
@@ -134,7 +138,13 @@ const statusMap: Record<string, { label: string; color: string }> = {
   Cancelled: { label: "ملغاة", color: "bg-red-100 text-red-800" },
 };
 
-export function ScaleOperationView({ truckId }: { truckId: number }) {
+export function ScaleOperationView({
+  truckId,
+  discrepancyWarnKg,
+}: {
+  truckId: number;
+  discrepancyWarnKg: number;
+}) {
   const { data: session } = useSession();
   const [truck, setTruck] = useState<TruckDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -257,6 +267,14 @@ export function ScaleOperationView({ truckId }: { truckId: number }) {
   const tare = truck.tareWeightKg ? Number(truck.tareWeightKg) : null;
   const gross = truck.grossWeightKg ? Number(truck.grossWeightKg) : null;
   const bridgeNetKg = tare != null && gross != null ? gross - tare : null;
+  const bridgeDiscrepancyKg =
+    bridgeNetKg != null
+      ? computeWeighbridgeDiscrepancy({
+          tareKg: tare ?? 0,
+          grossKg: gross ?? 0,
+          internalTotalTons: totalSessionsTons,
+        }).discrepancyKg
+      : null;
   const isActive = !["Completed", "Cancelled"].includes(truck.status);
   const timings = truck.timings;
 
@@ -323,8 +341,22 @@ export function ScaleOperationView({ truckId }: { truckId: number }) {
           />
           <InfoCard
             label="الفرق"
-            value={`${(bridgeNetKg / 1000 - totalSessionsTons).toFixed(3)} طن`}
+            value={
+              bridgeDiscrepancyKg != null
+                ? `${bridgeDiscrepancyKg.toLocaleString("ar-SY")} كغ`
+                : "—"
+            }
           />
+          {bridgeDiscrepancyKg != null &&
+            isWeighbridgeDiscrepancyWarning(bridgeDiscrepancyKg, discrepancyWarnKg) && (
+              <div className="sm:col-span-3 rounded-lg border-2 border-red-500 bg-red-50 px-4 py-3 text-sm text-red-800 dark:bg-red-950/30 dark:text-red-200">
+                <p className="font-semibold">تنبيه: فرق كبير بين القبان والوزنات الداخلية</p>
+                <p className="mt-1 text-xs">
+                  الفرق {bridgeDiscrepancyKg.toLocaleString("ar-SY")} كغ يتجاوز الحد{" "}
+                  {discrepancyWarnKg.toLocaleString("ar-SY")} كغ
+                </p>
+              </div>
+            )}
         </div>
       )}
 
@@ -661,6 +693,15 @@ export function ScaleOperationView({ truckId }: { truckId: number }) {
         open={showGrossDialog}
         onOpenChange={setShowGrossDialog}
         title="إدخال وزن المحمّل (كغ)"
+        crossCheck={
+          tare != null
+            ? {
+                tareKg: tare,
+                internalTotalTons: totalSessionsTons,
+                discrepancyWarnKg,
+              }
+            : undefined
+        }
         onSubmit={(kg) => doAction(`/api/trucks/${truck.id}/gross`, "PATCH", { weightKg: kg })}
       />
       <WeightDialog
@@ -680,6 +721,15 @@ export function ScaleOperationView({ truckId }: { truckId: number }) {
         onOpenChange={setShowCorrectGrossDialog}
         title="تصحيح وزن المحمّل (كغ)"
         currentValue={gross ?? undefined}
+        crossCheck={
+          tare != null
+            ? {
+                tareKg: tare,
+                internalTotalTons: totalSessionsTons,
+                discrepancyWarnKg,
+              }
+            : undefined
+        }
         onSubmit={(kg) =>
           doAction(`/api/trucks/${truck.id}/correct-gross`, "PATCH", {
             weightKg: kg,
@@ -911,12 +961,18 @@ function WeightDialog({
   onOpenChange,
   title,
   currentValue,
+  crossCheck,
   onSubmit,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   title: string;
   currentValue?: number;
+  crossCheck?: {
+    tareKg: number;
+    internalTotalTons: number;
+    discrepancyWarnKg: number;
+  };
   onSubmit: (kg: number) => Promise<boolean>;
 }) {
   const [value, setValue] = useState("");
@@ -925,6 +981,20 @@ function WeightDialog({
 
   const parsedKg = parseFloat(value);
   const isValid = !isNaN(parsedKg) && parsedKg > 0;
+  const discrepancyPreview =
+    crossCheck && isValid
+      ? computeWeighbridgeDiscrepancy({
+          tareKg: crossCheck.tareKg,
+          grossKg: parsedKg,
+          internalTotalTons: crossCheck.internalTotalTons,
+        })
+      : null;
+  const showDiscrepancyWarning =
+    discrepancyPreview != null &&
+    isWeighbridgeDiscrepancyWarning(
+      discrepancyPreview.discrepancyKg,
+      crossCheck?.discrepancyWarnKg,
+    );
 
   const handleNext = (e: React.FormEvent) => {
     e.preventDefault();
@@ -992,6 +1062,28 @@ function WeightDialog({
           </form>
         ) : (
           <div className="space-y-4">
+            {showDiscrepancyWarning && discrepancyPreview && crossCheck && (
+              <div className="rounded-lg border-2 border-red-500 bg-red-50 p-4 text-sm text-red-800 dark:bg-red-950/30 dark:border-red-700 dark:text-red-200">
+                <p className="font-bold">تنبيه: فرق كبير بين القبان والوزنات الداخلية</p>
+                <div className="mt-2 space-y-1 font-mono text-xs sm:text-sm">
+                  <p>
+                    صافي القبان:{" "}
+                    {discrepancyPreview.bridgeNetKg.toLocaleString("ar-SY")} كغ
+                  </p>
+                  <p>
+                    مجموع الداخلي:{" "}
+                    {discrepancyPreview.internalKg.toLocaleString("ar-SY")} كغ
+                  </p>
+                  <p className="font-semibold">
+                    الفرق: {discrepancyPreview.discrepancyKg.toLocaleString("ar-SY")} كغ
+                    {" "}(الحد: {crossCheck.discrepancyWarnKg.toLocaleString("ar-SY")} كغ)
+                  </p>
+                </div>
+                <p className="mt-2 text-xs">
+                  يمكنك المتابعة بعد التحقق الفعلي على الأرض.
+                </p>
+              </div>
+            )}
             <div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4 text-center dark:bg-amber-950/30 dark:border-amber-700">
               <p className="text-sm text-muted-foreground mb-1">هل أنت متأكد من القيمة التالية؟</p>
               <p className="text-3xl font-bold font-mono" dir="ltr">
