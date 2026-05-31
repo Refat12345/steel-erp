@@ -222,7 +222,7 @@ export function TruckList() {
               <TableHead>الحالة</TableHead>
               <TableHead>النخب</TableHead>
               <TableHead>الفارغ (كغ)</TableHead>
-              <TableHead>المحمّل (كغ)</TableHead>
+              <TableHead>صافي القبان (كغ)</TableHead>
               <TableHead>الوزنات</TableHead>
               <TableHead>مدة التحميل</TableHead>
               <TableHead>التاريخ</TableHead>
@@ -259,6 +259,10 @@ export function TruckList() {
                     const loadingMs = loadingInProgress
                       ? durationBetween(truck.tareTime, new Date())
                       : durationBetween(truck.tareTime, endTime);
+                    const tareKg = truck.tareWeightKg ? Number(truck.tareWeightKg) : null;
+                    const grossKg = truck.grossWeightKg ? Number(truck.grossWeightKg) : null;
+                    const bridgeNetKg =
+                      tareKg != null && grossKg != null ? grossKg - tareKg : null;
                     return (
                       <TableRow
                         key={truck.id}
@@ -287,8 +291,8 @@ export function TruckList() {
                             : "—"}
                         </TableCell>
                         <TableCell className="font-mono text-sm">
-                          {truck.grossWeightKg
-                            ? Number(truck.grossWeightKg).toLocaleString("ar-SY")
+                          {bridgeNetKg != null
+                            ? bridgeNetKg.toLocaleString("ar-SY")
                             : "—"}
                         </TableCell>
                         <TableCell className="text-center">
