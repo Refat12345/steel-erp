@@ -37,7 +37,12 @@ const mockPrisma = vi.hoisted(() => ({
     update: vi.fn(),
   },
   truckRequestItem: { createMany: vi.fn(), deleteMany: vi.fn() },
-  weighSession: { findMany: vi.fn(), count: vi.fn() },
+  weighSession: {
+    findMany: vi.fn(),
+    findUnique: vi.fn(),
+    count: vi.fn(),
+    deleteMany: vi.fn(),
+  },
   truckPhoto: { count: vi.fn() },
   auditLog: { create: vi.fn() },
   $transaction: vi.fn(),
@@ -63,6 +68,7 @@ import {
   enterGross,
   cancelOperation,
   reopenBeforeGross,
+  deleteWeighSession,
 } from "./truck.service";
 import { ServiceError } from "./errors";
 
@@ -697,5 +703,71 @@ describe("reopenBeforeGross", () => {
       loaderId: 99,
     });
     await expect(reopenBeforeGross(1, 7)).rejects.toThrow(/اكتمال التحميل/);
+  });
+});
+
+// ─── Delete internal weigh session ─────────────────────────────
+
+describe("deleteWeighSession", () => {
+  const weighRow = {
+    id: 10,
+    truckOperationId: 1,
+    sessionNumber: 2,
+    sizeId: 3,
+    bundleCount: 5,
+    weightTons: 6.12,
+    version: 1,
+  };
+
+  beforeEach(() => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValue({
+      id: 1,
+      status: "OnScale",
+    });
+    mockPrisma.weighSession.findUnique.mockResolvedValue(weighRow);
+    mockPrisma.weighSession.deleteMany.mockResolvedValue({ count: 1 });
+    mockPrisma.weighSession.count.mockResolvedValue(1);
+  });
+
+  it("deletes a session on OnScale and writes audit", async () => {
+    const result = await deleteWeighSession(1, 10, 1, 7);
+
+    expect(result.truckStatus).toBe("OnScale");
+    expect(mockPrisma.weighSession.deleteMany).toHaveBeenCalledWith({
+      where: { id: 10, version: 1 },
+    });
+    const audit = mockPrisma.auditLog.create.mock.calls[0][0];
+    expect(audit.data.action).toBe("delete");
+    expect(audit.data.entityType).toBe("WeighSession");
+    expect(audit.data.details.deleted.sessionNumber).toBe(2);
+  });
+
+  it("reverts truck status to FirstWeigh when the last session is deleted", async () => {
+    mockPrisma.weighSession.count.mockResolvedValue(0);
+    mockPrisma.truckOperation.update.mockResolvedValue({ id: 1, status: "FirstWeigh" });
+
+    const result = await deleteWeighSession(1, 10, 1, 7);
+
+    expect(result.truckStatus).toBe("FirstWeigh");
+    expect(mockPrisma.truckOperation.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: { status: "FirstWeigh" },
+    });
+  });
+
+  it("rejects delete after loading complete", async () => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValue({
+      id: 1,
+      status: "LoadingComplete",
+    });
+
+    await expect(deleteWeighSession(1, 10, 1, 7)).rejects.toThrow(/اكتمال التحميل/);
+    expect(mockPrisma.weighSession.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects stale expectedVersion", async () => {
+    mockPrisma.weighSession.deleteMany.mockResolvedValue({ count: 0 });
+
+    await expect(deleteWeighSession(1, 10, 1, 7)).rejects.toThrow(/مستخدم آخر/);
   });
 });
