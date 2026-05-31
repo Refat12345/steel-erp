@@ -43,6 +43,7 @@ import {
   Printer,
   ArrowRight,
   Pencil,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import { buildFileViewUrl } from "@/lib/uploaded-file-url";
@@ -162,6 +163,10 @@ export function ScaleOperationView({
   const canGross = sessionHasPermission(session, "scale.enter_gross");
   const canSession = sessionHasPermission(session, "scale.enter_session");
   const canEditSession = sessionHasPermission(session, "scale.edit_session");
+  const canDeleteSession = sessionHasPermission(session, "scale.delete_session");
+  const canManageSession =
+    (canEditSession || canDeleteSession) &&
+    (truck?.status === "OnScale" || truck?.status === "FirstWeigh");
   const canPhoto = sessionHasPermission(session, "scale.upload_photo");
   const canLoadingComplete = sessionHasPermission(session, "scale.loading_complete");
   const canReopen = sessionHasPermission(session, "scale.reopen_before_gross");
@@ -558,10 +563,7 @@ export function ScaleOperationView({
                     <TableHead>القياس</TableHead>
                     <TableHead>الربطات</TableHead>
                     <TableHead>الوزن (طن)</TableHead>
-                    {canEditSession &&
-                      (truck.status === "OnScale" || truck.status === "FirstWeigh") && (
-                        <TableHead className="w-[60px]" />
-                      )}
+                    {canManageSession && <TableHead className="w-[100px]">إجراءات</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -573,17 +575,27 @@ export function ScaleOperationView({
                       <TableCell className="font-mono">
                         {Number(s.weightTons).toFixed(3)}
                       </TableCell>
-                      {canEditSession &&
-                        (truck.status === "OnScale" || truck.status === "FirstWeigh") && (
-                          <TableCell>
-                            <EditSessionButton
-                              truckId={truck.id}
-                              session={s}
-                              sizes={sizes}
-                              onEdited={fetchTruck}
-                            />
-                          </TableCell>
-                        )}
+                      {canManageSession && (
+                        <TableCell>
+                          <div className="flex items-center gap-0.5">
+                            {canEditSession && (
+                              <EditSessionButton
+                                truckId={truck.id}
+                                session={s}
+                                sizes={sizes}
+                                onEdited={fetchTruck}
+                              />
+                            )}
+                            {canDeleteSession && (
+                              <DeleteSessionButton
+                                truckId={truck.id}
+                                session={s}
+                                onDeleted={fetchTruck}
+                              />
+                            )}
+                          </div>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                   <TableRow className="font-bold">
@@ -591,10 +603,7 @@ export function ScaleOperationView({
                     <TableCell className="font-mono">
                       {totalSessionsTons.toFixed(3)}
                     </TableCell>
-                    {canEditSession &&
-                      (truck.status === "OnScale" || truck.status === "FirstWeigh") && (
-                        <TableCell />
-                      )}
+                    {canManageSession && <TableCell />}
                   </TableRow>
                 </TableBody>
               </Table>
@@ -1467,6 +1476,92 @@ function EditSessionButton({
               </DialogFooter>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ─── Delete Session Button ────────────────────────────────────────
+
+function DeleteSessionButton({
+  truckId,
+  session: s,
+  onDeleted,
+}: {
+  truckId: number;
+  session: WeighSessionItem;
+  onDeleted: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const weightLabel = Number(s.weightTons).toFixed(3);
+
+  const handleConfirm = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/trucks/${truckId}/sessions/${s.id}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": createClientIdempotencyKey(),
+        },
+        body: JSON.stringify({ expectedVersion: s.version }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error);
+      toast.success("تم حذف الوزنة");
+      setOpen(false);
+      onDeleted();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "خطأ");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="text-destructive hover:text-destructive"
+        onClick={() => setOpen(true)}
+        aria-label={`حذف الوزنة ${s.sessionNumber}`}
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>حذف الوزنة #{s.sessionNumber}</DialogTitle>
+          </DialogHeader>
+          <div className="rounded-lg border-2 border-destructive/40 bg-destructive/5 p-4 text-center">
+            <p className="text-sm text-muted-foreground mb-1">سيتم حذف الوزنة التالية نهائياً:</p>
+            <p className="text-2xl font-bold font-mono" dir="ltr">
+              {weightLabel} <span className="text-base font-normal">طن</span>
+            </p>
+            {s.size?.displayName && (
+              <p className="text-sm mt-2">
+                <span className="text-muted-foreground">القياس: </span>
+                {s.size.displayName}
+              </p>
+            )}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={saving}>
+              إلغاء
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void handleConfirm()}
+              disabled={saving}
+            >
+              {saving ? "جاري الحذف..." : "تأكيد الحذف"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

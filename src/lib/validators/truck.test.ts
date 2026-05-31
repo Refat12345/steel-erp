@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { truckUpdateSchema } from "./truck";
+import { truckUpdateSchema, weighSessionDeleteSchema } from "./truck";
 
 describe("truckUpdateSchema", () => {
   it("accepts null notes (clear after edit)", () => {
@@ -24,5 +24,20 @@ describe("truckUpdateSchema", () => {
     if (result.success) {
       expect(result.data.operationalGrade).toBeUndefined();
     }
+  });
+});
+
+describe("weighSessionDeleteSchema", () => {
+  it("requires expectedVersion", () => {
+    expect(weighSessionDeleteSchema.safeParse({}).success).toBe(false);
+    expect(weighSessionDeleteSchema.safeParse({ expectedVersion: 0 }).success).toBe(
+      true,
+    );
+  });
+
+  it("rejects negative version", () => {
+    expect(weighSessionDeleteSchema.safeParse({ expectedVersion: -1 }).success).toBe(
+      false,
+    );
   });
 });

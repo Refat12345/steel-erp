@@ -80,6 +80,10 @@ export const weighSessionEditSchema = z.object({
   expectedVersion: z.number().int().nonnegative("الإصدار المتوقّع غير صالح"),
 });
 
+export const weighSessionDeleteSchema = z.object({
+  expectedVersion: z.number().int().nonnegative("الإصدار المتوقّع غير صالح"),
+});
+
 export const cancelSchema = z.object({
   reason: z.string().min(1, "سبب الإلغاء مطلوب").max(2000, "السبب طويل جداً"),
 });

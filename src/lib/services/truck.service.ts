@@ -843,6 +843,106 @@ export async function editWeighSession(
   );
 }
 
+// ─── Delete Weigh Session ─────────────────────────────────────────
+
+export async function deleteWeighSession(
+  truckId: number,
+  sessionId: number,
+  expectedVersion: number,
+  userId: number,
+) {
+  return withRetry(() =>
+    prisma.$transaction(
+      async (tx: TxClient) => {
+        const locked = await tx.$queryRaw<{ id: number }[]>`
+          SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
+        `;
+        if (locked.length === 0) {
+          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        }
+
+        const truck = await tx.truckOperation.findUnique({
+          where: { id: truckId },
+          select: { id: true, status: true },
+        });
+        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+
+        if (truck.status !== "OnScale" && truck.status !== "FirstWeigh") {
+          throw new ServiceError("لا يمكن حذف الوزنات بعد تأكيد اكتمال التحميل");
+        }
+
+        const session = await tx.weighSession.findUnique({
+          where: { id: sessionId },
+          select: {
+            id: true,
+            truckOperationId: true,
+            sessionNumber: true,
+            sizeId: true,
+            bundleCount: true,
+            weightTons: true,
+            version: true,
+          },
+        });
+        if (!session || session.truckOperationId !== truckId) {
+          throw new ServiceError("الوزنة غير موجودة", "NOT_FOUND");
+        }
+
+        const deletedSnapshot = {
+          sessionNumber: session.sessionNumber,
+          sizeId: session.sizeId,
+          bundleCount: session.bundleCount,
+          weightTons: Number(session.weightTons),
+          version: session.version,
+        };
+
+        const result = await tx.weighSession.deleteMany({
+          where: { id: sessionId, version: expectedVersion },
+        });
+        if (result.count === 0) {
+          throw new ServiceError(
+            "تم تعديل الوزنة من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
+            "CONFLICT",
+          );
+        }
+
+        let newStatus = truck.status;
+        if (truck.status === "OnScale") {
+          const remaining = await tx.weighSession.count({
+            where: { truckOperationId: truckId },
+          });
+          if (remaining === 0) {
+            await tx.truckOperation.update({
+              where: { id: truckId },
+              data: { status: "FirstWeigh" },
+            });
+            newStatus = "FirstWeigh";
+          }
+        }
+
+        await logAudit(tx, {
+          userId,
+          action: "delete",
+          entityType: "WeighSession",
+          entityId: String(sessionId),
+          details: {
+            truckId,
+            deleted: deletedSnapshot,
+            expectedVersion,
+            truckStatusAfter: newStatus,
+          },
+        });
+
+        logger.info(
+          { truckId, sessionId, sessionNumber: session.sessionNumber, newStatus },
+          "weigh session deleted",
+        );
+        return { truckStatus: newStatus };
+      },
+      { isolationLevel: "ReadCommitted" },
+    ),
+  );
+}
+
 // ─── Upload Photo ─────────────────────────────────────────────────
 
 export async function uploadPhoto(truckId: number, filePath: string, userId: number) {
