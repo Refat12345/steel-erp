@@ -40,7 +40,7 @@ function clampBound(kind: "min" | "max", value: number): number {
 
 export const WEIGHT_BOUNDS = {
   TARE_MIN_KG: clampBound("min", envInt("TARE_MIN_KG", 3_000)),
-  TARE_MAX_KG: clampBound("max", envInt("TARE_MAX_KG", 35_000)),
+  TARE_MAX_KG: clampBound("max", envInt("TARE_MAX_KG", MAX_WEIGHT_KG)),
   GROSS_MIN_KG: clampBound("min", envInt("GROSS_MIN_KG", 5_000)),
   GROSS_MAX_KG: clampBound("max", envInt("GROSS_MAX_KG", MAX_WEIGHT_KG)),
   NET_MIN_KG: Math.max(1, envInt("NET_MIN_KG", 500)),

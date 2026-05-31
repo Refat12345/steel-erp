@@ -33,6 +33,9 @@ describe("validateTareWeight", () => {
   it("accepts typical road-truck tare", () => {
     expect(validateTareWeight(10_000)).toBeNull();
   });
+  it("accepts tare at deployment maximum (100 000 kg)", () => {
+    expect(validateTareWeight(MAX_WEIGHT_KG)).toBeNull();
+  });
 });
 
 describe("validateGrossWeight — relationship to tare", () => {
