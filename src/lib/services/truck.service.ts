@@ -280,23 +280,45 @@ export async function updateTruckBeforeWeigh(
           );
         }
 
-        if (truck.status !== "Queued" && truck.status !== "Approved") {
-          throw new ServiceError(
-            "لا يمكن تعديل الشاحنة بعد بدء الوزن. يجب إلغاء العملية وإعادة تسجيلها إذا لزم الأمر.",
-          );
-        }
+        const APPROVED_ONLY_REQUEST_ITEMS: (keyof UpdateTruckInput)[] = [
+          "customerId",
+          "destinationId",
+          "plateNumber",
+          "driverName",
+          "salesOrderNumber",
+          "notes",
+          "operationalGrade",
+        ];
 
-        if (truck.status === "Approved") {
-          const forbiddenFields: (keyof UpdateTruckInput)[] = [
-            "customerId",
-            "destinationId",
-            "plateNumber",
-            "driverName",
-            "salesOrderNumber",
-            "notes",
-            "operationalGrade",
-          ];
-          const attempted = forbiddenFields.some((field) => data[field] !== undefined);
+        const FIRST_WEIGH_LOCKED_IDENTITY: (keyof UpdateTruckInput)[] = [
+          "customerId",
+          "salesOrderNumber",
+          "plateNumber",
+        ];
+
+        if (truck.status === "FirstWeigh") {
+          const sessionCount = await tx.weighSession.count({
+            where: { truckOperationId: truckId },
+          });
+          if (sessionCount > 0) {
+            throw new ServiceError(
+              "لا يمكن تعديل الشاحنة بعد بدء الوزنات الداخلية. يجب إلغاء العملية وإعادة تسجيلها إذا لزم الأمر.",
+            );
+          }
+          const attemptedIdentity = FIRST_WEIGH_LOCKED_IDENTITY.some(
+            (field) => data[field] !== undefined,
+          );
+          if (attemptedIdentity) {
+            throw new ServiceError(
+              "بعد وزن الفارغ لا يمكن تغيير الزبون أو أمر البيع أو رقم اللوحة. يمكن تعديل السائق والوجهة والملاحظات والنخب وتفاصيل الطلبية فقط.",
+            );
+          }
+        } else if (truck.status !== "Queued" && truck.status !== "Approved") {
+          throw new ServiceError(
+            "لا يمكن تعديل الشاحنة بعد بدء الوزنات الداخلية. يجب إلغاء العملية وإعادة تسجيلها إذا لزم الأمر.",
+          );
+        } else if (truck.status === "Approved") {
+          const attempted = APPROVED_ONLY_REQUEST_ITEMS.some((field) => data[field] !== undefined);
           if (attempted) {
             throw new ServiceError(
               "بعد اعتماد الشاحنة يمكن تعديل تفاصيل الطلبية فقط. تغيير بيانات التسجيل يتطلب إلغاء الشاحنة وإعادة تسجيلها.",
@@ -337,6 +359,8 @@ export async function updateTruckBeforeWeigh(
               );
             }
           }
+        } else if (truck.status === "FirstWeigh" && data.destinationId !== undefined) {
+          await validateTruckReferences(tx, { destinationId: nextDestinationId });
         }
 
         if (data.requestItems !== undefined) {
@@ -381,6 +405,17 @@ export async function updateTruckBeforeWeigh(
           updateData.notes = nextNotes;
           updateData.operationalGrade =
             data.operationalGrade !== undefined ? data.operationalGrade : truck.operationalGrade;
+        } else if (truck.status === "FirstWeigh") {
+          if (data.destinationId !== undefined) {
+            updateData.destination = nextDestinationId
+              ? { connect: { id: nextDestinationId } }
+              : { disconnect: true };
+          }
+          if (data.driverName !== undefined) updateData.driverName = nextDriverName;
+          if (data.notes !== undefined) updateData.notes = nextNotes;
+          if (data.operationalGrade !== undefined) {
+            updateData.operationalGrade = data.operationalGrade;
+          }
         }
 
         const updated = await tx.truckOperation.update({
@@ -402,13 +437,19 @@ export async function updateTruckBeforeWeigh(
           }
         }
 
+        const auditEvent =
+          truck.status === "FirstWeigh"
+            ? "truck_updated_after_tare"
+            : "truck_updated_before_weigh";
+
         await logAudit(tx, {
           userId,
           action: "update",
           entityType: "TruckOperation",
           entityId: String(truckId),
           details: {
-            event: "truck_updated_before_weigh",
+            event: auditEvent,
+            editedAfterTare: truck.status === "FirstWeigh",
             previousValue,
             newValue: {
               status: updated.status,

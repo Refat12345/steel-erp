@@ -23,6 +23,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { DestinationSelect } from "@/components/destinations/destination-select";
 import { createClientIdempotencyKey } from "@/lib/browser-idempotency-key";
 import { GRADE_LABELS } from "@/lib/truck-grade";
+import { notesForPatch, operationalGradeIfChanged } from "@/lib/truck-edit-ui";
 import { Plus, Trash2 } from "lucide-react";
 import type { SalesOrderGrade } from "@prisma/client";
 
@@ -65,8 +66,10 @@ export interface EditableTruck {
   }[];
 }
 
+const EDITABLE_STATUSES = ["Queued", "Approved", "FirstWeigh"] as const;
+
 interface Props {
-  truck: EditableTruck | null;
+  truckId: number | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
@@ -74,7 +77,39 @@ interface Props {
 
 let rowKeyCounter = 0;
 
-export function EditTruckDialog({ truck, open, onOpenChange, onSuccess }: Props) {
+function populateFormFromTruck(
+  truck: EditableTruck,
+  setters: {
+    setCustomerId: (v: string) => void;
+    setDestinationId: (v: number | null) => void;
+    setPlateNumber: (v: string) => void;
+    setDriverName: (v: string) => void;
+    setNotes: (v: string) => void;
+    setIsRebarLoad: (v: boolean) => void;
+    setOperationalGrade: (v: SalesOrderGrade | "") => void;
+    setRequestItems: (v: RequestItemRow[]) => void;
+  },
+) {
+  setters.setCustomerId(truck.customerId ? String(truck.customerId) : "");
+  setters.setDestinationId(truck.destinationId);
+  setters.setPlateNumber(truck.plateNumber);
+  setters.setDriverName(truck.driverName);
+  setters.setNotes(truck.notes ?? "");
+  setters.setIsRebarLoad(Boolean(truck.operationalGrade));
+  setters.setOperationalGrade(truck.operationalGrade ?? "");
+  setters.setRequestItems(
+    truck.requestItems.map((item) => ({
+      key: ++rowKeyCounter,
+      sizeCode: item.size.code,
+      bundleCount: item.bundleCount ? String(item.bundleCount) : "",
+      requestedTons: item.requestedTons ? String(item.requestedTons) : "",
+    })),
+  );
+}
+
+export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Props) {
+  const [truck, setTruck] = useState<EditableTruck | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
   const [customerId, setCustomerId] = useState("");
   const [destinationId, setDestinationId] = useState<number | null>(null);
   const [plateNumber, setPlateNumber] = useState("");
@@ -89,7 +124,12 @@ export function EditTruckDialog({ truck, open, onOpenChange, onSuccess }: Props)
   const [sizes, setSizes] = useState<SizeOption[]>([]);
 
   const requestItemsOnly = truck?.status === "Approved";
-  const canSubmit = truck?.status === "Queued" || truck?.status === "Approved";
+  const editAfterTare = truck?.status === "FirstWeigh";
+  const lockIdentityFields = requestItemsOnly || editAfterTare;
+  const canSubmit =
+    truck?.status === "Queued" ||
+    truck?.status === "Approved" ||
+    truck?.status === "FirstWeigh";
 
   const fetchReferenceData = useCallback(async () => {
     setLoadingRef(true);
@@ -114,23 +154,78 @@ export function EditTruckDialog({ truck, open, onOpenChange, onSuccess }: Props)
   }, [open, fetchReferenceData]);
 
   useEffect(() => {
-    if (!truck || !open) return;
-    setCustomerId(truck.customerId ? String(truck.customerId) : "");
-    setDestinationId(truck.destinationId);
-    setPlateNumber(truck.plateNumber);
-    setDriverName(truck.driverName);
-    setNotes(truck.notes ?? "");
-    setIsRebarLoad(Boolean(truck.operationalGrade));
-    setOperationalGrade(truck.operationalGrade ?? "");
-    setRequestItems(
-      truck.requestItems.map((item) => ({
-        key: ++rowKeyCounter,
-        sizeCode: item.size.code,
-        bundleCount: item.bundleCount ? String(item.bundleCount) : "",
-        requestedTons: item.requestedTons ? String(item.requestedTons) : "",
-      })),
-    );
-  }, [truck, open]);
+    if (!open || truckId == null) {
+      setTruck(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadTruck = async () => {
+      setLoadingDetail(true);
+      setTruck(null);
+      try {
+        const res = await fetch(`/api/trucks/${truckId}`);
+        const json = await res.json();
+        if (cancelled) return;
+        if (!json.success) throw new Error(json.error || "فشل تحميل بيانات الشاحنة");
+
+        const data = json.data as EditableTruck & { sessions?: unknown[] };
+
+        if (!EDITABLE_STATUSES.includes(data.status as (typeof EDITABLE_STATUSES)[number])) {
+          toast.error("لا يمكن تعديل الشاحنة في الحالة الحالية");
+          onOpenChange(false);
+          return;
+        }
+        if (data.status === "FirstWeigh" && (data.sessions?.length ?? 0) > 0) {
+          toast.error(
+            "لا يمكن تعديل الشاحنة بعد بدء الوزنات الداخلية. حدّث القائمة وحاول مرة أخرى.",
+          );
+          onOpenChange(false);
+          return;
+        }
+
+        const editable: EditableTruck = {
+          id: data.id,
+          status: data.status,
+          version: data.version,
+          customerId: data.customerId,
+          destinationId: data.destinationId,
+          plateNumber: data.plateNumber,
+          driverName: data.driverName,
+          salesOrderNumber: data.salesOrderNumber,
+          notes: data.notes,
+          operationalGrade: data.operationalGrade,
+          requestItems: data.requestItems,
+        };
+
+        setTruck(editable);
+        populateFormFromTruck(editable, {
+          setCustomerId,
+          setDestinationId,
+          setPlateNumber,
+          setDriverName,
+          setNotes,
+          setIsRebarLoad,
+          setOperationalGrade,
+          setRequestItems,
+        });
+      } catch (err) {
+        if (!cancelled) {
+          toast.error(err instanceof Error ? err.message : "خطأ في تحميل بيانات الشاحنة");
+          onOpenChange(false);
+        }
+      } finally {
+        if (!cancelled) setLoadingDetail(false);
+      }
+    };
+
+    void loadTruck();
+    return () => {
+      cancelled = true;
+    };
+    // onOpenChange omitted — parent inline callback would retrigger fetch every render
+  }, [open, truckId]);
 
   const customerSelectItems = useMemo(
     () =>
@@ -176,8 +271,12 @@ export function EditTruckDialog({ truck, open, onOpenChange, onSuccess }: Props)
     e.preventDefault();
     if (!truck) return;
 
-    if (!requestItemsOnly && (!customerId || !plateNumber.trim() || !driverName.trim())) {
+    if (truck.status === "Queued" && (!customerId || !plateNumber.trim() || !driverName.trim())) {
       toast.error("الزبون ورقم اللوحة واسم السائق مطلوبة");
+      return;
+    }
+    if (editAfterTare && !driverName.trim()) {
+      toast.error("اسم السائق مطلوب");
       return;
     }
 
@@ -212,21 +311,36 @@ export function EditTruckDialog({ truck, open, onOpenChange, onSuccess }: Props)
 
     setSaving(true);
     try {
+      const gradePatch = operationalGradeIfChanged(
+        truck.operationalGrade,
+        isRebarLoad,
+        operationalGrade,
+      );
+
       const payload = requestItemsOnly
         ? {
             expectedVersion: truck.version,
             requestItems: items,
           }
-        : {
-            expectedVersion: truck.version,
-            customerId: Number(customerId),
-            destinationId,
-            plateNumber: plateNumber.trim(),
-            driverName: driverName.trim(),
-            notes: notes.trim() || undefined,
-            operationalGrade: isRebarLoad && operationalGrade ? operationalGrade : null,
-            requestItems: items,
-          };
+        : editAfterTare
+          ? {
+              expectedVersion: truck.version,
+              destinationId,
+              driverName: driverName.trim(),
+              notes: notesForPatch(notes),
+              requestItems: items,
+              ...gradePatch,
+            }
+          : {
+              expectedVersion: truck.version,
+              customerId: Number(customerId),
+              destinationId,
+              plateNumber: plateNumber.trim(),
+              driverName: driverName.trim(),
+              notes: notesForPatch(notes),
+              requestItems: items,
+              ...gradePatch,
+            };
 
       const res = await fetch(`/api/trucks/${truck.id}`, {
         method: "PATCH",
@@ -248,16 +362,32 @@ export function EditTruckDialog({ truck, open, onOpenChange, onSuccess }: Props)
     }
   };
 
+  const formBusy = loadingDetail || loadingRef;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>تعديل الشاحنة #{truck?.id}</DialogTitle>
+          <DialogTitle>تعديل الشاحنة #{truckId ?? truck?.id}</DialogTitle>
         </DialogHeader>
+        {loadingDetail ? (
+          <div className="space-y-4 py-2">
+            <div className="h-9 animate-pulse rounded-md bg-muted" />
+            <div className="h-9 animate-pulse rounded-md bg-muted" />
+            <div className="h-24 animate-pulse rounded-md bg-muted" />
+          </div>
+        ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
           {requestItemsOnly && (
             <p className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
               الشاحنة معتمدة، لذلك يمكن تعديل تفاصيل الطلبية فقط قبل بدء الوزن.
+            </p>
+          )}
+          {editAfterTare && (
+            <p className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-100">
+              تم تسجيل وزن الفارغ. يمكن تعديل السائق والوجهة والملاحظات والنخب وتفاصيل
+              الطلبية فقط — الزبون وأمر البيع ورقم اللوحة غير قابلة للتغيير. بعد أول
+              وزنة داخلية لن يكون التعديل متاحاً.
             </p>
           )}
 
@@ -270,7 +400,7 @@ export function EditTruckDialog({ truck, open, onOpenChange, onSuccess }: Props)
                 items={customerSelectItems}
                 value={customerId}
                 onValueChange={(v) => setCustomerId(v ?? "")}
-                disabled={requestItemsOnly || saving}
+                disabled={lockIdentityFields || saving}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="اختر الزبون" />
@@ -350,7 +480,7 @@ export function EditTruckDialog({ truck, open, onOpenChange, onSuccess }: Props)
                 id="editPlateNumber"
                 value={plateNumber}
                 onChange={(e) => setPlateNumber(e.target.value)}
-                disabled={requestItemsOnly || saving}
+                disabled={lockIdentityFields || saving}
               />
             </div>
             <div className="space-y-2">
@@ -466,11 +596,12 @@ export function EditTruckDialog({ truck, open, onOpenChange, onSuccess }: Props)
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               إلغاء
             </Button>
-            <Button type="submit" disabled={!canSubmit || saving || loadingRef}>
+            <Button type="submit" disabled={!canSubmit || !truck || saving || formBusy}>
               {saving ? "جاري الحفظ..." : "حفظ التعديلات"}
             </Button>
           </DialogFooter>
         </form>
+        )}
       </DialogContent>
     </Dialog>
   );

@@ -37,7 +37,7 @@ const mockPrisma = vi.hoisted(() => ({
     update: vi.fn(),
   },
   truckRequestItem: { createMany: vi.fn(), deleteMany: vi.fn() },
-  weighSession: { findMany: vi.fn() },
+  weighSession: { findMany: vi.fn(), count: vi.fn() },
   truckPhoto: { count: vi.fn() },
   auditLog: { create: vi.fn() },
   $transaction: vi.fn(),
@@ -101,6 +101,7 @@ describe("updateTruckBeforeWeigh", () => {
     mockPrisma.customer.findUnique.mockResolvedValue({ id: 1, isActive: true });
     mockPrisma.masterContract.findFirst.mockResolvedValue({ contractNumber: "26-90" });
     mockPrisma.sizeLookup.findMany.mockResolvedValue([{ id: 1, isActive: true }]);
+    mockPrisma.weighSession.count.mockResolvedValue(0);
     mockPrisma.truckOperation.findFirst.mockResolvedValue(null);
     mockPrisma.truckOperation.update.mockResolvedValue({
       ...queuedTruck,
@@ -154,15 +155,139 @@ describe("updateTruckBeforeWeigh", () => {
     );
   });
 
-  it("rejects edits once first weigh has started", async () => {
+  it("allows FirstWeigh edits before any internal session", async () => {
+    const firstWeighTruck = {
+      ...queuedTruck,
+      status: "FirstWeigh",
+      tareWeightKg: 12000,
+      driverName: "Old Driver",
+    };
+    mockPrisma.truckOperation.findUnique
+      .mockResolvedValueOnce(firstWeighTruck)
+      .mockResolvedValueOnce({
+        ...firstWeighTruck,
+        version: 1,
+        driverName: "New Driver",
+      });
+    mockPrisma.truckOperation.update.mockResolvedValue({
+      ...firstWeighTruck,
+      version: 1,
+      driverName: "New Driver",
+    });
+
+    const result = await updateTruckBeforeWeigh(
+      1,
+      {
+        driverName: "New Driver",
+        requestItems: [{ sizeId: 1, bundleCount: 12 }],
+      },
+      0,
+      7,
+    );
+
+    expect(result?.driverName).toBe("New Driver");
+    expect(mockPrisma.weighSession.count).toHaveBeenCalled();
+    expect(mockPrisma.auditLog.create.mock.calls[0][0].data.details.event).toBe(
+      "truck_updated_after_tare",
+    );
+  });
+
+  it("rejects FirstWeigh edits once internal sessions exist", async () => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValueOnce({
+      ...queuedTruck,
+      status: "FirstWeigh",
+    });
+    mockPrisma.weighSession.count.mockResolvedValueOnce(1);
+
+    await expect(
+      updateTruckBeforeWeigh(1, { requestItems: [{ sizeId: 1, bundleCount: 12 }] }, 0, 7),
+    ).rejects.toThrow(/بعد بدء الوزنات الداخلية/);
+    expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects changing plate after tare", async () => {
     mockPrisma.truckOperation.findUnique.mockResolvedValueOnce({
       ...queuedTruck,
       status: "FirstWeigh",
     });
 
     await expect(
+      updateTruckBeforeWeigh(1, { plateNumber: "NEW-999" }, 0, 7),
+    ).rejects.toThrow(/لا يمكن تغيير الزبون/);
+  });
+
+  it("rejects changing customer after tare", async () => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValueOnce({
+      ...queuedTruck,
+      status: "FirstWeigh",
+    });
+
+    await expect(
+      updateTruckBeforeWeigh(1, { customerId: 2 }, 0, 7),
+    ).rejects.toThrow(/لا يمكن تغيير الزبون/);
+  });
+
+  it("clears notes at FirstWeigh when patch sends null", async () => {
+    const firstWeighTruck = {
+      ...queuedTruck,
+      status: "FirstWeigh",
+      notes: "ملاحظة قديمة",
+    };
+    mockPrisma.truckOperation.findUnique
+      .mockResolvedValueOnce(firstWeighTruck)
+      .mockResolvedValueOnce({ ...firstWeighTruck, version: 1, notes: null });
+    mockPrisma.truckOperation.update.mockResolvedValue({
+      ...firstWeighTruck,
+      version: 1,
+      notes: null,
+    });
+
+    await updateTruckBeforeWeigh(1, { notes: null }, 0, 7);
+
+    expect(mockPrisma.truckOperation.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 1 },
+        data: expect.objectContaining({ notes: null }),
+      }),
+    );
+  });
+
+  it("leaves operationalGrade unchanged when omitted from patch at FirstWeigh", async () => {
+    const firstWeighTruck = {
+      ...queuedTruck,
+      status: "FirstWeigh",
+      operationalGrade: "FIRST" as const,
+      driverName: "Old Driver",
+    };
+    mockPrisma.truckOperation.findUnique
+      .mockResolvedValueOnce(firstWeighTruck)
+      .mockResolvedValueOnce({
+        ...firstWeighTruck,
+        version: 1,
+        driverName: "New Driver",
+      });
+    mockPrisma.truckOperation.update.mockResolvedValue({
+      ...firstWeighTruck,
+      version: 1,
+      driverName: "New Driver",
+    });
+
+    await updateTruckBeforeWeigh(1, { driverName: "New Driver" }, 0, 7);
+
+    const updateArg = mockPrisma.truckOperation.update.mock.calls[0][0];
+    expect(updateArg.data).not.toHaveProperty("operationalGrade");
+    expect(updateArg.data).toMatchObject({ driverName: "New Driver" });
+  });
+
+  it("rejects edits once truck is OnScale", async () => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValueOnce({
+      ...queuedTruck,
+      status: "OnScale",
+    });
+
+    await expect(
       updateTruckBeforeWeigh(1, { requestItems: [{ sizeId: 1, bundleCount: 12 }] }, 0, 7),
-    ).rejects.toThrow(/بعد بدء الوزن/);
+    ).rejects.toThrow(/بعد بدء الوزنات الداخلية/);
     expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
   });
 

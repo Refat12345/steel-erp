@@ -24,7 +24,8 @@ export const truckRegisterSchema = z.object({
     .min(1, "اسم السائق مطلوب")
     .max(100, "اسم السائق طويل جداً"),
   salesOrderNumber: z.string().max(20).optional().or(z.literal("")),
-  notes: z.string().max(2000).optional().or(z.literal("")),
+  // null = clear notes on PATCH; "" still accepted from registration forms
+  notes: z.string().max(2000).optional().nullable(),
   requestItems: z.array(requestItemSchema).optional(),
   operationalGrade: z.enum(["FIRST", "SECOND"]).optional().nullable(),
 });
