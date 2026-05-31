@@ -37,6 +37,7 @@ import { RegisterTruckDialog } from "./register-truck-dialog";
 import { EditTruckDialog, type EditableTruck } from "./edit-truck-dialog";
 import { durationBetween, formatDurationCompact } from "@/lib/format-duration";
 import { getDisplayGradeLabel } from "@/lib/truck-grade";
+import { canShowTruckEditButton } from "@/lib/truck-edit-ui";
 import type { SalesOrderGrade } from "@prisma/client";
 
 interface TruckListItem extends EditableTruck {
@@ -101,7 +102,7 @@ export function TruckList() {
   const [plateSearch, setPlateSearch] = useState("");
   const [registrationDate, setRegistrationDate] = useState("");
   const [showRegister, setShowRegister] = useState(false);
-  const [editingTruck, setEditingTruck] = useState<TruckListItem | null>(null);
+  const [editingTruckId, setEditingTruckId] = useState<number | null>(null);
 
   const todayDate = formatLocalDateInput(new Date());
   const isTodaySelected = registrationDate === todayDate;
@@ -319,15 +320,19 @@ export function TruckList() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
-                            {((truck.status === "Queued" && canEditQueued) ||
-                              (truck.status === "Approved" && canEditApproved)) && (
+                            {canShowTruckEditButton(
+                              truck.status,
+                              truck._count.sessions,
+                              canEditQueued,
+                              canEditApproved,
+                            ) && (
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 title="تعديل"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setEditingTruck(truck);
+                                  setEditingTruckId(truck.id);
                                 }}
                               >
                                 <Pencil className="h-4 w-4" />
@@ -390,10 +395,10 @@ export function TruckList() {
         onSuccess={fetchData}
       />
       <EditTruckDialog
-        truck={editingTruck}
-        open={editingTruck !== null}
+        truckId={editingTruckId}
+        open={editingTruckId !== null}
         onOpenChange={(open) => {
-          if (!open) setEditingTruck(null);
+          if (!open) setEditingTruckId(null);
         }}
         onSuccess={fetchData}
       />

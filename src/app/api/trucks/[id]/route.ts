@@ -13,6 +13,7 @@ import { truckUpdateSchema } from "@/lib/validators/truck";
 import {
   getOperationDetail,
   updateTruckBeforeWeigh,
+  type UpdateTruckInput,
 } from "@/lib/services/truck.service";
 import { computeTruckTimings } from "@/lib/truck-timing";
 
@@ -81,18 +82,26 @@ export async function PATCH(
       if (current.status === "Queued" && !hasPermission(session, "truck.edit_queued")) {
         return forbidden();
       }
-      if (current.status === "Approved" && !hasPermission(session, "truck.edit_approved")) {
+      if (
+        (current.status === "Approved" || current.status === "FirstWeigh") &&
+        !hasPermission(session, "truck.edit_approved")
+      ) {
         return forbidden();
       }
 
       const { expectedVersion, ...patch } = validated.data;
+      const updateInput: UpdateTruckInput = { ...patch };
+      // Only normalize fields the client actually sent. Injecting `null` for omitted
+      // keys would look like an attempted SO/notes change and trip FirstWeigh guards.
+      if (patch.salesOrderNumber !== undefined) {
+        updateInput.salesOrderNumber = patch.salesOrderNumber || null;
+      }
+      if (patch.notes !== undefined) {
+        updateInput.notes = patch.notes || null;
+      }
       const truck = await updateTruckBeforeWeigh(
         truckId,
-        {
-          ...patch,
-          salesOrderNumber: patch.salesOrderNumber || null,
-          notes: patch.notes || null,
-        },
+        updateInput,
         expectedVersion,
         session.userId,
       );
