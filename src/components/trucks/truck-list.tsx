@@ -100,7 +100,9 @@ export function TruckList() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [plateSearch, setPlateSearch] = useState("");
-  const [registrationDate, setRegistrationDate] = useState("");
+  const [registrationDate, setRegistrationDate] = useState(() =>
+    formatLocalDateInput(new Date()),
+  );
   const [showRegister, setShowRegister] = useState(false);
   const [editingTruckId, setEditingTruckId] = useState<number | null>(null);
 
