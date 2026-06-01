@@ -324,8 +324,8 @@ function validateStatusTransition(current: string, next: string) {
 
 const KIND_LABELS: Record<string, string> = {
   REBAR: "مبروم",
-  SHORTBAR_1_4M: "توالف 1–4م",
-  SHORTBAR_4_12M: "توالف 4–12م",
+  SHORTBAR_1_4M: "قصائر 1–4 م",
+  SHORTBAR_4_12M: "قصائر 4–12 م",
   SCRAP: "خردة",
 };
 

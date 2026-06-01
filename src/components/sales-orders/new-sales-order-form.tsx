@@ -288,8 +288,8 @@ export function NewSalesOrderForm() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="REBAR">مبروم</SelectItem>
-                  <SelectItem value="SHORTBAR_1_4M">توالف 1–4م</SelectItem>
-                  <SelectItem value="SHORTBAR_4_12M">توالف 4–12م</SelectItem>
+                  <SelectItem value="SHORTBAR_1_4M">قصائر 1–4 م</SelectItem>
+                  <SelectItem value="SHORTBAR_4_12M">قصائر 4–12 م</SelectItem>
                   <SelectItem value="SCRAP">خردة</SelectItem>
                 </SelectContent>
               </Select>
