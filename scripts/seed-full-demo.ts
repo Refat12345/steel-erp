@@ -248,8 +248,8 @@ async function ensureRbacAndSizes(): Promise<void> {
     { code: "20mm", displayName: "20 مم", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 7 },
     { code: "22mm", displayName: "22 مم", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 8 },
     { code: "25mm", displayName: "25 مم", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 9 },
-    { code: "shortbar_1_4m", displayName: "توالف 1–4 م", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 10 },
-    { code: "shortbar_4_12m", displayName: "توالف 4–12 م", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 11 },
+    { code: "shortbar_1_4m", displayName: "قصائر 1–4 م", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 10 },
+    { code: "shortbar_4_12m", displayName: "قصائر 4–12 م", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 11 },
     { code: "scrap", displayName: "خردة (Scrap)", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 12 },
     { code: "6mm", displayName: "6 مم", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: false, sortOrder: 0 },
   ];
@@ -528,7 +528,7 @@ async function main() {
             orderDate: new Date(Date.now() - (8 + i) * 86400000),
             deliveryDate: new Date(Date.now() + (40 + i) * 86400000),
             status: p2.status,
-            notes: `توالف 4–12م — ديمو`,
+            notes: `قصائر 4–12 م — ديمو`,
             createdById: admin.id,
           },
         });
@@ -553,7 +553,7 @@ async function main() {
             orderDate: new Date(Date.now() - (5 + i) * 86400000),
             deliveryDate: new Date(Date.now() + (18 + i) * 86400000),
             status: p2.status,
-            notes: `توالف 1–4م — ديمو`,
+            notes: `قصائر 1–4 م — ديمو`,
             createdById: admin.id,
           },
         });
