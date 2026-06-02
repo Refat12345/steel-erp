@@ -14,6 +14,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { BRAND } from "@/lib/brand";
+import { BrandWordmark } from "@/components/layout/brand-wordmark";
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
@@ -84,7 +86,7 @@ export default function LoginPage() {
       <div className="auth-login-glow-accent pointer-events-none absolute -bottom-40 -left-40 h-[500px] w-[500px] rounded-full" />
 
       {/* Main content */}
-      <div className="animate-in fade-in-0 slide-in-from-bottom-4 duration-700 relative z-10 w-full max-w-[22rem]">
+      <div className="animate-in fade-in-0 slide-in-from-bottom-4 duration-700 relative z-10 w-full max-w-[24rem]">
         {/* Brand section */}
         <div className="mb-8 flex flex-col items-center gap-4">
           <div className="auth-login-brand-icon flex h-16 w-16 items-center justify-center rounded-2xl">
@@ -92,11 +94,11 @@ export default function LoginPage() {
           </div>
 
           <div className="text-center">
-            <h1 className="text-2xl font-bold tracking-tight text-white">
-              مصنع الحديد
+            <h1 className="leading-none">
+              <BrandWordmark size="lg" variant="on-dark" />
             </h1>
             <p className="auth-login-brand-subtitle mt-1 text-[13px] font-medium">
-              نظام إدارة المصنع — ERP
+              {BRAND.taglineAr}
             </p>
           </div>
         </div>
@@ -127,7 +129,7 @@ export default function LoginPage() {
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="username"
+                  placeholder={BRAND.usernamePlaceholderAr}
                   required
                   autoFocus
                   autoComplete="username"
@@ -204,7 +206,7 @@ export default function LoginPage() {
         </div>
 
         <p className="auth-login-footer mt-6 text-center text-xs">
-          نظام إدارة مصنع الحديد &nbsp;·&nbsp; {new Date().getFullYear()}
+          {BRAND.footerAr} &nbsp;·&nbsp; {new Date().getFullYear()}
         </p>
       </div>
     </div>
