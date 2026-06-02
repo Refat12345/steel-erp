@@ -58,6 +58,7 @@ interface TruckListItem extends EditableTruck {
   createdAt: string;
   closedAt: string | null;
   customer: { id: number; fullName: string; code: string } | null;
+  destination: { id: number; name: string; details: string | null } | null;
   creator: { id: number; fullName: string };
   _count: { sessions: number };
 }
@@ -214,7 +215,7 @@ export function TruckList() {
 
       {/* Table */}
       <div className="rounded-lg border overflow-x-auto">
-        <Table className="min-w-[900px]">
+        <Table className="min-w-[860px]">
           <TableHeader>
             <TableRow>
               <TableHead className="w-[60px]">#</TableHead>
@@ -223,9 +224,8 @@ export function TruckList() {
               <TableHead>السائق</TableHead>
               <TableHead>الحالة</TableHead>
               <TableHead>النخب</TableHead>
-              <TableHead>الفارغ (كغ)</TableHead>
+              <TableHead>الوجهة</TableHead>
               <TableHead>صافي القبان (كغ)</TableHead>
-              <TableHead>الوزنات</TableHead>
               <TableHead>مدة التحميل</TableHead>
               <TableHead>التاريخ</TableHead>
               <TableHead className="w-[96px]" />
@@ -235,7 +235,7 @@ export function TruckList() {
             {loading
               ? Array.from({ length: 5 }).map((_, i) => (
                   <TableRow key={i}>
-                    {Array.from({ length: 12 }).map((_, j) => (
+                    {Array.from({ length: 11 }).map((_, j) => (
                       <TableCell key={j}>
                         <Skeleton className="h-4 w-full" />
                       </TableCell>
@@ -244,7 +244,7 @@ export function TruckList() {
                 ))
               : data.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                       لا توجد عمليات
                     </TableCell>
                   </TableRow>
@@ -287,18 +287,13 @@ export function TruckList() {
                         <TableCell className="text-sm">
                           {getDisplayGradeLabel(truck) ?? "—"}
                         </TableCell>
-                        <TableCell className="font-mono text-sm">
-                          {truck.tareWeightKg
-                            ? Number(truck.tareWeightKg).toLocaleString("ar-SY")
-                            : "—"}
+                        <TableCell className="text-sm">
+                          {truck.destination?.name ?? "—"}
                         </TableCell>
                         <TableCell className="font-mono text-sm">
                           {bridgeNetKg != null
                             ? bridgeNetKg.toLocaleString("ar-SY")
                             : "—"}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          {truck._count.sessions}
                         </TableCell>
                         <TableCell
                           className={`font-mono text-sm tabular-nums ${
