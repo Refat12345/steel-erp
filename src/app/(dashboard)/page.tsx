@@ -10,6 +10,7 @@ import {
   isAnalyticsRestrictedRole,
 } from "@/lib/rbac-policy";
 import { logger } from "@/lib/logger";
+import { BRAND } from "@/lib/brand";
 
 export default async function DashboardPage() {
   const session = await getServerSession(authOptions);
@@ -82,7 +83,7 @@ export default async function DashboardPage() {
               </span>
             </h2>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              مرحباً بك في نظام إدارة مصنع الحديد
+              {BRAND.welcomeAr}
             </p>
           </div>
         </div>

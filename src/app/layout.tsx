@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Cairo } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { Providers } from "@/components/providers";
+import { BRAND } from "@/lib/brand";
 import "./globals.css";
 
 const cairo = Cairo({
@@ -10,8 +11,12 @@ const cairo = Cairo({
 });
 
 export const metadata: Metadata = {
-  title: "نظام إدارة مصنع الحديد",
-  description: "Steel Factory ERP System",
+  title: BRAND.metadataTitle,
+  description: BRAND.metadataDescription,
+  icons: {
+    icon: [{ url: BRAND.faviconPath, sizes: "any" }],
+    apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
+  },
 };
 
 export default function RootLayout({

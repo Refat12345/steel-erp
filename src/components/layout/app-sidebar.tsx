@@ -33,6 +33,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { isNavUrlSuspended } from "@/config/suspended-pages";
 import { isAnalyticsRestrictedRole } from "@/lib/rbac-policy";
+import { BRAND } from "@/lib/brand";
+import { BrandWordmark } from "@/components/layout/brand-wordmark";
 
 /* CSS custom properties defined in globals.css */
 const BLUE = "oklch(0.620 0.175 222)";
@@ -170,14 +172,12 @@ export function AppSidebar() {
 
           {/* Brand text */}
           <div className="flex flex-col overflow-hidden group-data-[collapsible=icon]:hidden">
-            <span className="text-sm font-bold tracking-tight text-sidebar-foreground leading-tight">
-              مصنع الحديد
-            </span>
+            <BrandWordmark size="sm" />
             <span
               className="text-[10px] font-semibold uppercase tracking-widest leading-tight"
               style={{ color: BLUE_70 }}
             >
-              ERP System
+              {BRAND.sidebarSubtitle}
             </span>
           </div>
         </div>

@@ -127,7 +127,7 @@ export const config = {
   matcher: [
     // Exclude:
     //   - Next.js asset paths
-    //   - favicon
+    //   - favicon / PWA icons (must be public — browsers fetch before auth)
     //   - /api/auth/*       — NextAuth handles its own session flows
     //   - /api/health       — public liveness probe (PM2 + monitoring)
     //   - /api/maintenance/cleanup-idempotency
@@ -138,6 +138,6 @@ export const config = {
     //       the endpoint remains protected even though middleware is skipped.
     //       Without this exemption, the bearer-only cron path is rejected
     //       at Layer 1 with 401 before the handler ever runs.
-    "/((?!_next/static|_next/image|favicon.ico|api/auth|api/health|api/maintenance/cleanup-idempotency).*)",
+    "/((?!_next/static|_next/image|favicon.ico|apple-icon.png|steeltech-logo.png|api/auth|api/health|api/maintenance/cleanup-idempotency).*)",
   ],
 };
