@@ -11,6 +11,7 @@ import {
 } from "@/lib/rbac-policy";
 import { logger } from "@/lib/logger";
 import { BRAND } from "@/lib/brand";
+import { formatDate } from "@/lib/date-format";
 
 export default async function DashboardPage() {
   const session = await getServerSession(authOptions);
@@ -50,12 +51,7 @@ export default async function DashboardPage() {
     redirect(getRoleLandingPage(auth.roleCode) ?? "/forbidden");
   }
 
-  const dateStr = new Date().toLocaleDateString("ar-SA", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  const dateStr = formatDate(new Date());
 
   return (
     <div className="space-y-8">

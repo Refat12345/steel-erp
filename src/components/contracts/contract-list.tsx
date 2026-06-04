@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { sessionHasPermission } from "@/lib/client-permissions";
+import { formatDate } from "@/lib/date-format";
 import { toast } from "sonner";
 import {
   Table,
@@ -166,7 +167,7 @@ export function ContractList() {
                       dir="ltr"
                       className="w-36 max-w-36 text-start font-mono text-xs tabular-nums"
                     >
-                      {new Date(c.createdAt).toLocaleDateString("ar-SA")}
+                      {formatDate(c.createdAt)}
                     </TableCell>
                     <TableCell className="w-12 text-center align-middle tabular-nums">
                       <div className="flex justify-center">{c._count.attachments}</div>

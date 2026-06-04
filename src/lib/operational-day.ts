@@ -1,6 +1,8 @@
 import type { TruckStatus } from "@prisma/client";
 
 /** Business invariant: operational day runs cutoff→cutoff (Damascus VPS local). */
+import { formatDateTime } from "@/lib/date-format";
+
 export const OPERATIONAL_DAY_CUTOFF_HOUR = 8;
 export const OPERATIONAL_TIMEZONE = "Asia/Damascus";
 
@@ -147,14 +149,5 @@ export function defaultOperationalDateInput(
 }
 
 export function formatOperationalWindowLabel(window: OperationalDayWindow): string {
-  const fmt = (d: Date) =>
-    d.toLocaleString("ar-SY", {
-      day: "numeric",
-      month: "numeric",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
-  return `${fmt(window.from)} → ${fmt(window.to)}`;
+  return `${formatDateTime(window.from)} → ${formatDateTime(window.to)}`;
 }

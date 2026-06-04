@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatDate } from "@/lib/date-format";
 
 interface RoleInfo {
   code: string;
@@ -238,7 +239,7 @@ export function UserManagement() {
                       )}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {new Date(user.createdAt).toLocaleDateString("ar-SY")}
+                      {formatDate(user.createdAt)}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">

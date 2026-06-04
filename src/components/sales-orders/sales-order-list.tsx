@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { sessionHasPermission } from "@/lib/client-permissions";
+import { formatDate } from "@/lib/date-format";
 import { toast } from "sonner";
 import {
   Table,
@@ -263,7 +264,7 @@ export function SalesOrderList() {
                       {o._count.items}
                     </TableCell>
                     <TableCell className="text-xs">
-                      {new Date(o.createdAt).toLocaleDateString("ar-SA")}
+                      {formatDate(o.createdAt)}
                     </TableCell>
                     <TableCell>
                       <Button

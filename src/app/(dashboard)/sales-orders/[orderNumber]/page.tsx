@@ -36,6 +36,7 @@ import {
   Ban,
 } from "lucide-react";
 import { sessionHasPermission } from "@/lib/client-permissions";
+import { formatDate } from "@/lib/date-format";
 
 interface CatalogSize {
   id: number;
@@ -496,13 +497,13 @@ export default function SalesOrderDetailPage({
           <div>
             <span className="text-muted-foreground">تاريخ الأمر</span>
             <p className="font-medium">
-              {new Date(order.orderDate).toLocaleDateString("ar-SA")}
+              {formatDate(order.orderDate)}
             </p>
           </div>
           <div>
             <span className="text-muted-foreground">تاريخ التسليم المتوقع</span>
             <p className="font-medium">
-              {new Date(order.deliveryDate).toLocaleDateString("ar-SA")}
+              {formatDate(order.deliveryDate)}
             </p>
           </div>
           {order.notes && (

@@ -13,6 +13,7 @@ import {
   Truck,
 } from "lucide-react";
 import { sessionHasPermission } from "@/lib/client-permissions";
+import { formatDateTime } from "@/lib/date-format";
 import { defaultOperationalDateInput } from "@/lib/operational-day";
 import type { DailyTrucksReport, DailyTruckRow } from "@/lib/services/report.service";
 import { Button } from "@/components/ui/button";
@@ -57,15 +58,9 @@ function formatTons(value: number | null): string {
   return value.toFixed(3);
 }
 
-function formatDateTime(iso: string | null): string {
+function formatNullableDateTime(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("ar-SY", {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+  return formatDateTime(iso);
 }
 
 function SummaryCard({
@@ -338,10 +333,10 @@ export function DailyTrucksReportView() {
                         {row.salesOrderNumber ?? "—"}
                       </TableCell>
                       <TableCell className="text-xs whitespace-nowrap">
-                        {formatDateTime(row.createdAt)}
+                        {formatNullableDateTime(row.createdAt)}
                       </TableCell>
                       <TableCell className="text-xs whitespace-nowrap">
-                        {formatDateTime(row.closedAt)}
+                        {formatNullableDateTime(row.closedAt)}
                       </TableCell>
                       <TableCell>
                         <Badge variant={STATUS_BADGE[row.tonnageStatus]}>
