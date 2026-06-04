@@ -44,10 +44,12 @@ import {
   ArrowRight,
   Pencil,
   Trash2,
+  AlertTriangle,
 } from "lucide-react";
 import Link from "next/link";
 import { buildFileViewUrl } from "@/lib/uploaded-file-url";
 import { aggregateWeighSessionsBySize } from "@/lib/weigh-session-aggregate";
+import { buildRequestVsLoadedComparison } from "@/lib/loading-complete-comparison";
 import {
   computeWeighbridgeDiscrepancy,
   isWeighbridgeDiscrepancyWarning,
@@ -157,6 +159,7 @@ export function ScaleOperationView({
   const [showCorrectGrossDialog, setShowCorrectGrossDialog] = useState(false);
   const [showSessionDialog, setShowSessionDialog] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [showLoadingCompleteDialog, setShowLoadingCompleteDialog] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
   const canTare = sessionHasPermission(session, "scale.enter_tare");
@@ -467,7 +470,7 @@ export function ScaleOperationView({
             {truck.status === "OnScale" && canLoadingComplete && (
               <Button
                 variant="default"
-                onClick={() => doAction(`/api/trucks/${truck.id}/loading-complete`, "POST")}
+                onClick={() => setShowLoadingCompleteDialog(true)}
                 disabled={actionLoading}
               >
                 <Lock className="h-4 w-4 me-1" />
@@ -752,6 +755,25 @@ export function ScaleOperationView({
         truckId={truck.id}
         sizes={sizes}
         onSuccess={fetchTruck}
+      />
+      <LoadingCompleteDialog
+        open={showLoadingCompleteDialog}
+        onOpenChange={setShowLoadingCompleteDialog}
+        truckId={truck.id}
+        plateNumber={truck.plateNumber}
+        customerLabel={
+          truck.customer
+            ? `${truck.customer.fullName} (${truck.customer.code})`
+            : null
+        }
+        sessions={truck.sessions}
+        requestItems={truck.requestItems}
+        photoCount={truck.photos.length}
+        onConfirm={async () => {
+          const ok = await doAction(`/api/trucks/${truck.id}/loading-complete`, "POST");
+          if (ok) setShowLoadingCompleteDialog(false);
+          return ok;
+        }}
       />
       <CancelDialog
         open={showCancelDialog}
@@ -1625,6 +1647,196 @@ function PhotoUploadButton({
         {uploading ? "جاري الرفع..." : "رفع صورة"}
       </Button>
     </>
+  );
+}
+
+// ─── Loading Complete Dialog ────────────────────────────────────────
+
+function LoadingCompleteDialog({
+  open,
+  onOpenChange,
+  truckId,
+  plateNumber,
+  customerLabel,
+  sessions,
+  requestItems,
+  photoCount,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  truckId: number;
+  plateNumber: string;
+  customerLabel: string | null;
+  sessions: WeighSessionItem[];
+  requestItems: TruckRequestItemData[];
+  photoCount: number;
+  onConfirm: () => Promise<boolean>;
+}) {
+  const [saving, setSaving] = useState(false);
+
+  const bySize = aggregateWeighSessionsBySize(sessions);
+  const { rows: requestRows, warnings: requestWarnings } =
+    buildRequestVsLoadedComparison(requestItems, sessions);
+  const totalTons = sessions.reduce((sum, s) => sum + Number(s.weightTons), 0);
+  const totalBundles =
+    bySize.length > 0 && bySize.every((row) => row.totalBundles != null)
+      ? bySize.reduce((sum, row) => sum + (row.totalBundles ?? 0), 0)
+      : null;
+
+  const warnings: string[] = [...requestWarnings];
+  if (sessions.length === 0) {
+    warnings.push("لا توجد وزنات داخلية — يُفضّل إضافة وزنة واحدة على الأقل قبل التأكيد");
+  }
+  if (photoCount === 0) {
+    warnings.push("لم تُرفع أي صورة بعد — يُفضّل رفع صورة واحدة على الأقل قبل التأكيد");
+  }
+  if (sessions.some((s) => s.bundleCount == null)) {
+    warnings.push("بعض الوزنات لم يُسجَّل فيها عدد الربطات — راجع القائمة قبل التأكيد");
+  }
+
+  const handleConfirm = async () => {
+    setSaving(true);
+    try {
+      await onConfirm();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-sm max-h-[90dvh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>تأكيد اكتمال التحميل</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 text-sm">
+          <div className="text-muted-foreground space-y-0.5">
+            <div>
+              <span className="font-medium text-foreground">عملية #{truckId}</span>
+              <span className="mx-2">·</span>
+              <span>{plateNumber}</span>
+            </div>
+            {customerLabel && <div>{customerLabel}</div>}
+          </div>
+
+          {requestRows.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-sm font-medium">تفاصيل الطلبية مقابل المحمّل</p>
+              <div className="overflow-x-auto rounded-lg border">
+                <Table className="min-w-[280px]">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>القياس</TableHead>
+                      <TableHead>المطلوب</TableHead>
+                      <TableHead>المحمّل</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {requestRows.map((row) => (
+                      <TableRow key={row.sizeId}>
+                        <TableCell>{row.displayName}</TableCell>
+                        <TableCell className="font-mono text-muted-foreground">
+                          {row.requestedLabel}
+                        </TableCell>
+                        <TableCell className="font-mono font-semibold">
+                          {row.loadedLabel}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+
+          {sessions.length > 0 && (
+            <p className="text-sm font-medium">
+              {requestRows.length > 0 ? "تفصيل المحمّل (حسب القياس)" : "ما تم تحميله"}
+            </p>
+          )}
+
+          {sessions.length === 0 ? (
+            <p className="text-center text-muted-foreground py-4">لا توجد وزنات داخلية بعد</p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border">
+              <Table className="min-w-[260px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>القياس</TableHead>
+                    <TableHead>الربطات</TableHead>
+                    <TableHead>الوزن (طن)</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {bySize.map((row) => (
+                    <TableRow key={row.sizeId ?? "none"}>
+                      <TableCell>{row.displayName}</TableCell>
+                      <TableCell className="font-mono">
+                        {row.totalBundles != null
+                          ? row.totalBundles.toLocaleString("ar-SY")
+                          : "—"}
+                      </TableCell>
+                      <TableCell className="font-mono font-semibold">
+                        {row.totalTons.toFixed(3)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow className="font-bold bg-muted/50">
+                    <TableCell>المجموع الكلي</TableCell>
+                    <TableCell className="font-mono">
+                      {totalBundles != null
+                        ? totalBundles.toLocaleString("ar-SY")
+                        : "—"}
+                    </TableCell>
+                    <TableCell className="font-mono">{totalTons.toFixed(3)}</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          <p className="text-xs text-muted-foreground">
+            {sessions.length.toLocaleString("ar-SY")} وزنة ·{" "}
+            {photoCount.toLocaleString("ar-SY")} صورة
+          </p>
+
+          {warnings.length > 0 && (
+            <div
+              className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 space-y-1.5 dark:bg-amber-950/30 dark:border-amber-700"
+              role="alert"
+            >
+              {warnings.map((msg) => (
+                <p key={msg} className="text-xs text-amber-900 dark:text-amber-200 flex gap-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
+                  <span>{msg}</span>
+                </p>
+              ))}
+            </div>
+          )}
+
+          <p className="text-xs text-muted-foreground">
+            بعد التأكيد تُجمَّد الوزنات الداخلية ولا تُعدَّل إلا بإعادة فتح التحميل (إن وُجدت
+            الصلاحية).
+          </p>
+        </div>
+
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            تراجع
+          </Button>
+          <Button
+            type="button"
+            onClick={() => void handleConfirm()}
+            disabled={saving}
+            className="bg-green-600 hover:bg-green-700"
+          >
+            {saving ? "جاري التأكيد..." : "تأكيد اكتمال التحميل"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
