@@ -9,6 +9,11 @@ export const dailyTrucksReportQuerySchema = z.object({
       (v) => (v === "" || v === null || v === undefined ? undefined : v),
       z.coerce.number().int().positive().optional(),
     ),
+  grade: z
+    .preprocess(
+      (v) => (v === "" || v === null || v === undefined ? undefined : v),
+      z.enum(["FIRST", "SECOND"]).optional(),
+    ),
 });
 
 export type DailyTrucksReportQuery = z.infer<typeof dailyTrucksReportQuerySchema>;
