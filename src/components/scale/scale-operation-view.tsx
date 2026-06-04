@@ -61,6 +61,7 @@ import {
   formatDuration,
   formatDurationCompact,
 } from "@/lib/format-duration";
+import { formatDateTime } from "@/lib/date-format";
 import type { TruckTimings } from "@/lib/truck-timing";
 
 interface SizeOption {
@@ -684,10 +685,10 @@ export function ScaleOperationView({
       {/* Metadata */}
       <Card>
         <CardContent className="py-3 text-xs text-muted-foreground space-y-1">
-          <div>سجّل بواسطة: {truck.creator.fullName} — {new Date(truck.createdAt).toLocaleString("ar-SY")}</div>
+          <div>سجّل بواسطة: {truck.creator.fullName} — {formatDateTime(truck.createdAt)}</div>
           {truck.closer && truck.closedAt && (
             <div>
-              {truck.status === "Cancelled" ? "ألغى" : "أغلق"} بواسطة: {truck.closer.fullName} — {new Date(truck.closedAt).toLocaleString("ar-SY")}
+              {truck.status === "Cancelled" ? "ألغى" : "أغلق"} بواسطة: {truck.closer.fullName} — {formatDateTime(truck.closedAt)}
             </div>
           )}
           {truck.notes && <div>ملاحظات: {truck.notes}</div>}
@@ -918,7 +919,7 @@ function TimingCard({
                 <span className="text-sm font-medium">{step.label}</span>
                 <span className="text-xs text-muted-foreground font-mono">
                   {step.time
-                    ? new Date(step.time).toLocaleString("ar-SY")
+                    ? formatDateTime(step.time)
                     : step.inProgress
                       ? "— في الانتظار —"
                       : "— لم يحصل بعد —"}

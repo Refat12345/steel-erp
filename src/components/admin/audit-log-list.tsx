@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { formatAuditDetails } from "@/lib/audit-details";
+import { formatDateTime } from "@/lib/date-format";
 
 type AuditAction = "create" | "update" | "status_change" | "upload" | "delete";
 
@@ -218,7 +219,7 @@ export function AuditLogList() {
               rows.map((row) => (
                 <TableRow key={row.id}>
                   <TableCell className="text-xs">
-                    {new Date(row.createdAt).toLocaleString("ar-SA")}
+                    {formatDateTime(row.createdAt)}
                   </TableCell>
                   <TableCell className="text-sm">
                     {row.user.fullName}

@@ -33,6 +33,7 @@
 
 import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/db";
+import { formatDate } from "@/lib/date-format";
 import type { TruckStatus, SalesOrderGrade } from "@prisma/client";
 
 // ─── Period & Time Helpers ─────────────────────────────────────────────
@@ -151,8 +152,8 @@ function netTonnage(grossKg: unknown, tareKg: unknown): number {
   return net > 0 ? net : 0;
 }
 
-function arabicDayLabel(d: Date): string {
-  return d.toLocaleDateString("ar-SA", { month: "short", day: "numeric" });
+function dayLabel(d: Date): string {
+  return formatDate(d);
 }
 
 // ─── Types: Owner Tier ────────────────────────────────────────────────
@@ -345,7 +346,7 @@ async function buildOwnerStats(period: DashboardPeriod): Promise<OwnerStats> {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, v]) => ({
       date,
-      label: arabicDayLabel(new Date(date)),
+      label: dayLabel(new Date(date)),
       trucks: v.trucks,
       tons: Math.round(v.tons * 1000) / 1000,
     }));

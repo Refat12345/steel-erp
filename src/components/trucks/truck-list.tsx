@@ -36,6 +36,7 @@ import {
 import { RegisterTruckDialog } from "./register-truck-dialog";
 import { EditTruckDialog, type EditableTruck } from "./edit-truck-dialog";
 import { durationBetween, formatDurationCompact } from "@/lib/format-duration";
+import { formatDate, formatDateTime } from "@/lib/date-format";
 import { getDisplayGradeLabel } from "@/lib/truck-grade";
 import { canShowTruckEditButton } from "@/lib/truck-edit-ui";
 import type { SalesOrderGrade } from "@prisma/client";
@@ -301,9 +302,9 @@ export function TruckList() {
                           }`}
                           title={
                             truck.tareTime
-                              ? `دخول القبان فارغاً: ${new Date(truck.tareTime).toLocaleString("ar-SY")}${
+                              ? `دخول القبان فارغاً: ${formatDateTime(truck.tareTime)}${
                                   endTime
-                                    ? `\nوزن المحمّل: ${new Date(endTime).toLocaleString("ar-SY")}`
+                                    ? `\nوزن المحمّل: ${formatDateTime(endTime)}`
                                     : ""
                                 }`
                               : ""
@@ -317,7 +318,7 @@ export function TruckList() {
                           )}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
-                          {new Date(truck.createdAt).toLocaleDateString("ar-SY")}
+                          {formatDate(truck.createdAt)}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">

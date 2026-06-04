@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { formatDate } from "@/lib/date-format";
 import {
   Table,
   TableBody,
@@ -127,7 +128,7 @@ export function PaymentDetailDialog({ paymentId, onClose }: Props) {
               </div>
               <div>
                 <span className="text-muted-foreground">تاريخ الدفع</span>
-                <p>{new Date(currentData.paymentDate).toLocaleDateString("ar-SA")}</p>
+                <p>{formatDate(currentData.paymentDate)}</p>
               </div>
               {currentData.referenceNumber && (
                 <div>

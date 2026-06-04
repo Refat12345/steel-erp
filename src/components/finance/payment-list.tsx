@@ -32,6 +32,7 @@ import {
 import { RecordPaymentDialog } from "./record-payment-dialog";
 import { PaymentDetailDialog } from "./payment-detail-dialog";
 import { CustomerBalanceDialog } from "./customer-balance-dialog";
+import { formatDate } from "@/lib/date-format";
 
 interface PaymentRow {
   id: number;
@@ -203,7 +204,7 @@ export function PaymentList() {
                     </Badge>
                   </TableCell>
                   <TableCell className="text-sm">
-                    {new Date(p.paymentDate).toLocaleDateString("ar-SA")}
+                    {formatDate(p.paymentDate)}
                   </TableCell>
                   <TableCell className="text-center text-sm">
                     {p._count.allocations}

@@ -7,6 +7,7 @@ import { Printer, ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { aggregateWeighSessionsBySize } from "@/lib/weigh-session-aggregate";
 import { formatDuration } from "@/lib/format-duration";
+import { formatDate, formatDateTime } from "@/lib/date-format";
 import type { TruckTimings } from "@/lib/truck-timing";
 import { getDisplayGradeLabel } from "@/lib/truck-grade";
 import {
@@ -276,8 +277,8 @@ export function ScaleCardPrint({
             <span className="font-bold">التاريخ: </span>
             <span>
               {truck.closedAt
-                ? new Date(truck.closedAt).toLocaleDateString("ar-SY")
-                : new Date(truck.createdAt).toLocaleDateString("ar-SY")}
+                ? formatDate(truck.closedAt)
+                : formatDate(truck.createdAt)}
             </span>
           </div>
         </div>
@@ -374,7 +375,7 @@ export function ScaleCardPrint({
                 <td className="py-2 px-3">تسجيل الشاحنة (اللوجستك)</td>
                 <td className="py-2 px-3 text-gray-600">—</td>
                 <td className="py-2 px-3 text-xs">
-                  {new Date(truck.createdAt).toLocaleString("ar-SY")}
+                  {formatDateTime(truck.createdAt)}
                 </td>
               </tr>
               <tr className="border-b border-gray-300">
@@ -384,7 +385,7 @@ export function ScaleCardPrint({
                 </td>
                 <td className="py-2 px-3 text-xs">
                   {truck.tareTime
-                    ? new Date(truck.tareTime).toLocaleString("ar-SY")
+                    ? formatDateTime(truck.tareTime)
                     : "—"}
                 </td>
               </tr>
@@ -395,7 +396,7 @@ export function ScaleCardPrint({
                 </td>
                 <td className="py-2 px-3 text-xs">
                   {truck.grossTime
-                    ? new Date(truck.grossTime).toLocaleString("ar-SY")
+                    ? formatDateTime(truck.grossTime)
                     : "—"}
                 </td>
               </tr>
@@ -447,7 +448,7 @@ export function ScaleCardPrint({
                     <td className="py-1.5 px-3">تأكيد المحمّل</td>
                     <td className="py-1.5 px-3 font-semibold">
                       {loaderName} —{" "}
-                      {new Date(loadingConfirmedAt).toLocaleString("ar-SY")}
+                      {formatDateTime(loadingConfirmedAt)}
                     </td>
                   </tr>
                 )}
@@ -546,12 +547,12 @@ export function ScaleCardPrint({
               <div>المشغّل: {truck.closer?.fullName ?? truck.creator.fullName}</div>
             )}
             {truck.closedAt && (
-              <div>وقت الإغلاق: {new Date(truck.closedAt).toLocaleString("ar-SY")}</div>
+              <div>وقت الإغلاق: {formatDateTime(truck.closedAt)}</div>
             )}
           </div>
           <div className="text-left space-y-0.5">
             {truck.notes && <div>ملاحظات: {truck.notes}</div>}
-            <div>طُبع: {new Date().toLocaleString("ar-SY")}</div>
+            <div>طُبع: {formatDateTime(new Date())}</div>
           </div>
         </div>
 

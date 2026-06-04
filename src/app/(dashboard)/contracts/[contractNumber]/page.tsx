@@ -33,6 +33,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { fetchUploadedFile } from "@/lib/uploaded-file-url";
+import { formatDate } from "@/lib/date-format";
 
 interface Attachment {
   id: number;
@@ -296,7 +297,7 @@ export default function ContractDetailPage({
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
               أُنشئ بتاريخ{" "}
-              {new Date(contract.createdAt).toLocaleDateString("ar-SA")} بواسطة{" "}
+              {formatDate(contract.createdAt)} بواسطة{" "}
               {contract.creator.fullName}
             </p>
           </div>
@@ -420,7 +421,7 @@ export default function ContractDetailPage({
                     <p className="text-sm truncate">{att.fileName}</p>
                     <p className="text-xs text-muted-foreground">
                       {(att.fileSize / 1024).toFixed(0)} كيلوبايت —{" "}
-                      {new Date(att.uploadedAt).toLocaleDateString("ar-SA")}
+                      {formatDate(att.uploadedAt)}
                     </p>
                   </div>
                   <Button

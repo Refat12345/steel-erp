@@ -1,5 +1,6 @@
 import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/db";
+import { formatDate } from "@/lib/date-format";
 
 /** Cached KPI payload — heavy (12+ DB ops); shared across all authenticated users */
 export async function getDashboardStatsCached() {
@@ -78,10 +79,7 @@ export async function getDashboardStatsCached() {
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([date, total]) => ({
           date,
-          label: new Date(date).toLocaleDateString("ar-SA", {
-            month: "short",
-            day: "numeric",
-          }),
+          label: formatDate(date),
           total,
         }));
 
