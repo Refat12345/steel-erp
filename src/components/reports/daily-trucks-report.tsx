@@ -53,9 +53,19 @@ const STATUS_BADGE: Record<
   excluded_open: "default",
 };
 
+const GRADE_OPTIONS = [
+  { value: "FIRST", label: "نخب أول" },
+  { value: "SECOND", label: "نخب ثاني" },
+] as const;
+
 function formatTons(value: number | null): string {
   if (value == null) return "—";
   return value.toFixed(3);
+}
+
+function formatBundles(value: number | null): string {
+  if (value == null) return "—";
+  return String(value);
 }
 
 function formatNullableDateTime(iso: string | null): string {
@@ -91,6 +101,7 @@ export function DailyTrucksReportView() {
     defaultOperationalDateInput(),
   );
   const [customerId, setCustomerId] = useState<string>("all");
+  const [grade, setGrade] = useState<string>("all");
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [loadingCustomers, setLoadingCustomers] = useState(true);
   const [loadingReport, setLoadingReport] = useState(false);
@@ -126,6 +137,7 @@ export function DailyTrucksReportView() {
     try {
       const params = new URLSearchParams({ date: operationalDate });
       if (customerId !== "all") params.set("customerId", customerId);
+      if (grade !== "all") params.set("grade", grade);
       const res = await fetch(`/api/reports/daily-trucks?${params.toString()}`);
       const json = await res.json();
       if (!res.ok || !json.success) {
@@ -140,7 +152,7 @@ export function DailyTrucksReportView() {
     } finally {
       setLoadingReport(false);
     }
-  }, [operationalDate, customerId]);
+  }, [operationalDate, customerId, grade]);
 
   useEffect(() => {
     if (canView) {
@@ -224,6 +236,23 @@ export function DailyTrucksReportView() {
           </Select>
         </div>
 
+        <div className="space-y-1.5 min-w-[10rem]">
+          <label className="text-xs font-medium text-muted-foreground">النخب</label>
+          <Select value={grade} onValueChange={(v) => setGrade(v ?? "all")}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="كل النخب" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">كل النخب</SelectItem>
+              {GRADE_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         <Button onClick={() => void fetchReport()} disabled={loadingReport}>
           {loadingReport ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -239,6 +268,7 @@ export function DailyTrucksReportView() {
           onClick={() => {
             setOperationalDate(defaultOperationalDateInput());
             setCustomerId("all");
+            setGrade("all");
           }}
         >
           مسح الفلاتر
@@ -279,9 +309,66 @@ export function DailyTrucksReportView() {
               فلتر الزبون: <span className="font-medium">{report.filters.customerName}</span>
             </p>
           ) : null}
+          {report.filters.gradeLabelAr ? (
+            <p className="text-sm text-muted-foreground">
+              فلتر النخب: <span className="font-medium">{report.filters.gradeLabelAr}</span>
+            </p>
+          ) : null}
+
+          <Card className="shadow-sm">
+            <CardContent className="p-4 space-y-3">
+              <div>
+                <h2 className="text-base font-semibold">المجموع حسب القياس</h2>
+                <p className="text-xs text-muted-foreground">
+                  محسوب من أوزان الجلسات الداخلية للشاحنات المكتملة ضمن يوم التشغيل
+                </p>
+              </div>
+              <div className="rounded-lg border overflow-x-auto min-w-0">
+                <Table className="min-w-[560px]">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>القياس</TableHead>
+                      <TableHead className="text-left">المجموع الداخلي</TableHead>
+                      <TableHead className="text-left">الربطات</TableHead>
+                      <TableHead className="text-left">الشاحنات</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {report.sizeTotals.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={4}
+                          className="text-center py-8 text-muted-foreground"
+                        >
+                          لا توجد أوزان داخلية مجمّعة حسب القياس لهذا اليوم
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      report.sizeTotals.map((sizeTotal) => (
+                        <TableRow key={sizeTotal.sizeId ?? "none"}>
+                          <TableCell className="font-medium">
+                            {sizeTotal.displayName}
+                          </TableCell>
+                          <TableCell className="font-mono tabular-nums text-left">
+                            {formatTons(sizeTotal.totalTons)}
+                          </TableCell>
+                          <TableCell className="font-mono tabular-nums text-left">
+                            {formatBundles(sizeTotal.totalBundles)}
+                          </TableCell>
+                          <TableCell className="font-mono tabular-nums text-left">
+                            {sizeTotal.truckCount}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
 
           <div className="rounded-lg border overflow-x-auto min-w-0">
-            <Table className="min-w-[960px]">
+            <Table className="min-w-[1040px]">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-10 text-center">#</TableHead>
@@ -290,6 +377,7 @@ export function DailyTrucksReportView() {
                   <TableHead>الزبون</TableHead>
                   <TableHead>الوجهة</TableHead>
                   <TableHead>أمر البيع</TableHead>
+                  <TableHead>النخب</TableHead>
                   <TableHead>التسجيل</TableHead>
                   <TableHead>الإغلاق</TableHead>
                   <TableHead>الحالة</TableHead>
@@ -302,7 +390,7 @@ export function DailyTrucksReportView() {
               <TableBody>
                 {report.rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={13} className="text-center py-10 text-muted-foreground">
+                    <TableCell colSpan={14} className="text-center py-10 text-muted-foreground">
                       لا توجد شاحنات مسجّلة في هذا اليوم التشغيلي
                     </TableCell>
                   </TableRow>
@@ -332,6 +420,7 @@ export function DailyTrucksReportView() {
                       <TableCell className="font-mono text-xs">
                         {row.salesOrderNumber ?? "—"}
                       </TableCell>
+                      <TableCell>{row.gradeLabelAr ?? "—"}</TableCell>
                       <TableCell className="text-xs whitespace-nowrap">
                         {formatNullableDateTime(row.createdAt)}
                       </TableCell>

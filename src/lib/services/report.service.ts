@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
-import type { TruckStatus } from "@prisma/client";
+import type { SalesOrderGrade, TruckStatus } from "@prisma/client";
+import { GRADE_LABELS, getDisplayGrade } from "@/lib/truck-grade";
 import {
   OPERATIONAL_DAY_CUTOFF_HOUR,
   REPORT_DISCREPANCY_WARN_TONS,
@@ -35,6 +36,7 @@ const TONNAGE_NOTE: Record<ReportTonnageStatus, string | null> = {
 export interface DailyTrucksReportParams {
   operationalDate: string;
   customerId?: number;
+  grade?: SalesOrderGrade;
 }
 
 export interface DailyTruckRow {
@@ -46,6 +48,8 @@ export interface DailyTruckRow {
   salesOrderNumber: string | null;
   status: TruckStatus;
   statusLabelAr: string;
+  grade: SalesOrderGrade | null;
+  gradeLabelAr: string | null;
   createdAt: string;
   closedAt: string | null;
   bridgeTons: number | null;
@@ -67,6 +71,14 @@ export interface DailyTrucksReportSummary {
   totalDiscrepancyTons: number;
 }
 
+export interface DailyTrucksReportSizeTotal {
+  sizeId: number | null;
+  displayName: string;
+  totalTons: number;
+  totalBundles: number | null;
+  truckCount: number;
+}
+
 export interface DailyTrucksReport {
   operationalDate: string;
   windowFrom: string;
@@ -76,8 +88,11 @@ export interface DailyTrucksReport {
   filters: {
     customerId?: number;
     customerName?: string;
+    grade?: SalesOrderGrade;
+    gradeLabelAr?: string;
   };
   summary: DailyTrucksReportSummary;
+  sizeTotals: DailyTrucksReportSizeTotal[];
   rows: DailyTruckRow[];
 }
 
@@ -115,6 +130,10 @@ export async function getDailyTrucksReport(
       customerName: customer.fullName,
     };
   }
+  const gradeFilter =
+    params.grade != null
+      ? { grade: params.grade, gradeLabelAr: GRADE_LABELS[params.grade] }
+      : {};
 
   const trucks = await prisma.truckOperation.findMany({
     where: {
@@ -133,9 +152,18 @@ export async function getDailyTrucksReport(
       createdAt: true,
       closedAt: true,
       cancelReason: true,
+      operationalGrade: true,
       customer: { select: { id: true, fullName: true, code: true } },
       destination: { select: { id: true, name: true } },
-      sessions: { select: { weightTons: true } },
+      salesOrder: { select: { grade: true } },
+      sessions: {
+        select: {
+          sizeId: true,
+          bundleCount: true,
+          weightTons: true,
+          size: { select: { displayName: true, sortOrder: true } },
+        },
+      },
     },
   });
 
@@ -149,6 +177,17 @@ export async function getDailyTrucksReport(
     totalDiscrepancyTons: 0,
   };
 
+  type SizeTotalAcc = {
+    sizeId: number | null;
+    displayName: string;
+    sortOrder: number;
+    totalTons: number;
+    totalBundles: number;
+    anyMissingBundle: boolean;
+    truckIds: Set<number>;
+  };
+  const sizeTotalMap = new Map<string, SizeTotalAcc>();
+
   const rows: DailyTruckRow[] = trucks.map((truck) => {
     const tonnageStatus = resolveReportTonnageStatus({
       status: truck.status,
@@ -159,9 +198,14 @@ export async function getDailyTrucksReport(
     const bridgeTons = computeBridgeTons(truck.grossWeightKg, truck.tareWeightKg);
     const internalTons = computeInternalTons(truck.sessions);
     const discrepancyTons = computeDiscrepancyTons(bridgeTons, internalTons);
+    const grade = getDisplayGrade(truck);
     const discrepancyWarning =
       discrepancyTons != null &&
       Math.abs(discrepancyTons) > REPORT_DISCREPANCY_WARN_TONS;
+
+    if (params.grade != null && grade !== params.grade) {
+      return null;
+    }
 
     summary.registered += 1;
     if (truck.status === "Completed") summary.completed += 1;
@@ -172,6 +216,34 @@ export async function getDailyTrucksReport(
       if (bridgeTons != null) summary.totalBridgeTons += bridgeTons;
       if (internalTons != null) summary.totalInternalTons += internalTons;
       if (discrepancyTons != null) summary.totalDiscrepancyTons += discrepancyTons;
+
+      for (const session of truck.sessions) {
+        const weightTons = Number(session.weightTons);
+        if (!Number.isFinite(weightTons)) continue;
+
+        const key = session.sizeId != null ? `id:${session.sizeId}` : "none";
+        let acc = sizeTotalMap.get(key);
+        if (!acc) {
+          acc = {
+            sizeId: session.sizeId,
+            displayName: session.size?.displayName ?? "بدون قياس",
+            sortOrder: session.size?.sortOrder ?? Number.MAX_SAFE_INTEGER,
+            totalTons: 0,
+            totalBundles: 0,
+            anyMissingBundle: false,
+            truckIds: new Set<number>(),
+          };
+          sizeTotalMap.set(key, acc);
+        }
+
+        acc.totalTons += weightTons;
+        acc.truckIds.add(truck.id);
+        if (session.bundleCount == null) {
+          acc.anyMissingBundle = true;
+        } else {
+          acc.totalBundles += session.bundleCount;
+        }
+      }
     }
 
     const displayBridge = tonnageStatus === "included" ? bridgeTons : null;
@@ -188,6 +260,8 @@ export async function getDailyTrucksReport(
       salesOrderNumber: truck.salesOrderNumber,
       status: truck.status,
       statusLabelAr: TRUCK_STATUS_LABELS[truck.status],
+      grade,
+      gradeLabelAr: grade ? GRADE_LABELS[grade] : null,
       createdAt: truck.createdAt.toISOString(),
       closedAt: truck.closedAt?.toISOString() ?? null,
       bridgeTons: displayBridge,
@@ -199,12 +273,22 @@ export async function getDailyTrucksReport(
       cancelReason: truck.cancelReason,
       noteAr: buildNote(tonnageStatus, truck.cancelReason),
     };
-  });
+  }).filter((row): row is DailyTruckRow => row !== null);
 
   summary.totalBridgeTons = Math.round(summary.totalBridgeTons * 1000) / 1000;
   summary.totalInternalTons = Math.round(summary.totalInternalTons * 1000) / 1000;
   summary.totalDiscrepancyTons =
     Math.round(summary.totalDiscrepancyTons * 1000) / 1000;
+
+  const sizeTotals: DailyTrucksReportSizeTotal[] = Array.from(sizeTotalMap.values())
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.displayName.localeCompare(b.displayName))
+    .map((acc) => ({
+      sizeId: acc.sizeId,
+      displayName: acc.displayName,
+      totalTons: Math.round(acc.totalTons * 1000) / 1000,
+      totalBundles: acc.anyMissingBundle ? null : acc.totalBundles,
+      truckCount: acc.truckIds.size,
+    }));
 
   return {
     operationalDate: params.operationalDate,
@@ -212,8 +296,9 @@ export async function getDailyTrucksReport(
     windowTo: window.to.toISOString(),
     windowLabelAr: formatOperationalWindowLabel(window),
     cutoffHour: OPERATIONAL_DAY_CUTOFF_HOUR,
-    filters: customerFilter,
+    filters: { ...customerFilter, ...gradeFilter },
     summary,
+    sizeTotals,
     rows,
   };
 }

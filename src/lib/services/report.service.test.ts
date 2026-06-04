@@ -55,7 +55,20 @@ describe("getDailyTrucksReport", () => {
         cancelReason: null,
         customer: { id: 1, fullName: "ز", code: "C-1" },
         destination: null,
-        sessions: [{ weightTons: 14.8 }],
+        sessions: [
+          {
+            sizeId: 8,
+            bundleCount: 20,
+            weightTons: 10.5,
+            size: { displayName: "8 مم", sortOrder: 8 },
+          },
+          {
+            sizeId: 12,
+            bundleCount: 8,
+            weightTons: 4.3,
+            size: { displayName: "12 مم", sortOrder: 12 },
+          },
+        ],
       },
       {
         id: 2,
@@ -70,7 +83,14 @@ describe("getDailyTrucksReport", () => {
         cancelReason: null,
         customer: null,
         destination: null,
-        sessions: [{ weightTons: 20 }],
+        sessions: [
+          {
+            sizeId: 8,
+            bundleCount: 40,
+            weightTons: 20,
+            size: { displayName: "8 مم", sortOrder: 8 },
+          },
+        ],
       },
       {
         id: 3,
@@ -100,6 +120,97 @@ describe("getDailyTrucksReport", () => {
     expect(report.rows[1].tonnageStatus).toBe("excluded_late_close");
     expect(report.rows[1].bridgeTons).toBeNull();
     expect(report.rows[2].noteAr).toBe("تجاوزت اليوم");
+    expect(report.sizeTotals).toEqual([
+      {
+        sizeId: 8,
+        displayName: "8 مم",
+        totalTons: 10.5,
+        totalBundles: 20,
+        truckCount: 1,
+      },
+      {
+        sizeId: 12,
+        displayName: "12 مم",
+        totalTons: 4.3,
+        totalBundles: 8,
+        truckCount: 1,
+      },
+    ]);
+  });
+
+  it("filters by effective grade from sales order or operational grade", async () => {
+    mockPrisma.truckOperation.findMany.mockResolvedValue([
+      {
+        id: 11,
+        plateNumber: "G-1",
+        driverName: "سائق",
+        salesOrderNumber: "SO-FIRST",
+        status: "Completed",
+        tareWeightKg: 10_000,
+        grossWeightKg: 22_000,
+        createdAt: new Date(2026, 4, 23, 10, 0, 0, 0),
+        closedAt: new Date(2026, 4, 23, 12, 0, 0, 0),
+        cancelReason: null,
+        operationalGrade: "SECOND",
+        salesOrder: { grade: "FIRST" },
+        customer: null,
+        destination: null,
+        sessions: [
+          {
+            sizeId: 8,
+            bundleCount: 10,
+            weightTons: 12,
+            size: { displayName: "8 مم", sortOrder: 8 },
+          },
+        ],
+      },
+      {
+        id: 12,
+        plateNumber: "G-2",
+        driverName: "سائق",
+        salesOrderNumber: null,
+        status: "Completed",
+        tareWeightKg: 10_000,
+        grossWeightKg: 28_000,
+        createdAt: new Date(2026, 4, 23, 11, 0, 0, 0),
+        closedAt: new Date(2026, 4, 23, 13, 0, 0, 0),
+        cancelReason: null,
+        operationalGrade: "SECOND",
+        salesOrder: null,
+        customer: null,
+        destination: null,
+        sessions: [
+          {
+            sizeId: 12,
+            bundleCount: 18,
+            weightTons: 18,
+            size: { displayName: "12 مم", sortOrder: 12 },
+          },
+        ],
+      },
+    ]);
+
+    const report = await getDailyTrucksReport({
+      operationalDate: "2026-05-23",
+      grade: "FIRST",
+    });
+
+    expect(report.filters.grade).toBe("FIRST");
+    expect(report.filters.gradeLabelAr).toBe("نخب أول");
+    expect(report.summary.registered).toBe(1);
+    expect(report.summary.totalInternalTons).toBe(12);
+    expect(report.rows).toHaveLength(1);
+    expect(report.rows[0].grade).toBe("FIRST");
+    expect(report.rows[0].gradeLabelAr).toBe("نخب أول");
+    expect(report.sizeTotals).toEqual([
+      {
+        sizeId: 8,
+        displayName: "8 مم",
+        totalTons: 12,
+        totalBundles: 10,
+        truckCount: 1,
+      },
+    ]);
   });
 
   it("includes bridge-only totals when internal sessions are missing", async () => {

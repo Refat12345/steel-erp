@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
   const parsed = dailyTrucksReportQuerySchema.safeParse({
     date: req.nextUrl.searchParams.get("date"),
     customerId: req.nextUrl.searchParams.get("customerId") ?? undefined,
+    grade: req.nextUrl.searchParams.get("grade") ?? undefined,
   });
 
   if (!parsed.success) {
@@ -30,6 +31,7 @@ export async function GET(req: NextRequest) {
     const data = await getDailyTrucksReport({
       operationalDate: parsed.data.date,
       customerId: parsed.data.customerId,
+      grade: parsed.data.grade,
     });
     return ok(data);
   } catch (err) {
