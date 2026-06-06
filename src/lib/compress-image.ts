@@ -5,12 +5,35 @@
  * Non-image files are returned unchanged (callers must only pass images when needed).
  */
 
-const MAX_DIMENSION = 1920;
-const INITIAL_QUALITY = 0.8;
-const TARGET_MAX_BYTES = 2 * 1024 * 1024; // ~2 MB goal
-const MIN_QUALITY = 0.35;
-const MIN_MAX_DIMENSION = 640;
-const MAX_ATTEMPTS = 56;
+export type CompressImagePreset = "contract" | "truck";
+
+type CompressImageConfig = {
+  maxDimension: number;
+  initialQuality: number;
+  targetMaxBytes: number;
+  minQuality: number;
+  minMaxDimension: number;
+  maxAttempts: number;
+};
+
+const COMPRESS_PRESETS: Record<CompressImagePreset, CompressImageConfig> = {
+  contract: {
+    maxDimension: 1920,
+    initialQuality: 0.8,
+    targetMaxBytes: 2 * 1024 * 1024, // ~2 MB goal
+    minQuality: 0.35,
+    minMaxDimension: 640,
+    maxAttempts: 56,
+  },
+  truck: {
+    maxDimension: 1280,
+    initialQuality: 0.72,
+    targetMaxBytes: 700 * 1024, // truck photos should stay light for VPS storage
+    minQuality: 0.3,
+    minMaxDimension: 540,
+    maxAttempts: 56,
+  },
+};
 
 function stripExtension(name: string): string {
   const base = name.replace(/\.[^.]+$/, "").trim();
@@ -72,13 +95,18 @@ async function encodeOnce(
 }
 
 /**
- * Re-encode an image file to JPEG (max edge ≤ {@link MAX_DIMENSION}, then tighten
- * quality / dimensions until under ~2 MB when possible). Non-image `File` is returned as-is.
+ * Re-encode an image file to JPEG, then tighten quality / dimensions until it
+ * reaches the selected storage budget when possible. Non-image `File` is returned as-is.
  */
-export async function compressImage(file: File): Promise<File> {
+export async function compressImage(
+  file: File,
+  preset: CompressImagePreset = "contract",
+): Promise<File> {
   if (!file.type.startsWith("image/")) {
     return file;
   }
+
+  const config = COMPRESS_PRESETS[preset];
 
   let img: HTMLImageElement;
   try {
@@ -93,17 +121,17 @@ export async function compressImage(file: File): Promise<File> {
     return file;
   }
 
-  let maxDim = MAX_DIMENSION;
-  let quality = INITIAL_QUALITY;
+  let maxDim = config.maxDimension;
+  let quality = config.initialQuality;
   let bestOverBudget: Blob | null = null;
 
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 0; attempt < config.maxAttempts; attempt++) {
     const blob = await encodeOnce(img, iw, ih, maxDim, quality);
     if (!blob) {
       break;
     }
 
-    if (blob.size <= TARGET_MAX_BYTES) {
+    if (blob.size <= config.targetMaxBytes) {
       return new File([blob], `${stripExtension(file.name)}.jpg`, {
         type: "image/jpeg",
         lastModified: Date.now(),
@@ -114,14 +142,14 @@ export async function compressImage(file: File): Promise<File> {
       bestOverBudget = blob;
     }
 
-    if (quality > MIN_QUALITY + 0.008) {
-      quality = Math.max(MIN_QUALITY, quality - 0.06);
+    if (quality > config.minQuality + 0.008) {
+      quality = Math.max(config.minQuality, quality - 0.06);
       continue;
     }
 
-    if (maxDim > MIN_MAX_DIMENSION) {
-      maxDim = Math.max(MIN_MAX_DIMENSION, Math.floor(maxDim * 0.86));
-      quality = INITIAL_QUALITY;
+    if (maxDim > config.minMaxDimension) {
+      maxDim = Math.max(config.minMaxDimension, Math.floor(maxDim * 0.86));
+      quality = config.initialQuality;
       continue;
     }
 
