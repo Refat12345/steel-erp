@@ -1611,7 +1611,7 @@ function PhotoUploadButton({
 
     setUploading(true);
     try {
-      const file = await compressImage(raw);
+      const file = await compressImage(raw, "truck");
       const fd = new FormData();
       fd.append("file", file);
       const res = await fetch(`/api/trucks/${truckId}/photo`, {

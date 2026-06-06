@@ -16,15 +16,17 @@ import { uploadPhoto } from "@/lib/services/truck.service";
 const UPLOAD_DIR = path.join(process.cwd(), "uploads", "trucks");
 
 /**
- * MAX_FILE_SIZE = 15 MB. Enforced in THREE places:
+ * MAX_FILE_SIZE = 3 MB. Enforced in THREE places:
  *   1. Content-Length header check BEFORE reading the body (below).
  *   2. Stream-size check after FormData parsing (in case body is sent
  *      chunked without a length header, e.g. some mobile clients).
  *
- * Reading a multi-hundred-MB body only to reject it afterwards is a trivial
- * DoS vector: this pre-check rejects oversized uploads within milliseconds.
+ * Client-side truck compression targets ~700 KB; this cap is a safety net when
+ * browser compression fails. Reading a multi-hundred-MB body only to reject it
+ * afterwards is a trivial DoS vector: this pre-check rejects oversized uploads
+ * within milliseconds.
  */
-const MAX_FILE_SIZE = 15 * 1024 * 1024;
+const MAX_FILE_SIZE = 3 * 1024 * 1024;
 
 type DetectedImageType = {
   mimeType: "image/jpeg" | "image/png";
