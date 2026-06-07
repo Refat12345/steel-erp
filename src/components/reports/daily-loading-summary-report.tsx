@@ -675,9 +675,6 @@ const PRINT_STYLE = `
 `;
 
 function DailyLoadingSummaryPrintable({ report }: { report: DailyLoadingSummary }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-
   const content = (
     <div id="loading-summary-print" dir="ltr">
         <h1>{BRAND.name} — Loading Summary</h1>
@@ -792,7 +789,7 @@ function DailyLoadingSummaryPrintable({ report }: { report: DailyLoadingSummary 
   return (
     <>
       <style>{PRINT_STYLE}</style>
-      {mounted ? createPortal(content, document.body) : null}
+      {typeof document !== "undefined" ? createPortal(content, document.body) : null}
     </>
   );
 }
