@@ -1,0 +1,76 @@
+/**
+ * English label dictionary for the English-language reports (e.g. the Daily
+ * Loading Summary). The database stores city names in Arabic
+ * (`Destination.name`) and size names in Arabic (`SizeLookup.displayName`),
+ * so this map provides their English equivalents.
+ *
+ * To add a translation later, just add a line here — no other code changes
+ * are needed. Anything missing from the dictionary falls back gracefully
+ * (cities keep their Arabic name; sizes get a best-effort transliteration).
+ */
+
+const CITY_EN: Record<string, string> = {
+  دمشق: "Damascus",
+  "ريف دمشق": "Rural Damascus",
+  حمص: "Homs",
+  حماة: "Hama",
+  حلب: "Aleppo",
+  اللاذقية: "Lattakia",
+  طرطوس: "Tartus",
+  درعا: "Daraa",
+  السويداء: "As-Suwayda",
+  إدلب: "Idlib",
+  الحسكة: "Al-Hasakah",
+  "دير الزور": "Deir ez-Zor",
+  الرقة: "Raqqa",
+  القنيطرة: "Quneitra",
+};
+
+/** Keyed by the stable English `SizeLookup.code` (language-independent). */
+const SIZE_EN_BY_CODE: Record<string, string> = {
+  "6mm": "6mm",
+  "8mm": "8mm",
+  "10mm": "10mm",
+  "12mm": "12mm",
+  "14mm": "14mm",
+  "16mm": "16mm",
+  "18mm": "18mm",
+  "20mm": "20mm",
+  "22mm": "22mm",
+  "25mm": "25mm",
+  shortbar_1_4m: "Short bars 1–4 m",
+  shortbar_4_12m: "Short bars 4–12 m",
+  scrap: "Scrap",
+};
+
+const ARABIC_DIGITS = "٠١٢٣٤٥٦٧٨٩";
+
+function latinizeDigits(value: string): string {
+  return value.replace(/[٠-٩]/g, (d) => String(ARABIC_DIGITS.indexOf(d)));
+}
+
+/** Translate a city (destination) name to English, falling back to the original. */
+export function toEnglishCity(arabicName: string | null | undefined): string {
+  if (!arabicName) return "—";
+  return CITY_EN[arabicName.trim()] ?? arabicName;
+}
+
+/**
+ * Translate a size to English. Prefers the dictionary keyed by the size
+ * `code`; otherwise transliterates the Arabic display name (Arabic-Indic
+ * digits → Latin, "مم" → "mm", "م" → "m") so unknown sizes still read in
+ * English.
+ */
+export function toEnglishSize(
+  displayName: string,
+  code?: string | null,
+): string {
+  if (code && SIZE_EN_BY_CODE[code]) return SIZE_EN_BY_CODE[code];
+  const transliterated = latinizeDigits(displayName)
+    .trim()
+    .replace(/مم/g, "mm")
+    .replace(/قصائر/g, "Short bars")
+    .replace(/خردة/g, "Scrap")
+    .replace(/(^|\s)م(\s|$)/g, "$1m$2");
+  return transliterated || displayName;
+}

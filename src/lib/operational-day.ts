@@ -64,6 +64,67 @@ export function getOperationalDayWindow(
   return { operationalDate: dateStr, from, to };
 }
 
+export type ReportPeriod = "daily" | "weekly" | "monthly";
+
+export const REPORT_PERIODS: readonly ReportPeriod[] = [
+  "daily",
+  "weekly",
+  "monthly",
+] as const;
+
+/**
+ * Operational window for a daily / weekly / monthly report, anchored on the
+ * selected calendar date and aligned to the cutoff hour.
+ *
+ *  - daily:   [D cutoff, D+1 cutoff)
+ *  - weekly:  the week (Sat→Sat, Levant convention) containing D
+ *  - monthly: the calendar month containing D
+ *
+ * Returned `from`/`to` are local Dates, identical in shape to
+ * `getOperationalDayWindow`, so all tonnage/status helpers work unchanged.
+ */
+export function getReportPeriodWindow(
+  dateStr: string,
+  period: ReportPeriod,
+  cutoffHour: number = OPERATIONAL_DAY_CUTOFF_HOUR,
+): OperationalDayWindow {
+  const { year, month, day } = parseOperationalDateInput(dateStr);
+
+  if (period === "weekly") {
+    // getDay(): Sun=0 … Sat=6. Distance back to the most recent Saturday.
+    const anchor = new Date(year, month - 1, day);
+    const offsetToSaturday = (anchor.getDay() - 6 + 7) % 7;
+    const from = new Date(
+      year,
+      month - 1,
+      day - offsetToSaturday,
+      cutoffHour,
+      0,
+      0,
+      0,
+    );
+    const to = new Date(from);
+    to.setDate(to.getDate() + 7);
+    return { operationalDate: dateStr, from, to };
+  }
+
+  if (period === "monthly") {
+    const from = new Date(year, month - 1, 1, cutoffHour, 0, 0, 0);
+    const to = new Date(year, month, 1, cutoffHour, 0, 0, 0);
+    return { operationalDate: dateStr, from, to };
+  }
+
+  return getOperationalDayWindow(dateStr, cutoffHour);
+}
+
+/** Local `YYYY-MM-DD` of a Date (used to label report period ranges). */
+export function formatLocalDateInput(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 export function isWithinOperationalWindow(
   ts: Date,
   window: OperationalDayWindow,
