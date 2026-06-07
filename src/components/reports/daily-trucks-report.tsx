@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { sessionHasPermission } from "@/lib/client-permissions";
 import { formatDateTime } from "@/lib/date-format";
+import { formatDurationCompact } from "@/lib/format-duration";
 import { defaultOperationalDateInput } from "@/lib/operational-day";
 import type { DailyTrucksReport, DailyTruckRow } from "@/lib/services/report.service";
 import { Button } from "@/components/ui/button";
@@ -94,7 +95,7 @@ function SummaryCard({
 }
 
 export function DailyTrucksReportView() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const canView = sessionHasPermission(session, "report.daily_trucks");
 
   const [operationalDate, setOperationalDate] = useState(() =>
@@ -155,10 +156,20 @@ export function DailyTrucksReportView() {
   }, [operationalDate, customerId, grade]);
 
   useEffect(() => {
-    if (canView) {
+    if (status === "authenticated" && canView) {
       void fetchReport();
     }
-  }, [canView, fetchReport]);
+  }, [canView, fetchReport, status]);
+
+  if (status === "loading") {
+    return (
+      <div className="flex-1 p-4 sm:p-6 space-y-6 min-w-0 max-w-full">
+        <Skeleton className="h-10 w-48" />
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
 
   if (!canView) {
     return (
@@ -282,6 +293,11 @@ export function DailyTrucksReportView() {
         </div>
       ) : report ? (
         <>
+          {(() => {
+            const canViewSensitiveTonnage = report.permissions.canViewSensitiveTonnage;
+            const rowColSpan = canViewSensitiveTonnage ? 14 : 12;
+            return (
+              <>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 min-w-0">
             <SummaryCard label="مسجّلة" value={report.summary.registered} />
             <SummaryCard label="مكتملة" value={report.summary.completed} />
@@ -292,16 +308,20 @@ export function DailyTrucksReportView() {
               value={formatTons(report.summary.totalBridgeTons)}
               sub="طن"
             />
-            <SummaryCard
-              label="مجموع داخلي"
-              value={formatTons(report.summary.totalInternalTons)}
-              sub="طن"
-            />
-            <SummaryCard
-              label="مجموع فرق"
-              value={formatTons(report.summary.totalDiscrepancyTons)}
-              sub="طن"
-            />
+            {canViewSensitiveTonnage ? (
+              <>
+                <SummaryCard
+                  label="مجموع داخلي"
+                  value={formatTons(report.summary.totalInternalTons)}
+                  sub="طن"
+                />
+                <SummaryCard
+                  label="مجموع فرق"
+                  value={formatTons(report.summary.totalDiscrepancyTons)}
+                  sub="طن"
+                />
+              </>
+            ) : null}
           </div>
 
           {report.filters.customerName ? (
@@ -368,7 +388,7 @@ export function DailyTrucksReportView() {
           </Card>
 
           <div className="rounded-lg border overflow-x-auto min-w-0">
-            <Table className="min-w-[1040px]">
+            <Table className={canViewSensitiveTonnage ? "min-w-[1080px]" : "min-w-[920px]"}>
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-10 text-center">#</TableHead>
@@ -379,18 +399,25 @@ export function DailyTrucksReportView() {
                   <TableHead>أمر البيع</TableHead>
                   <TableHead>النخب</TableHead>
                   <TableHead>التسجيل</TableHead>
-                  <TableHead>الإغلاق</TableHead>
+                  <TableHead>مدة التحميل الداخلي</TableHead>
                   <TableHead>الحالة</TableHead>
                   <TableHead className="text-left">قبان</TableHead>
-                  <TableHead className="text-left">داخلي</TableHead>
-                  <TableHead className="text-left">فرق</TableHead>
+                  {canViewSensitiveTonnage ? (
+                    <>
+                      <TableHead className="text-left">داخلي</TableHead>
+                      <TableHead className="text-left">فرق</TableHead>
+                    </>
+                  ) : null}
                   <TableHead>ملاحظة</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {report.rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={14} className="text-center py-10 text-muted-foreground">
+                    <TableCell
+                      colSpan={rowColSpan}
+                      className="text-center py-10 text-muted-foreground"
+                    >
                       لا توجد شاحنات مسجّلة في هذا اليوم التشغيلي
                     </TableCell>
                   </TableRow>
@@ -424,8 +451,8 @@ export function DailyTrucksReportView() {
                       <TableCell className="text-xs whitespace-nowrap">
                         {formatNullableDateTime(row.createdAt)}
                       </TableCell>
-                      <TableCell className="text-xs whitespace-nowrap">
-                        {formatNullableDateTime(row.closedAt)}
+                      <TableCell className="font-mono tabular-nums whitespace-nowrap">
+                        {formatDurationCompact(row.internalLoadingMs)}
                       </TableCell>
                       <TableCell>
                         <Badge variant={STATUS_BADGE[row.tonnageStatus]}>
@@ -435,16 +462,20 @@ export function DailyTrucksReportView() {
                       <TableCell className="font-mono tabular-nums text-left">
                         {formatTons(row.bridgeTons)}
                       </TableCell>
-                      <TableCell className="font-mono tabular-nums text-left">
-                        {formatTons(row.internalTons)}
-                      </TableCell>
-                      <TableCell
-                        className={`font-mono tabular-nums text-left ${
-                          row.discrepancyWarning ? "text-red-600 font-semibold" : ""
-                        }`}
-                      >
-                        {formatTons(row.discrepancyTons)}
-                      </TableCell>
+                      {canViewSensitiveTonnage ? (
+                        <>
+                          <TableCell className="font-mono tabular-nums text-left">
+                            {formatTons(row.internalTons)}
+                          </TableCell>
+                          <TableCell
+                            className={`font-mono tabular-nums text-left ${
+                              row.discrepancyWarning ? "text-red-600 font-semibold" : ""
+                            }`}
+                          >
+                            {formatTons(row.discrepancyTons)}
+                          </TableCell>
+                        </>
+                      ) : null}
                       <TableCell className="text-xs text-muted-foreground max-w-[10rem]">
                         {row.noteAr ?? "—"}
                       </TableCell>
@@ -454,6 +485,9 @@ export function DailyTrucksReportView() {
               </TableBody>
             </Table>
           </div>
+              </>
+            );
+          })()}
         </>
       ) : null}
     </div>
@@ -493,7 +527,7 @@ export function ReportsIndexView() {
                 <div className="min-w-0">
                   <h2 className="font-semibold">تقرير الشاحنات اليومي</h2>
                   <p className="text-sm text-muted-foreground mt-1">
-                    شاحنات يوم التشغيل (8ص→8ص) — قبان، داخلي، فرق
+                    شاحنات يوم التشغيل (8ص→8ص) — قبان ومدة التحميل
                   </p>
                 </div>
               </CardContent>

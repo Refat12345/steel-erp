@@ -9,6 +9,7 @@ import {
   unauthorized,
 } from "@/lib/api-utils";
 import { logger } from "@/lib/logger";
+import { DAILY_TRUCKS_SENSITIVE_TONNAGE_PERMISSION } from "@/lib/report-permissions";
 import { getDailyTrucksReport } from "@/lib/services/report.service";
 import { dailyTrucksReportQuerySchema } from "@/lib/validators/report";
 
@@ -32,6 +33,10 @@ export async function GET(req: NextRequest) {
       operationalDate: parsed.data.date,
       customerId: parsed.data.customerId,
       grade: parsed.data.grade,
+      canViewSensitiveTonnage: hasPermission(
+        session,
+        DAILY_TRUCKS_SENSITIVE_TONNAGE_PERMISSION,
+      ),
     });
     return ok(data);
   } catch (err) {
