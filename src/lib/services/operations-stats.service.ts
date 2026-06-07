@@ -34,23 +34,23 @@
 import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/db";
 import { formatDate } from "@/lib/date-format";
+import {
+  defaultOperationalDateInput,
+  getOperationalDayWindow,
+} from "@/lib/operational-day";
 import type { TruckStatus, SalesOrderGrade } from "@prisma/client";
 
 // ─── Period & Time Helpers ─────────────────────────────────────────────
 
 export type DashboardPeriod = "today" | "week" | "month";
 
-/** Server-local start-of-day. The Damascus VPS runs in Asia/Damascus so
- *  this matches the operational day for all stakeholders. Tests can stub
- *  this via the `now` parameter. */
-function startOfDay(now: Date): Date {
-  const d = new Date(now);
-  d.setHours(0, 0, 0, 0);
-  return d;
+/** Server-local operational day start: 08:00→08:00 (Damascus on production). */
+function operationalDayStart(now: Date): Date {
+  return getOperationalDayWindow(defaultOperationalDateInput(now)).from;
 }
 
 function periodStart(period: DashboardPeriod, now: Date = new Date()): Date {
-  const today = startOfDay(now);
+  const today = operationalDayStart(now);
   if (period === "today") return today;
   if (period === "week") {
     const d = new Date(today);
@@ -60,6 +60,10 @@ function periodStart(period: DashboardPeriod, now: Date = new Date()): Date {
   const d = new Date(today);
   d.setDate(d.getDate() - 29);
   return d;
+}
+
+function operationalDateKey(date: Date): string {
+  return defaultOperationalDateInput(date);
 }
 
 // ─── Constants ────────────────────────────────────────────────────────
@@ -255,9 +259,9 @@ export interface OpsStats {
 async function buildOwnerStats(period: DashboardPeriod): Promise<OwnerStats> {
   const now = new Date();
   const from = periodStart(period, now);
-  const fourteenStart = new Date(startOfDay(now));
+  const fourteenStart = new Date(operationalDayStart(now));
   fourteenStart.setDate(fourteenStart.getDate() - 13);
-  const thirtyStart = new Date(startOfDay(now));
+  const thirtyStart = new Date(operationalDayStart(now));
   thirtyStart.setDate(thirtyStart.getDate() - 29);
 
   // All completed trucks in [from, now) and in [fourteenStart, now) and in [thirtyStart, now)
@@ -331,12 +335,12 @@ async function buildOwnerStats(period: DashboardPeriod): Promise<OwnerStats> {
   for (let i = 0; i < 14; i++) {
     const d = new Date(fourteenStart);
     d.setDate(d.getDate() + i);
-    const key = d.toISOString().slice(0, 10);
+    const key = operationalDateKey(d);
     dayMap.set(key, { trucks: 0, tons: 0 });
   }
   for (const t of completed14d) {
     if (!t.closedAt) continue;
-    const key = new Date(t.closedAt).toISOString().slice(0, 10);
+    const key = operationalDateKey(new Date(t.closedAt));
     const slot = dayMap.get(key);
     if (!slot) continue;
     slot.trucks += 1;
@@ -346,7 +350,7 @@ async function buildOwnerStats(period: DashboardPeriod): Promise<OwnerStats> {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, v]) => ({
       date,
-      label: dayLabel(new Date(date)),
+      label: dayLabel(getOperationalDayWindow(date).from),
       trucks: v.trucks,
       tons: Math.round(v.tons * 1000) / 1000,
     }));
@@ -461,7 +465,7 @@ async function buildOwnerStats(period: DashboardPeriod): Promise<OwnerStats> {
 
 async function buildOpsStats(): Promise<OpsStats> {
   const now = new Date();
-  const thirtyStart = new Date(startOfDay(now));
+  const thirtyStart = new Date(operationalDayStart(now));
   thirtyStart.setDate(thirtyStart.getDate() - 29);
 
   const [statusGroups, activeTrucks, completed30d, cancelled30d] =
