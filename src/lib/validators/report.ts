@@ -17,3 +17,12 @@ export const dailyTrucksReportQuerySchema = z.object({
 });
 
 export type DailyTrucksReportQuery = z.infer<typeof dailyTrucksReportQuerySchema>;
+
+export const loadingSummaryQuerySchema = dailyTrucksReportQuerySchema.extend({
+  period: z.preprocess(
+    (v) => (v === "" || v === null || v === undefined ? undefined : v),
+    z.enum(["daily", "weekly", "monthly"]).optional(),
+  ),
+});
+
+export type LoadingSummaryQuery = z.infer<typeof loadingSummaryQuerySchema>;

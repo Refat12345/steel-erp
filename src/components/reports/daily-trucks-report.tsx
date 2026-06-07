@@ -8,7 +8,11 @@ import {
   ArrowRight,
   BarChart3,
   CalendarDays,
+  Download,
+  FileSpreadsheet,
+  Layers,
   Loader2,
+  Printer,
   RefreshCw,
   Truck,
 } from "lucide-react";
@@ -16,8 +20,19 @@ import { sessionHasPermission } from "@/lib/client-permissions";
 import { formatDateTime } from "@/lib/date-format";
 import { formatDurationCompact } from "@/lib/format-duration";
 import { defaultOperationalDateInput } from "@/lib/operational-day";
+import { exportDailyTrucksExcel } from "@/lib/export/daily-trucks-excel";
 import type { DailyTrucksReport, DailyTruckRow } from "@/lib/services/report.service";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -107,6 +122,7 @@ export function DailyTrucksReportView() {
   const [loadingCustomers, setLoadingCustomers] = useState(true);
   const [loadingReport, setLoadingReport] = useState(false);
   const [report, setReport] = useState<DailyTrucksReport | null>(null);
+  const [includeDetails, setIncludeDetails] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -160,6 +176,22 @@ export function DailyTrucksReportView() {
       void fetchReport();
     }
   }, [canView, fetchReport, status]);
+
+  const hasExportableReport = !!report && report.rows.length > 0;
+
+  const handleExportExcel = useCallback(() => {
+    if (!report) return;
+    try {
+      exportDailyTrucksExcel(report, { includeDetails });
+    } catch {
+      toast.error("تعذّر تصدير ملف Excel");
+    }
+  }, [report, includeDetails]);
+
+  const handlePrint = useCallback(() => {
+    if (!report) return;
+    window.print();
+  }, [report]);
 
   if (status === "loading") {
     return (
@@ -284,6 +316,38 @@ export function DailyTrucksReportView() {
         >
           مسح الفلاتر
         </Button>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button type="button" variant="outline" disabled={!hasExportableReport}>
+                <Download className="h-4 w-4" />
+                <span className="mr-2">تصدير</span>
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="end" className="w-60">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>تصدير التقرير</DropdownMenuLabel>
+            </DropdownMenuGroup>
+            <DropdownMenuCheckboxItem
+              checked={includeDetails}
+              onCheckedChange={(checked) => setIncludeDetails(checked === true)}
+              closeOnClick={false}
+            >
+              تضمين تفاصيل القياسات لكل شاحنة
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleExportExcel}>
+              <FileSpreadsheet className="h-4 w-4" />
+              <span className="mr-2">تصدير Excel</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handlePrint}>
+              <Printer className="h-4 w-4" />
+              <span className="mr-2">طباعة / PDF</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {loadingReport && !report ? (
@@ -490,7 +554,194 @@ export function DailyTrucksReportView() {
           })()}
         </>
       ) : null}
+
+      {report ? (
+        <DailyTrucksPrintable report={report} includeDetails={includeDetails} />
+      ) : null}
     </div>
+  );
+}
+
+const PRINT_STYLE = `
+@media screen {
+  #daily-trucks-print { display: none; }
+}
+@media print {
+  body * { visibility: hidden; }
+  #daily-trucks-print, #daily-trucks-print * { visibility: visible; }
+  #daily-trucks-print {
+    display: block;
+    position: absolute;
+    top: 0;
+    inset-inline-start: 0;
+    width: 100%;
+    padding: 12px;
+    font-size: 12px;
+    color: #000;
+  }
+  #daily-trucks-print table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+  #daily-trucks-print th, #daily-trucks-print td {
+    border: 1px solid #999;
+    padding: 4px 6px;
+    text-align: right;
+  }
+  #daily-trucks-print thead { display: table-header-group; }
+  #daily-trucks-print tr { break-inside: avoid; }
+  #daily-trucks-print h1 { font-size: 16px; margin: 0 0 4px; }
+  #daily-trucks-print h2 { font-size: 13px; margin: 12px 0 4px; }
+  #daily-trucks-print .num { text-align: left; font-variant-numeric: tabular-nums; }
+  #daily-trucks-print .meta { font-size: 11px; color: #333; margin: 2px 0; }
+  #daily-trucks-print .sizes { font-size: 11px; color: #333; }
+}
+`;
+
+function DailyTrucksPrintable({
+  report,
+  includeDetails,
+}: {
+  report: DailyTrucksReport;
+  includeDetails: boolean;
+}) {
+  const canSensitive = report.permissions.canViewSensitiveTonnage;
+  return (
+    <>
+      <style>{PRINT_STYLE}</style>
+      <div id="daily-trucks-print" dir="rtl">
+        <h1>تقرير الشاحنات اليومي</h1>
+        <p className="meta">يوم التشغيل: {report.operationalDate}</p>
+        <p className="meta">{report.windowLabelAr}</p>
+        {report.filters.customerName ? (
+          <p className="meta">فلتر الزبون: {report.filters.customerName}</p>
+        ) : null}
+        {report.filters.gradeLabelAr ? (
+          <p className="meta">فلتر النخب: {report.filters.gradeLabelAr}</p>
+        ) : null}
+
+        <h2>الملخص</h2>
+        <table>
+          <tbody>
+            <tr>
+              <th>مسجّلة</th>
+              <td className="num">{report.summary.registered}</td>
+              <th>مكتملة</th>
+              <td className="num">{report.summary.completed}</td>
+              <th>ملغاة</th>
+              <td className="num">{report.summary.cancelled}</td>
+              <th>مفتوحة</th>
+              <td className="num">{report.summary.open}</td>
+            </tr>
+            <tr>
+              <th>مجموع قبان (طن)</th>
+              <td className="num">{formatTons(report.summary.totalBridgeTons)}</td>
+              {canSensitive ? (
+                <>
+                  <th>مجموع داخلي (طن)</th>
+                  <td className="num">{formatTons(report.summary.totalInternalTons)}</td>
+                  <th>مجموع فرق (طن)</th>
+                  <td className="num">{formatTons(report.summary.totalDiscrepancyTons)}</td>
+                </>
+              ) : null}
+            </tr>
+          </tbody>
+        </table>
+
+        <h2>المجموع حسب القياس</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>القياس</th>
+              <th className="num">المجموع الداخلي (طن)</th>
+              <th className="num">الربطات</th>
+              <th className="num">الشاحنات</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.sizeTotals.length === 0 ? (
+              <tr>
+                <td colSpan={4}>لا توجد بيانات</td>
+              </tr>
+            ) : (
+              report.sizeTotals.map((sizeTotal) => (
+                <tr key={sizeTotal.sizeId ?? "none"}>
+                  <td>{sizeTotal.displayName}</td>
+                  <td className="num">{formatTons(sizeTotal.totalTons)}</td>
+                  <td className="num">{formatBundles(sizeTotal.totalBundles)}</td>
+                  <td className="num">{sizeTotal.truckCount}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+
+        <h2>الشاحنات</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>اللوحة</th>
+              <th>السائق</th>
+              <th>الزبون</th>
+              <th>الوجهة</th>
+              <th>أمر البيع</th>
+              <th>النخب</th>
+              <th>الحالة</th>
+              <th className="num">قبان</th>
+              {canSensitive ? (
+                <>
+                  <th className="num">داخلي</th>
+                  <th className="num">فرق</th>
+                </>
+              ) : null}
+              <th>ملاحظة</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.rows.length === 0 ? (
+              <tr>
+                <td colSpan={canSensitive ? 12 : 10}>لا توجد شاحنات</td>
+              </tr>
+            ) : (
+              report.rows.map((row, index) => (
+                <tr key={row.id}>
+                  <td className="num">{index + 1}</td>
+                  <td>{row.plateNumber}</td>
+                  <td>{row.driverName}</td>
+                  <td>{row.customer?.fullName ?? "—"}</td>
+                  <td>{row.destination?.name ?? "—"}</td>
+                  <td>{row.salesOrderNumber ?? "—"}</td>
+                  <td>{row.gradeLabelAr ?? "—"}</td>
+                  <td>{row.statusLabelAr}</td>
+                  <td className="num">{formatTons(row.bridgeTons)}</td>
+                  {canSensitive ? (
+                    <>
+                      <td className="num">{formatTons(row.internalTons)}</td>
+                      <td className="num">{formatTons(row.discrepancyTons)}</td>
+                    </>
+                  ) : null}
+                  <td>
+                    {row.noteAr ?? "—"}
+                    {includeDetails && row.sizeBreakdown.length > 0 ? (
+                      <div className="sizes">
+                        {row.sizeBreakdown
+                          .map(
+                            (item) =>
+                              `${item.displayName}: ${formatTons(item.weightTons)} طن${
+                                item.bundleCount != null
+                                  ? ` (${item.bundleCount} ربطة)`
+                                  : ""
+                              }`,
+                          )
+                          .join("، ")}
+                      </div>
+                    ) : null}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 
@@ -528,6 +779,23 @@ export function ReportsIndexView() {
                   <h2 className="font-semibold">تقرير الشاحنات اليومي</h2>
                   <p className="text-sm text-muted-foreground mt-1">
                     شاحنات يوم التشغيل (8ص→8ص) — قبان ومدة التحميل
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+        ) : null}
+        {canDailyTrucks ? (
+          <Link href="/reports/daily-loading-summary" className="block min-w-0">
+            <Card className="h-full shadow-sm transition-colors hover:bg-muted/40">
+              <CardContent className="flex items-start gap-4 p-5">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                  <Layers className="h-5 w-5 text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="font-semibold">ملخص التحميل اليومي</h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    تجميع حسب الزبون والمدينة والقياس — مع النسب
                   </p>
                 </div>
               </CardContent>
