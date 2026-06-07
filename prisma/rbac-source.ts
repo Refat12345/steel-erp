@@ -84,6 +84,11 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
   // Reports
   { code: "reports.view", displayName: "الوصول إلى قسم التقارير", module: "reports" },
   { code: "report.daily_trucks", displayName: "تقرير شاحنات يومي", module: "reports" },
+  {
+    code: "report.daily_trucks.sensitive_tonnage",
+    displayName: "عرض الداخلي والفرق في تقرير الشاحنات",
+    module: "reports",
+  },
   { code: "report.customer_balance", displayName: "تقرير رصيد زبون", module: "reports" },
   { code: "report.salesorder_status", displayName: "تقرير حالة أمر بيع", module: "reports" },
   { code: "report.audit", displayName: "تقرير التدقيق", module: "reports" },

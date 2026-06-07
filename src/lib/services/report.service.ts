@@ -12,6 +12,7 @@ import {
   resolveReportTonnageStatus,
   type ReportTonnageStatus,
 } from "@/lib/operational-day";
+import { computeTruckTimings } from "@/lib/truck-timing";
 import { ServiceError } from "./errors";
 
 const TRUCK_STATUS_LABELS: Record<TruckStatus, string> = {
@@ -37,6 +38,7 @@ export interface DailyTrucksReportParams {
   operationalDate: string;
   customerId?: number;
   grade?: SalesOrderGrade;
+  canViewSensitiveTonnage?: boolean;
 }
 
 export interface DailyTruckRow {
@@ -51,7 +53,7 @@ export interface DailyTruckRow {
   grade: SalesOrderGrade | null;
   gradeLabelAr: string | null;
   createdAt: string;
-  closedAt: string | null;
+  internalLoadingMs: number | null;
   bridgeTons: number | null;
   internalTons: number | null;
   discrepancyTons: number | null;
@@ -67,8 +69,8 @@ export interface DailyTrucksReportSummary {
   cancelled: number;
   open: number;
   totalBridgeTons: number;
-  totalInternalTons: number;
-  totalDiscrepancyTons: number;
+  totalInternalTons: number | null;
+  totalDiscrepancyTons: number | null;
 }
 
 export interface DailyTrucksReportSizeTotal {
@@ -94,6 +96,9 @@ export interface DailyTrucksReport {
   summary: DailyTrucksReportSummary;
   sizeTotals: DailyTrucksReportSizeTotal[];
   rows: DailyTruckRow[];
+  permissions: {
+    canViewSensitiveTonnage: boolean;
+  };
 }
 
 function buildNote(
@@ -109,6 +114,7 @@ function buildNote(
 export async function getDailyTrucksReport(
   params: DailyTrucksReportParams,
 ): Promise<DailyTrucksReport> {
+  const canViewSensitiveTonnage = params.canViewSensitiveTonnage === true;
   let window;
   try {
     window = getOperationalDayWindow(params.operationalDate);
@@ -151,6 +157,8 @@ export async function getDailyTrucksReport(
       grossWeightKg: true,
       createdAt: true,
       closedAt: true,
+      loadingConfirmedAt: true,
+      lastReopenedAt: true,
       cancelReason: true,
       operationalGrade: true,
       customer: { select: { id: true, fullName: true, code: true } },
@@ -161,6 +169,7 @@ export async function getDailyTrucksReport(
           sizeId: true,
           bundleCount: true,
           weightTons: true,
+          createdAt: true,
           size: { select: { displayName: true, sortOrder: true } },
         },
       },
@@ -176,6 +185,8 @@ export async function getDailyTrucksReport(
     totalInternalTons: 0,
     totalDiscrepancyTons: 0,
   };
+  let totalInternalTons = 0;
+  let totalDiscrepancyTons = 0;
 
   type SizeTotalAcc = {
     sizeId: number | null;
@@ -202,6 +213,14 @@ export async function getDailyTrucksReport(
     const discrepancyWarning =
       discrepancyTons != null &&
       Math.abs(discrepancyTons) > REPORT_DISCREPANCY_WARN_TONS;
+    const timings = computeTruckTimings({
+      createdAt: truck.createdAt,
+      closedAt: truck.closedAt,
+      status: truck.status,
+      loadingConfirmedAt: truck.loadingConfirmedAt,
+      lastReopenedAt: truck.lastReopenedAt,
+      sessions: truck.sessions.map((session) => ({ createdAt: session.createdAt })),
+    });
 
     if (params.grade != null && grade !== params.grade) {
       return null;
@@ -214,8 +233,8 @@ export async function getDailyTrucksReport(
 
     if (tonnageStatus === "included") {
       if (bridgeTons != null) summary.totalBridgeTons += bridgeTons;
-      if (internalTons != null) summary.totalInternalTons += internalTons;
-      if (discrepancyTons != null) summary.totalDiscrepancyTons += discrepancyTons;
+      if (internalTons != null) totalInternalTons += internalTons;
+      if (discrepancyTons != null) totalDiscrepancyTons += discrepancyTons;
 
       for (const session of truck.sessions) {
         const weightTons = Number(session.weightTons);
@@ -247,9 +266,10 @@ export async function getDailyTrucksReport(
     }
 
     const displayBridge = tonnageStatus === "included" ? bridgeTons : null;
-    const displayInternal = tonnageStatus === "included" ? internalTons : null;
+    const displayInternal =
+      canViewSensitiveTonnage && tonnageStatus === "included" ? internalTons : null;
     const displayDiscrepancy =
-      tonnageStatus === "included" ? discrepancyTons : null;
+      canViewSensitiveTonnage && tonnageStatus === "included" ? discrepancyTons : null;
 
     return {
       id: truck.id,
@@ -263,12 +283,12 @@ export async function getDailyTrucksReport(
       grade,
       gradeLabelAr: grade ? GRADE_LABELS[grade] : null,
       createdAt: truck.createdAt.toISOString(),
-      closedAt: truck.closedAt?.toISOString() ?? null,
+      internalLoadingMs: timings.internalLoadingMs,
       bridgeTons: displayBridge,
       internalTons: displayInternal,
       discrepancyTons: displayDiscrepancy,
       discrepancyWarning:
-        tonnageStatus === "included" ? discrepancyWarning : false,
+        canViewSensitiveTonnage && tonnageStatus === "included" ? discrepancyWarning : false,
       tonnageStatus,
       cancelReason: truck.cancelReason,
       noteAr: buildNote(tonnageStatus, truck.cancelReason),
@@ -276,9 +296,12 @@ export async function getDailyTrucksReport(
   }).filter((row): row is DailyTruckRow => row !== null);
 
   summary.totalBridgeTons = Math.round(summary.totalBridgeTons * 1000) / 1000;
-  summary.totalInternalTons = Math.round(summary.totalInternalTons * 1000) / 1000;
-  summary.totalDiscrepancyTons =
-    Math.round(summary.totalDiscrepancyTons * 1000) / 1000;
+  summary.totalInternalTons = canViewSensitiveTonnage
+    ? Math.round(totalInternalTons * 1000) / 1000
+    : null;
+  summary.totalDiscrepancyTons = canViewSensitiveTonnage
+    ? Math.round(totalDiscrepancyTons * 1000) / 1000
+    : null;
 
   const sizeTotals: DailyTrucksReportSizeTotal[] = Array.from(sizeTotalMap.values())
     .sort((a, b) => a.sortOrder - b.sortOrder || a.displayName.localeCompare(b.displayName))
@@ -300,5 +323,6 @@ export async function getDailyTrucksReport(
     summary,
     sizeTotals,
     rows,
+    permissions: { canViewSensitiveTonnage },
   };
 }
