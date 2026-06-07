@@ -10,6 +10,10 @@ import {
   parsePagination,
 } from "@/lib/api-utils";
 import { withIdempotency, readJsonBody } from "@/lib/idempotency";
+import {
+  getOperationalDayWindow,
+  type OperationalDayWindow,
+} from "@/lib/operational-day";
 import { truckRegisterSchema } from "@/lib/validators/truck";
 import { registerTruck, listOperations } from "@/lib/services/truck.service";
 import type { TruckStatus } from "@prisma/client";
@@ -27,16 +31,24 @@ export async function GET(req: NextRequest) {
   const pagination = parsePagination(searchParams);
   const status = searchParams.get("status") as TruckStatus | null;
   const plateNumber = searchParams.get("plateNumber");
-  const dateFrom = searchParams.get("dateFrom");
-  const dateTo = searchParams.get("dateTo");
+  const operationalDate = searchParams.get("operationalDate");
 
   try {
+    let window: OperationalDayWindow | null = null;
+    if (operationalDate) {
+      try {
+        window = getOperationalDayWindow(operationalDate);
+      } catch {
+        return badRequest("تاريخ يوم التشغيل غير صالح");
+      }
+    }
+
     const result = await listOperations(
       {
         status: status || undefined,
         plateNumber: plateNumber || undefined,
-        dateFrom: dateFrom ? new Date(dateFrom) : undefined,
-        dateTo: dateTo ? new Date(dateTo) : undefined,
+        dateFrom: window?.from,
+        dateTo: window?.to,
       },
       pagination,
     );

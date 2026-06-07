@@ -32,7 +32,9 @@ const mockPrisma = vi.hoisted(() => ({
   sizeLookup: { findMany: vi.fn() },
   truckOperation: {
     findFirst: vi.fn(),
+    findMany: vi.fn(),
     findUnique: vi.fn(),
+    count: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
   },
@@ -63,6 +65,7 @@ vi.mock("./tx-retry", () => ({
 import {
   registerTruck,
   updateTruckBeforeWeigh,
+  listOperations,
   enterTare,
   confirmLoadingComplete,
   enterGross,
@@ -71,6 +74,7 @@ import {
   deleteWeighSession,
 } from "./truck.service";
 import { ServiceError } from "./errors";
+import { getOperationalDayWindow } from "@/lib/operational-day";
 
 // ─── Setup ─────────────────────────────────────────────────────
 
@@ -84,6 +88,40 @@ beforeEach(() => {
   // Default: FOR UPDATE lock resolves "row exists" unless a test overrides.
   mockPrisma.$queryRaw.mockResolvedValue([{ id: 1 }]);
   mockPrisma.auditLog.create.mockResolvedValue({});
+});
+
+// ─── List Operations ─────────────────────────────────────────────
+
+describe("listOperations", () => {
+  it("filters createdAt by an operational day half-open window", async () => {
+    mockPrisma.truckOperation.findMany.mockResolvedValue([]);
+    mockPrisma.truckOperation.count.mockResolvedValue(0);
+    const window = getOperationalDayWindow("2026-06-06");
+
+    await listOperations(
+      { dateFrom: window.from, dateTo: window.to },
+      { page: 1, pageSize: 25 },
+    );
+
+    expect(mockPrisma.truckOperation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          createdAt: {
+            gte: new Date(2026, 5, 6, 8, 0, 0, 0),
+            lt: new Date(2026, 5, 7, 8, 0, 0, 0),
+          },
+        },
+      }),
+    );
+    expect(mockPrisma.truckOperation.count).toHaveBeenCalledWith({
+      where: {
+        createdAt: {
+          gte: new Date(2026, 5, 6, 8, 0, 0, 0),
+          lt: new Date(2026, 5, 7, 8, 0, 0, 0),
+        },
+      },
+    });
+  });
 });
 
 // ─── Update Before Weigh ───────────────────────────────────────

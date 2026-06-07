@@ -1451,7 +1451,7 @@ export async function listOperations(
   if (filters.dateFrom || filters.dateTo) {
     where.createdAt = {
       ...(filters.dateFrom ? { gte: filters.dateFrom } : {}),
-      ...(filters.dateTo ? { lte: filters.dateTo } : {}),
+      ...(filters.dateTo ? { lt: filters.dateTo } : {}),
     };
   }
 
