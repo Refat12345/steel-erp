@@ -518,7 +518,7 @@ export function ChartsSection() {
       {/* ── Header: period toggle ─────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground">
-          الفترة المعروضة في بطاقات الإنجاز
+          الفترة المعروضة في بطاقات الإنجاز حسب يوم التشغيل 08:00 → 08:00
         </p>
         <PeriodToggle
           value={period}
