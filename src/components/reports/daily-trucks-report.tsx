@@ -417,7 +417,7 @@ export function DailyTrucksReportView() {
                 </p>
               </div>
               <div className="rounded-lg border overflow-x-auto min-w-0">
-                <Table className="min-w-[560px]">
+                <Table dir="ltr" className="min-w-[560px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead>Size</TableHead>
@@ -461,7 +461,7 @@ export function DailyTrucksReportView() {
           </Card>
 
           <div className="rounded-lg border overflow-x-auto min-w-0">
-            <Table className={canViewSensitiveTonnage ? "min-w-[1080px]" : "min-w-[920px]"}>
+            <Table dir="ltr" className={canViewSensitiveTonnage ? "min-w-[1080px]" : "min-w-[920px]"}>
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-10 text-center">#</TableHead>
