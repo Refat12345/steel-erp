@@ -9,6 +9,8 @@
  * (cities keep their Arabic name; sizes get a best-effort transliteration).
  */
 
+import type { SalesOrderGrade, TruckStatus } from "@prisma/client";
+
 const CITY_EN: Record<string, string> = {
   دمشق: "Damascus",
   "ريف دمشق": "Rural Damascus",
@@ -73,4 +75,44 @@ export function toEnglishSize(
     .replace(/خردة/g, "Scrap")
     .replace(/(^|\s)م(\s|$)/g, "$1m$2");
   return transliterated || displayName;
+}
+
+/** English truck status labels — mirrors TRUCK_STATUS_LABELS in report.service.ts. */
+export const TRUCK_STATUS_EN: Record<TruckStatus, string> = {
+  Queued: "Queued",
+  Approved: "Approved",
+  FirstWeigh: "Empty weigh",
+  Loading: "Loading",
+  OnScale: "On scale",
+  LoadingComplete: "Loading complete",
+  SecondWeigh: "Loaded weigh",
+  Completed: "Completed",
+  Cancelled: "Cancelled",
+};
+
+/** English grade label, or "—" when no grade is set. */
+export function gradeLabelEn(grade: SalesOrderGrade | null | undefined): string {
+  if (grade === "FIRST") return "First grade";
+  if (grade === "SECOND") return "Second grade";
+  return "—";
+}
+
+/**
+ * English tonnage note — mirrors TONNAGE_NOTE / buildNote in report.service.ts.
+ * For cancelled trucks the raw (Arabic) cancel reason is passed through unchanged.
+ */
+export function tonnageNoteEn(
+  status: string,
+  cancelReason: string | null | undefined,
+): string | null {
+  if (status === "excluded_cancelled") {
+    return cancelReason?.trim() ? cancelReason.trim() : null;
+  }
+  if (status === "excluded_late_close") {
+    return "Completed after the operational day ended";
+  }
+  if (status === "excluded_open") {
+    return "Not completed yet";
+  }
+  return null;
 }

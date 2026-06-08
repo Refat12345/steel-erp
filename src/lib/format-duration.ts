@@ -54,6 +54,27 @@ export function formatDurationCompact(ms: number | null | undefined): string {
   return `${minutes}د`;
 }
 
+/**
+ * Compact English format for tables: "2h 30m" or "45m" or "1d 5h".
+ */
+export function formatDurationCompactEn(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return "—";
+  if (ms < 60_000) return `<1m`;
+
+  const totalMin = Math.floor(ms / 60_000);
+  const days = Math.floor(totalMin / 1440);
+  const hours = Math.floor((totalMin % 1440) / 60);
+  const minutes = totalMin % 60;
+
+  if (days > 0) {
+    return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  }
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+  return `${minutes}m`;
+}
+
 /** Compute milliseconds between two ISO-string/Date values. */
 export function durationBetween(
   from: string | Date | null | undefined,

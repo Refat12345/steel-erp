@@ -1,6 +1,13 @@
 import * as XLSX from "xlsx";
 import { formatDateTime } from "@/lib/date-format";
-import { formatDurationCompact } from "@/lib/format-duration";
+import { formatDurationCompactEn } from "@/lib/format-duration";
+import {
+  TRUCK_STATUS_EN,
+  gradeLabelEn,
+  tonnageNoteEn,
+  toEnglishCity,
+  toEnglishSize,
+} from "@/lib/en-labels";
 import type {
   DailyTrucksReport,
   DailyTruckRow,
@@ -22,25 +29,25 @@ function dateTimeOrDash(iso: string | null): string {
 function buildSummarySheet(report: DailyTrucksReport): XLSX.WorkSheet {
   const canSensitive = report.permissions.canViewSensitiveTonnage;
   const rows: (string | number)[][] = [
-    ["تقرير الشاحنات اليومي"],
-    ["يوم التشغيل", report.operationalDate],
-    ["النافذة", report.windowLabelAr],
+    ["Daily Trucks Report"],
+    ["Operational day", report.operationalDate],
+    ["Window", report.windowLabelAr],
   ];
   if (report.filters.customerName) {
-    rows.push(["فلتر الزبون", report.filters.customerName]);
+    rows.push(["Customer filter", report.filters.customerName]);
   }
-  if (report.filters.gradeLabelAr) {
-    rows.push(["فلتر النخب", report.filters.gradeLabelAr]);
+  if (report.filters.grade) {
+    rows.push(["Grade filter", gradeLabelEn(report.filters.grade)]);
   }
   rows.push([]);
-  rows.push(["مسجّلة", report.summary.registered]);
-  rows.push(["مكتملة", report.summary.completed]);
-  rows.push(["ملغاة", report.summary.cancelled]);
-  rows.push(["مفتوحة", report.summary.open]);
-  rows.push(["مجموع قبان (طن)", tons(report.summary.totalBridgeTons)]);
+  rows.push(["Registered", report.summary.registered]);
+  rows.push(["Completed", report.summary.completed]);
+  rows.push(["Cancelled", report.summary.cancelled]);
+  rows.push(["Open", report.summary.open]);
+  rows.push(["Bridge total (t)", tons(report.summary.totalBridgeTons)]);
   if (canSensitive) {
-    rows.push(["مجموع داخلي (طن)", tons(report.summary.totalInternalTons)]);
-    rows.push(["مجموع فرق (طن)", tons(report.summary.totalDiscrepancyTons)]);
+    rows.push(["Internal total (t)", tons(report.summary.totalInternalTons)]);
+    rows.push(["Discrepancy total (t)", tons(report.summary.totalDiscrepancyTons)]);
   }
   const sheet = XLSX.utils.aoa_to_sheet(rows);
   sheet["!cols"] = [{ wch: 22 }, { wch: 32 }];
@@ -51,18 +58,18 @@ function buildTrucksSheet(report: DailyTrucksReport): XLSX.WorkSheet {
   const canSensitive = report.permissions.canViewSensitiveTonnage;
   const header = [
     "#",
-    "اللوحة",
-    "السائق",
-    "الزبون",
-    "الوجهة",
-    "أمر البيع",
-    "النخب",
-    "التسجيل",
-    "مدة التحميل الداخلي",
-    "الحالة",
-    "قبان (طن)",
-    ...(canSensitive ? ["داخلي (طن)", "فرق (طن)"] : []),
-    "ملاحظة",
+    "Plate",
+    "Driver",
+    "Customer",
+    "Destination",
+    "Sales order",
+    "Grade",
+    "Registered",
+    "Internal loading time",
+    "Status",
+    "Bridge (t)",
+    ...(canSensitive ? ["Internal (t)", "Discrepancy (t)"] : []),
+    "Note",
   ];
 
   const body = report.rows.map((row: DailyTruckRow, index: number) => [
@@ -70,15 +77,15 @@ function buildTrucksSheet(report: DailyTrucksReport): XLSX.WorkSheet {
     row.plateNumber,
     row.driverName,
     row.customer?.fullName ?? "—",
-    row.destination?.name ?? "—",
+    toEnglishCity(row.destination?.name),
     row.salesOrderNumber ?? "—",
-    row.gradeLabelAr ?? "—",
+    gradeLabelEn(row.grade),
     dateTimeOrDash(row.createdAt),
-    formatDurationCompact(row.internalLoadingMs),
-    row.statusLabelAr,
+    formatDurationCompactEn(row.internalLoadingMs),
+    TRUCK_STATUS_EN[row.status],
     tons(row.bridgeTons),
     ...(canSensitive ? [tons(row.internalTons), tons(row.discrepancyTons)] : []),
-    row.noteAr ?? "—",
+    tonnageNoteEn(row.tonnageStatus, row.cancelReason) ?? "—",
   ]);
 
   const sheet = XLSX.utils.aoa_to_sheet([header, ...body]);
@@ -101,9 +108,9 @@ function buildTrucksSheet(report: DailyTrucksReport): XLSX.WorkSheet {
 }
 
 function buildSizeTotalsSheet(report: DailyTrucksReport): XLSX.WorkSheet {
-  const header = ["القياس", "المجموع الداخلي (طن)", "الربطات", "الشاحنات"];
+  const header = ["Size", "Internal total (t)", "Bundles", "Trucks"];
   const body = report.sizeTotals.map((sizeTotal) => [
-    sizeTotal.displayName,
+    toEnglishSize(sizeTotal.displayName),
     tons(sizeTotal.totalTons),
     bundles(sizeTotal.totalBundles),
     sizeTotal.truckCount,
@@ -114,7 +121,7 @@ function buildSizeTotalsSheet(report: DailyTrucksReport): XLSX.WorkSheet {
 }
 
 function buildDetailsSheet(report: DailyTrucksReport): XLSX.WorkSheet {
-  const header = ["#", "اللوحة", "الزبون", "القياس", "الوزن (طن)", "الربطات"];
+  const header = ["#", "Plate", "Customer", "Size", "Weight (t)", "Bundles"];
   const body: (string | number)[][] = [];
   report.rows.forEach((row, index) => {
     if (row.sizeBreakdown.length === 0) {
@@ -133,7 +140,7 @@ function buildDetailsSheet(report: DailyTrucksReport): XLSX.WorkSheet {
         index + 1,
         row.plateNumber,
         row.customer?.fullName ?? "—",
-        item.displayName,
+        toEnglishSize(item.displayName),
         tons(item.weightTons),
         bundles(item.bundleCount),
       ]);
@@ -156,20 +163,19 @@ export function exportDailyTrucksExcel(
   options: { includeDetails: boolean },
 ): void {
   const workbook = XLSX.utils.book_new();
-  workbook.Workbook = { Views: [{ RTL: true }] };
 
-  XLSX.utils.book_append_sheet(workbook, buildSummarySheet(report), "الملخص");
-  XLSX.utils.book_append_sheet(workbook, buildTrucksSheet(report), "الشاحنات");
+  XLSX.utils.book_append_sheet(workbook, buildSummarySheet(report), "Summary");
+  XLSX.utils.book_append_sheet(workbook, buildTrucksSheet(report), "Trucks");
   XLSX.utils.book_append_sheet(
     workbook,
     buildSizeTotalsSheet(report),
-    "المجموع حسب القياس",
+    "Totals by size",
   );
   if (options.includeDetails) {
     XLSX.utils.book_append_sheet(
       workbook,
       buildDetailsSheet(report),
-      "تفاصيل القياسات",
+      "Size details",
     );
   }
 

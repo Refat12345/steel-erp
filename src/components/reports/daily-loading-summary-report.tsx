@@ -81,6 +81,14 @@ function fmtPct(value: number): string {
   return `${value.toFixed(1)}%`;
 }
 
+function fmtSizeTons(value: number | null | undefined): string {
+  if (value == null) return "-";
+  return value.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 /** "2026-06-06" → "6/6/2026" (M/D/YYYY, no leading zeros), matching the office file. */
 function fmtLoadingDate(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
@@ -435,7 +443,7 @@ export function DailyLoadingSummaryView() {
                 </p>
               </div>
               <div className="rounded-lg border overflow-x-auto min-w-0">
-                <Table className="min-w-[520px]">
+                <Table dir="ltr" className="min-w-[520px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead>Customer</TableHead>
@@ -498,7 +506,7 @@ export function DailyLoadingSummaryView() {
                 </p>
               </div>
               <div className="rounded-lg border overflow-x-auto min-w-0">
-                <Table className="min-w-[520px]">
+                <Table dir="ltr" className="min-w-[520px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead>City</TableHead>
@@ -561,7 +569,7 @@ export function DailyLoadingSummaryView() {
                 </p>
               </div>
               <div className="rounded-lg border overflow-x-auto min-w-0">
-                <Table className="min-w-[640px]">
+                <Table dir="ltr" className="min-w-[640px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead>City</TableHead>
@@ -649,25 +657,62 @@ const PRINT_STYLE = `
     display: block;
     width: 100%;
     color: #000;
+    font-family: Calibri, Arial, sans-serif;
     font-size: 10px;
+    line-height: 1.2;
+  }
+  #loading-summary-print .print-title {
+    font-size: 13px;
+    font-weight: 700;
+    margin: 0 0 2px;
+  }
+  #loading-summary-print .section-title {
+    color: #2b3f55;
+    font-size: 12px;
+    font-weight: 700;
+    margin: 12px 0 7px 6px;
   }
   #loading-summary-print table {
-    width: 100%;
+    border: 1px solid #c7d1df;
     border-collapse: collapse;
-    margin-bottom: 10px;
+    margin-bottom: 11px;
     table-layout: fixed;
   }
+  #loading-summary-print .narrow-table {
+    width: 58%;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  #loading-summary-print .wide-table {
+    width: 100%;
+  }
   #loading-summary-print th, #loading-summary-print td {
-    border: 1px solid #999;
-    padding: 3px 4px;
+    border: 1px solid #c7d1df;
+    padding: 4px 7px;
     text-align: left;
     word-break: break-word;
     overflow-wrap: anywhere;
   }
+  #loading-summary-print th {
+    background: #1f3864;
+    color: #fff;
+    font-weight: 700;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  #loading-summary-print tbody tr:nth-child(even):not(.total-row) td {
+    background: #f1f4fa;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  #loading-summary-print .total-row td {
+    background: #dbe5f3;
+    font-weight: 700;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
   #loading-summary-print thead { display: table-header-group; }
   #loading-summary-print tr { break-inside: avoid; }
-  #loading-summary-print h1 { font-size: 14px; margin: 0 0 2px; }
-  #loading-summary-print h2 { font-size: 12px; margin: 12px 0 4px; }
   #loading-summary-print .num { text-align: right; font-variant-numeric: tabular-nums; }
   #loading-summary-print .headline { font-size: 10px; color: #222; margin: 0 0 4px; }
   #loading-summary-print .pagefoot { text-align: center; font-size: 10px; color: #555; margin-top: 14px; }
@@ -677,7 +722,7 @@ const PRINT_STYLE = `
 function DailyLoadingSummaryPrintable({ report }: { report: DailyLoadingSummary }) {
   const content = (
     <div id="loading-summary-print" dir="ltr">
-        <h1>{BRAND.name} — Loading Summary</h1>
+        <h1 className="print-title">{BRAND.name} — Loading Summary</h1>
         <p className="headline">{buildHeaderLine(report)}</p>
         {report.filters.customerName ? (
           <p className="headline">Customer filter: {report.filters.customerName}</p>
@@ -689,8 +734,8 @@ function DailyLoadingSummaryPrintable({ report }: { report: DailyLoadingSummary 
           </p>
         ) : null}
 
-        <h2>1. By customer</h2>
-        <table>
+        <h2 className="section-title">1. By customer</h2>
+        <table className="narrow-table">
           <thead>
             <tr>
               <th>Customer</th>
@@ -708,7 +753,7 @@ function DailyLoadingSummaryPrintable({ report }: { report: DailyLoadingSummary 
                 <td className="num">{fmtPct(row.sharePct)}</td>
               </tr>
             ))}
-            <tr>
+            <tr className="total-row">
               <td>Total</td>
               <td className="num">{report.totals.truckCount}</td>
               <td className="num">{fmtTons(report.totals.totalBridgeTons)}</td>
@@ -717,8 +762,8 @@ function DailyLoadingSummaryPrintable({ report }: { report: DailyLoadingSummary 
           </tbody>
         </table>
 
-        <h2>2. By city</h2>
-        <table>
+        <h2 className="section-title">2. By city</h2>
+        <table className="narrow-table">
           <thead>
             <tr>
               <th>City</th>
@@ -736,7 +781,7 @@ function DailyLoadingSummaryPrintable({ report }: { report: DailyLoadingSummary 
                 <td className="num">{fmtPct(row.sharePct)}</td>
               </tr>
             ))}
-            <tr>
+            <tr className="total-row">
               <td>Total</td>
               <td className="num">{report.totals.truckCount}</td>
               <td className="num">{fmtTons(report.totals.totalBridgeTons)}</td>
@@ -745,8 +790,8 @@ function DailyLoadingSummaryPrintable({ report }: { report: DailyLoadingSummary 
           </tbody>
         </table>
 
-        <h2>3. By size within each city (t)</h2>
-        <table>
+        <h2 className="section-title">3. By size within each city (t)</h2>
+        <table className="wide-table">
           <thead>
             <tr>
               <th>City</th>
@@ -764,17 +809,17 @@ function DailyLoadingSummaryPrintable({ report }: { report: DailyLoadingSummary 
                 <td>{toEnglishCity(row.cityName)}</td>
                 {report.sizeColumns.map((col) => (
                   <td key={col.key} className="num">
-                    {row.sizeTons[col.key] != null ? fmtTons(row.sizeTons[col.key]) : "-"}
+                    {fmtSizeTons(row.sizeTons[col.key])}
                   </td>
                 ))}
                 <td className="num">{fmtTons(row.totalTons)}</td>
               </tr>
             ))}
-            <tr>
+            <tr className="total-row">
               <td>Total</td>
               {report.sizeColumns.map((col) => (
                 <td key={col.key} className="num">
-                  {fmtTons(report.citySizeColumnTotals[col.key])}
+                  {fmtSizeTons(report.citySizeColumnTotals[col.key])}
                 </td>
               ))}
               <td className="num">{fmtTons(report.totals.totalInternalTons)}</td>
