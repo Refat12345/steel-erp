@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
@@ -21,6 +21,10 @@ import { toEnglishCity, toEnglishSize } from "@/lib/en-labels";
 import { BRAND } from "@/lib/brand";
 import { defaultOperationalDateInput } from "@/lib/operational-day";
 import { exportDailyLoadingSummaryExcel } from "@/lib/export/daily-loading-summary-excel";
+import {
+  computeA4LandscapePrintFitScale,
+  SCALE_CARD_PRINT_HEIGHT_FUDGE,
+} from "@/lib/scale-card-print-fit";
 import type { DailyLoadingSummary } from "@/lib/services/report.service";
 import { Button } from "@/components/ui/button";
 import {
@@ -89,6 +93,29 @@ function fmtSizeTons(value: number | null | undefined): string {
   });
 }
 
+/** Signed tons, e.g. "+1.250" / "−0.840" (uses a real minus sign). */
+function fmtSignedTons(value: number): string {
+  const sign = value >= 0 ? "+" : "−";
+  return `${sign}${fmtTons(Math.abs(value))}`;
+}
+
+/**
+ * Bridge (external weighbridge) and internal (sum of weigh sessions) totals are
+ * two independent measurements and never match exactly. A difference within
+ * this percentage of the dispatched total is treated as normal, not an error.
+ */
+const RECONCILE_TOLERANCE_PCT = 2;
+
+function computeReconciliation(bridge: number, internal: number) {
+  const diffTons = Math.round((bridge - internal) * 1000) / 1000;
+  const diffPct = bridge !== 0 ? (Math.abs(diffTons) / bridge) * 100 : 0;
+  return {
+    diffTons,
+    diffPct,
+    withinTolerance: diffPct <= RECONCILE_TOLERANCE_PCT,
+  };
+}
+
 /** "2026-06-06" → "6/6/2026" (M/D/YYYY, no leading zeros), matching the office file. */
 function fmtLoadingDate(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
@@ -135,6 +162,74 @@ function SummaryCard({
         <p className="text-xs text-muted-foreground">{label}</p>
         <p className="text-xl font-bold tabular-nums">{value}</p>
         {sub ? <p className="text-xs text-muted-foreground mt-1">{sub}</p> : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ReconciliationCard({
+  bridge,
+  internal,
+}: {
+  bridge: number;
+  internal: number;
+}) {
+  const { diffTons, diffPct, withinTolerance } = computeReconciliation(
+    bridge,
+    internal,
+  );
+  return (
+    <Card className="shadow-sm">
+      <CardContent className="p-4 space-y-3">
+        <div>
+          <h2 className="text-base font-semibold">
+            Reconciliation: dispatched vs internal
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Dispatched total is the external weighbridge (قبان) net weight; the
+            by-size table is summed from internal weigh sessions. The two are
+            independent measurements, so a small difference is expected — it is
+            not a report error.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="rounded-lg border p-3">
+            <p className="text-xs text-muted-foreground">
+              Total dispatched (قبان)
+            </p>
+            <p className="text-lg font-bold tabular-nums">
+              {fmtTons(bridge)} <span className="text-xs font-normal">t</span>
+            </p>
+          </div>
+          <div className="rounded-lg border p-3">
+            <p className="text-xs text-muted-foreground">
+              Total by size (internal)
+            </p>
+            <p className="text-lg font-bold tabular-nums">
+              {fmtTons(internal)} <span className="text-xs font-normal">t</span>
+            </p>
+          </div>
+          <div className="rounded-lg border p-3">
+            <p className="text-xs text-muted-foreground">Difference</p>
+            <p className="text-lg font-bold tabular-nums">
+              {fmtSignedTons(diffTons)}{" "}
+              <span className="text-xs font-normal">
+                t ({fmtPct(diffPct)})
+              </span>
+            </p>
+            <span
+              className={`mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                withinTolerance
+                  ? "bg-green-100 text-green-700"
+                  : "bg-amber-100 text-amber-700"
+              }`}
+            >
+              {withinTolerance
+                ? `Within ±${RECONCILE_TOLERANCE_PCT}% tolerance`
+                : `Exceeds ±${RECONCILE_TOLERANCE_PCT}% — review`}
+            </span>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
@@ -419,6 +514,13 @@ export function DailyLoadingSummaryView() {
             />
           </div>
 
+          {report.totals.totalInternalTons != null ? (
+            <ReconciliationCard
+              bridge={report.totals.totalBridgeTons}
+              internal={report.totals.totalInternalTons}
+            />
+          ) : null}
+
           {report.filters.customerName ? (
             <p className="text-sm text-muted-foreground">
               Customer filter:{" "}
@@ -565,7 +667,9 @@ export function DailyLoadingSummaryView() {
               <div>
                 <h2 className="text-base font-semibold">3. By size within each city (t)</h2>
                 <p className="text-xs text-muted-foreground">
-                  Computed from internal weigh-session weights
+                  Computed from internal weigh-session weights — its total is
+                  expected to differ slightly from the dispatched (قبان) total;
+                  see the reconciliation above.
                 </p>
               </div>
               <div className="rounded-lg border overflow-x-auto min-w-0">
@@ -642,9 +746,86 @@ export function DailyLoadingSummaryView() {
   );
 }
 
+/* Base typography is written OUTSIDE @media print so it also applies while the
+   printable is measured off-screen — measurement must match the real print
+   layout for the scale-to-fit math to be accurate. */
 const PRINT_STYLE = `
+#loading-summary-print {
+  color: #000;
+  font-family: Calibri, Arial, sans-serif;
+  font-size: 10px;
+  line-height: 1.2;
+  background: #fff;
+  transform-origin: top left;
+}
+#loading-summary-print .print-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 2px;
+}
+#loading-summary-print .section-title {
+  color: #2b3f55;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 12px 0 7px 6px;
+}
+#loading-summary-print table {
+  border: 1px solid #c7d1df;
+  border-collapse: collapse;
+  margin-bottom: 11px;
+  table-layout: fixed;
+}
+#loading-summary-print .narrow-table {
+  width: 58%;
+  margin-left: auto;
+  margin-right: auto;
+}
+#loading-summary-print .wide-table {
+  width: 100%;
+}
+#loading-summary-print th, #loading-summary-print td {
+  border: 1px solid #c7d1df;
+  padding: 4px 7px;
+  text-align: left;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+#loading-summary-print th {
+  background: #1f3864;
+  color: #fff;
+  font-weight: 700;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+#loading-summary-print tbody tr:nth-child(even):not(.total-row) td {
+  background: #f1f4fa;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+#loading-summary-print .total-row td {
+  background: #dbe5f3;
+  font-weight: 700;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+#loading-summary-print thead { display: table-header-group; }
+#loading-summary-print tr { break-inside: avoid; }
+#loading-summary-print .num { text-align: right; font-variant-numeric: tabular-nums; }
+#loading-summary-print .headline { font-size: 10px; color: #222; margin: 0 0 4px; }
+#loading-summary-print .pagefoot { text-align: center; font-size: 10px; color: #555; margin-top: 14px; }
+
 @media screen {
+  /* Hidden on screen, except briefly while measuring: rendered off-canvas at
+     the exact landscape printable width so its height matches the printout. */
   #loading-summary-print { display: none; }
+  #loading-summary-print.is-measuring {
+    display: block;
+    position: fixed;
+    left: -10000px;
+    top: 0;
+    width: 277mm;
+    background: #fff;
+  }
 }
 @media print {
   /* Landscape so the City × size cross-tab fits without being cut off. */
@@ -656,72 +837,69 @@ const PRINT_STYLE = `
   #loading-summary-print {
     display: block;
     width: 100%;
-    color: #000;
-    font-family: Calibri, Arial, sans-serif;
-    font-size: 10px;
-    line-height: 1.2;
   }
-  #loading-summary-print .print-title {
-    font-size: 13px;
-    font-weight: 700;
-    margin: 0 0 2px;
-  }
-  #loading-summary-print .section-title {
-    color: #2b3f55;
-    font-size: 12px;
-    font-weight: 700;
-    margin: 12px 0 7px 6px;
-  }
-  #loading-summary-print table {
-    border: 1px solid #c7d1df;
-    border-collapse: collapse;
-    margin-bottom: 11px;
-    table-layout: fixed;
-  }
-  #loading-summary-print .narrow-table {
-    width: 58%;
-    margin-left: auto;
-    margin-right: auto;
-  }
-  #loading-summary-print .wide-table {
-    width: 100%;
-  }
-  #loading-summary-print th, #loading-summary-print td {
-    border: 1px solid #c7d1df;
-    padding: 4px 7px;
-    text-align: left;
-    word-break: break-word;
-    overflow-wrap: anywhere;
-  }
-  #loading-summary-print th {
-    background: #1f3864;
-    color: #fff;
-    font-weight: 700;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-  #loading-summary-print tbody tr:nth-child(even):not(.total-row) td {
-    background: #f1f4fa;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-  #loading-summary-print .total-row td {
-    background: #dbe5f3;
-    font-weight: 700;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-  #loading-summary-print thead { display: table-header-group; }
-  #loading-summary-print tr { break-inside: avoid; }
-  #loading-summary-print .num { text-align: right; font-variant-numeric: tabular-nums; }
-  #loading-summary-print .headline { font-size: 10px; color: #222; margin: 0 0 4px; }
-  #loading-summary-print .pagefoot { text-align: center; font-size: 10px; color: #555; margin-top: 14px; }
 }
 `;
 
+/**
+ * Below this scale the print would become unreadable; instead of shrinking
+ * further we let the report flow naturally onto multiple pages.
+ */
+const MIN_PRINT_FIT_SCALE = 0.6;
+
 function DailyLoadingSummaryPrintable({ report }: { report: DailyLoadingSummary }) {
+  const printRef = useRef<HTMLDivElement>(null);
+
+  const resetPrintFit = useCallback(() => {
+    const el = printRef.current;
+    if (!el) return;
+    el.classList.remove("is-measuring");
+    el.style.zoom = "";
+    el.style.transform = "";
+  }, []);
+
+  const applyPrintFit = useCallback(() => {
+    const el = printRef.current;
+    if (!el) return;
+
+    resetPrintFit();
+
+    // Render off-canvas at the real print width, then measure true height.
+    el.classList.add("is-measuring");
+    const width = el.scrollWidth;
+    const height = Math.max(el.scrollHeight, el.getBoundingClientRect().height);
+    el.classList.remove("is-measuring");
+
+    const scale = computeA4LandscapePrintFitScale(
+      width,
+      height * SCALE_CARD_PRINT_HEIGHT_FUDGE,
+    );
+
+    // Already fits, or so large that shrinking would hurt readability → leave
+    // it to paginate naturally across multiple pages.
+    if (scale >= 0.999 || scale < MIN_PRINT_FIT_SCALE) return;
+
+    if (typeof CSS !== "undefined" && CSS.supports("zoom", "1")) {
+      el.style.zoom = String(scale);
+      return;
+    }
+    el.style.transform = `scale(${scale})`;
+  }, [resetPrintFit]);
+
+  useEffect(() => {
+    const onBeforePrint = () => applyPrintFit();
+    const onAfterPrint = () => resetPrintFit();
+    window.addEventListener("beforeprint", onBeforePrint);
+    window.addEventListener("afterprint", onAfterPrint);
+    return () => {
+      window.removeEventListener("beforeprint", onBeforePrint);
+      window.removeEventListener("afterprint", onAfterPrint);
+      resetPrintFit();
+    };
+  }, [applyPrintFit, resetPrintFit]);
+
   const content = (
-    <div id="loading-summary-print" dir="ltr">
+    <div id="loading-summary-print" dir="ltr" ref={printRef}>
         <h1 className="print-title">{BRAND.name} — Loading Summary</h1>
         <p className="headline">{buildHeaderLine(report)}</p>
         {report.filters.customerName ? (
@@ -826,6 +1004,47 @@ function DailyLoadingSummaryPrintable({ report }: { report: DailyLoadingSummary 
             </tr>
           </tbody>
         </table>
+
+        {report.totals.totalInternalTons != null ? (
+          <>
+            <h2 className="section-title">4. Reconciliation: dispatched vs internal</h2>
+            <p className="headline">
+              Dispatched is the external weighbridge (قبان) net weight; the
+              by-size total is summed from internal weigh sessions. A small
+              difference is expected and is not a report error.
+            </p>
+            {(() => {
+              const { diffTons, diffPct, withinTolerance } =
+                computeReconciliation(
+                  report.totals.totalBridgeTons,
+                  report.totals.totalInternalTons,
+                );
+              return (
+                <table className="narrow-table">
+                  <tbody>
+                    <tr>
+                      <th>Total dispatched (قبان)</th>
+                      <td className="num">{fmtTons(report.totals.totalBridgeTons)} t</td>
+                    </tr>
+                    <tr>
+                      <th>Total by size (internal)</th>
+                      <td className="num">{fmtTons(report.totals.totalInternalTons)} t</td>
+                    </tr>
+                    <tr className="total-row">
+                      <th>Difference</th>
+                      <td className="num">
+                        {fmtSignedTons(diffTons)} t ({fmtPct(diffPct)}) —{" "}
+                        {withinTolerance
+                          ? `within ±${RECONCILE_TOLERANCE_PCT}%`
+                          : `exceeds ±${RECONCILE_TOLERANCE_PCT}%, review`}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              );
+            })()}
+          </>
+        ) : null}
 
         <p className="pagefoot">-- 1 of 1 --</p>
       </div>
