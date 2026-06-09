@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { sessionHasPermission } from "@/lib/client-permissions";
 import { toast } from "sonner";
@@ -150,6 +151,9 @@ export function ScaleOperationView({
   discrepancyWarnKg: number;
 }) {
   const { data: session } = useSession();
+  const searchParams = useSearchParams();
+  const backHref =
+    searchParams.get("from") === "loaded-trucks" ? "/loaded-trucks" : "/trucks";
   const [truck, setTruck] = useState<TruckDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [sizes, setSizes] = useState<SizeOption[]>([]);
@@ -291,7 +295,7 @@ export function ScaleOperationView({
     <div className="space-y-4">
       {/* Header */}
       <div className="flex flex-wrap items-center gap-3">
-        <Link href="/trucks">
+        <Link href={backHref}>
           <Button variant="ghost" size="sm">
             <ArrowRight className="h-4 w-4 me-1" />
             العودة للقائمة

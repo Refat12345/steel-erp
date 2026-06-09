@@ -38,6 +38,10 @@ const ROUTE_PERMISSIONS: RouteRule[] = [
 
   { pattern: /^\/trucks$/, permissions: ["truck.view_queue", "truck.view_approved"] },
 
+  // Owner-only simplified loaded-trucks view (gated by the daily-trucks
+  // report permission so shop-floor roles never see it).
+  { pattern: /^\/loaded-trucks$/, permissions: ["report.daily_trucks"] },
+
   { pattern: /^\/scale\/\d+\/print$/, permissions: ["truck.view_approved", "scale.close"] },
   { pattern: /^\/scale\/\d+$/, permissions: ["truck.view_approved", "scale.start"] },
   { pattern: /^\/scale$/, permissions: ["truck.view_approved", "scale.start"] },
