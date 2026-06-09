@@ -12,6 +12,10 @@ import {
   validateWeightRange,
 } from "@/lib/weight-bounds";
 import { buildWeighbridgeDiscrepancyAuditFields } from "@/lib/weighbridge-discrepancy";
+import {
+  aggregateWeighSessionsBySize,
+  type WeighSessionSizeAggregate,
+} from "@/lib/weigh-session-aggregate";
 
 type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
@@ -1474,6 +1478,85 @@ export async function listOperations(
     }),
     prisma.truckOperation.count({ where }),
   ]);
+
+  return { data, total, page: pagination.page, pageSize: pagination.pageSize };
+}
+
+// ─── List Loaded Trucks (owner read-only view) ────────────────────
+
+export interface LoadedTruckFilters {
+  customer?: string;
+  dateFrom?: Date;
+  dateTo?: Date;
+}
+
+export interface LoadedTruckListItem {
+  id: number;
+  customerName: string | null;
+  destinationName: string | null;
+  tareWeightKg: string | null;
+  grossWeightKg: string | null;
+  createdAt: Date;
+  loadedSizes: WeighSessionSizeAggregate[];
+}
+
+/**
+ * Simplified, read-only listing for the factory owner. Returns only the
+ * columns the owner cares about (customer, destination, bridge net, date)
+ * plus the actually-loaded sizes aggregated per size from weigh sessions.
+ */
+export async function listLoadedTrucks(
+  filters: LoadedTruckFilters,
+  pagination: PaginationParams,
+): Promise<PaginatedResult<LoadedTruckListItem>> {
+  const where: Prisma.TruckOperationWhereInput = {};
+
+  if (filters.customer) {
+    where.customer = {
+      fullName: { contains: filters.customer, mode: "insensitive" },
+    };
+  }
+  if (filters.dateFrom || filters.dateTo) {
+    where.createdAt = {
+      ...(filters.dateFrom ? { gte: filters.dateFrom } : {}),
+      ...(filters.dateTo ? { lt: filters.dateTo } : {}),
+    };
+  }
+
+  const [rows, total] = await Promise.all([
+    prisma.truckOperation.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: (pagination.page - 1) * pagination.pageSize,
+      take: pagination.pageSize,
+      include: {
+        customer: { select: { fullName: true } },
+        destination: { select: { name: true } },
+        sessions: {
+          orderBy: { sessionNumber: "asc" as const },
+          include: { size: { select: { displayName: true } } },
+        },
+      },
+    }),
+    prisma.truckOperation.count({ where }),
+  ]);
+
+  const data: LoadedTruckListItem[] = rows.map((row) => ({
+    id: row.id,
+    customerName: row.customer?.fullName ?? null,
+    destinationName: row.destination?.name ?? null,
+    tareWeightKg: row.tareWeightKg != null ? row.tareWeightKg.toString() : null,
+    grossWeightKg: row.grossWeightKg != null ? row.grossWeightKg.toString() : null,
+    createdAt: row.createdAt,
+    loadedSizes: aggregateWeighSessionsBySize(
+      row.sessions.map((s) => ({
+        sizeId: s.sizeId,
+        bundleCount: s.bundleCount,
+        weightTons: s.weightTons.toString(),
+        size: s.size,
+      })),
+    ),
+  }));
 
   return { data, total, page: pagination.page, pageSize: pagination.pageSize };
 }

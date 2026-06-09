@@ -78,6 +78,12 @@ const navItems: {
     permission: ["truck.view_queue", "truck.view_approved"],
   },
   {
+    title: "حركة الشاحنات",
+    url: "/loaded-trucks",
+    icon: Truck,
+    permission: "report.daily_trucks",
+  },
+  {
     title: "المالية",
     url: "/finance",
     icon: Wallet,
@@ -137,6 +143,13 @@ export function AppSidebar() {
     // been granted. Real enforcement lives in the server guards/API;
     // this is UI hygiene so nothing is tempting them to click.
     if (analyticsRestricted && (item.url === "/" || item.url === "/reports")) {
+      return false;
+    }
+
+    // Owner (manager) uses the simplified "loaded trucks" view instead of
+    // the full operational trucks queue — hide the queue entry from their
+    // sidebar only. UI hygiene; other roles keep /trucks unchanged.
+    if (session.user.role === "manager" && item.url === "/trucks") {
       return false;
     }
 
