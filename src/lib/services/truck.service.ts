@@ -1492,6 +1492,7 @@ export interface LoadedTruckFilters {
 
 export interface LoadedTruckListItem {
   id: number;
+  status: TruckStatus;
   customerName: string | null;
   destinationName: string | null;
   tareWeightKg: string | null;
@@ -1543,6 +1544,7 @@ export async function listLoadedTrucks(
 
   const data: LoadedTruckListItem[] = rows.map((row) => ({
     id: row.id,
+    status: row.status,
     customerName: row.customer?.fullName ?? null,
     destinationName: row.destination?.name ?? null,
     tareWeightKg: row.tareWeightKg != null ? row.tareWeightKg.toString() : null,
