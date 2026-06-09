@@ -28,6 +28,7 @@ interface LoadedSize {
 
 interface LoadedTruckItem {
   id: number;
+  status: string;
   customerName: string | null;
   destinationName: string | null;
   tareWeightKg: string | null;
@@ -200,6 +201,7 @@ export function LoadedTrucksList() {
               </TableRow>
             ) : (
               data.map((truck) => {
+                const isCancelled = truck.status === "Cancelled";
                 const tareKg = truck.tareWeightKg ? Number(truck.tareWeightKg) : null;
                 const grossKg = truck.grossWeightKg ? Number(truck.grossWeightKg) : null;
                 const bridgeNetKg =
@@ -207,7 +209,9 @@ export function LoadedTrucksList() {
                 return (
                   <TableRow
                     key={truck.id}
-                    className="cursor-pointer hover:bg-muted/50"
+                    className={`cursor-pointer hover:bg-muted/50 ${
+                      isCancelled ? "bg-destructive/5 hover:bg-destructive/10" : ""
+                    }`}
                     onClick={() =>
                       router.push(`/scale/${truck.id}?from=loaded-trucks`)
                     }
