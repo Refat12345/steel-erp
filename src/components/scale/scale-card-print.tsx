@@ -381,7 +381,7 @@ export function ScaleCardPrint({
               <tr className="border-b border-gray-300">
                 <td className="py-2 px-3">وزن الفارغ (Tare)</td>
                 <td className="py-2 px-3 font-mono font-bold">
-                  {tare.toLocaleString("ar-SY")} كغ
+                  {tare.toLocaleString("en-US")} كغ
                 </td>
                 <td className="py-2 px-3 text-xs">
                   {truck.tareTime
@@ -392,7 +392,7 @@ export function ScaleCardPrint({
               <tr className="border-b border-gray-300">
                 <td className="py-2 px-3">وزن المحمّل (Gross)</td>
                 <td className="py-2 px-3 font-mono font-bold">
-                  {gross.toLocaleString("ar-SY")} كغ
+                  {gross.toLocaleString("en-US")} كغ
                 </td>
                 <td className="py-2 px-3 text-xs">
                   {truck.grossTime
@@ -403,7 +403,7 @@ export function ScaleCardPrint({
               <tr className="bg-gray-50">
                 <td className="py-2 px-3 font-bold">صافي القبان (Net)</td>
                 <td className="py-2 px-3 font-mono font-bold text-base">
-                  {bridgeNetKg.toLocaleString("ar-SY")} كغ
+                  {bridgeNetKg.toLocaleString("en-US")} كغ
                 </td>
                 <td className="py-2 px-3" />
               </tr>
@@ -490,7 +490,7 @@ export function ScaleCardPrint({
                         <td className="py-1 px-2">{row.displayName}</td>
                         <td className="py-1 px-2 font-mono">
                           {row.totalBundles != null
-                            ? row.totalBundles.toLocaleString("ar-SY")
+                            ? row.totalBundles.toLocaleString("en-US")
                             : "—"}
                         </td>
                         {!isDriver && (
@@ -503,7 +503,7 @@ export function ScaleCardPrint({
                         <td className="py-1.5 px-2">المجموع الكلي (كل الوزنات)</td>
                         <td className="py-1.5 px-2 font-mono">
                           {totalAggregateBundles != null
-                            ? totalAggregateBundles.toLocaleString("ar-SY")
+                            ? totalAggregateBundles.toLocaleString("en-US")
                             : "—"}
                         </td>
                         <td className="py-1.5 px-2 font-mono">{totalSessionsTons.toFixed(3)} طن</td>

@@ -26,7 +26,7 @@ type SessionInput = {
 function formatRequested(item: RequestItemInput): string {
   if (item.size.isBundleType) {
     return item.bundleCount != null
-      ? `${item.bundleCount.toLocaleString("ar-SY")} ربطة`
+      ? `${item.bundleCount.toLocaleString("en-US")} ربطة`
       : "—";
   }
   if (item.requestedTons == null) return "—";
@@ -44,7 +44,7 @@ function formatLoaded(
   if (!loaded) return "—";
   if (isBundleType) {
     return loaded.totalBundles != null
-      ? `${loaded.totalBundles.toLocaleString("ar-SY")} ربطة`
+      ? `${loaded.totalBundles.toLocaleString("en-US")} ربطة`
       : "—";
   }
   return `${loaded.totalTons.toFixed(3)} طن`;
@@ -122,7 +122,7 @@ export function buildRequestVsLoadedComparison(
   for (const row of bySize) {
     if (row.sizeId != null && !requestedSizeIds.has(row.sizeId)) {
       const loadedLabel = row.totalBundles != null
-        ? `${row.totalBundles.toLocaleString("ar-SY")} ربطة · ${row.totalTons.toFixed(3)} طن`
+        ? `${row.totalBundles.toLocaleString("en-US")} ربطة · ${row.totalTons.toFixed(3)} طن`
         : `${row.totalTons.toFixed(3)} طن`;
       warnings.push(
         `قياس «${row.displayName}» محمّل (${loadedLabel}) وغير موجود في تفاصيل الطلبية`,

@@ -47,7 +47,7 @@ export const WEIGHT_BOUNDS = {
 } as const;
 
 function fmt(kg: number): string {
-  return kg.toLocaleString("ar-SY");
+  return kg.toLocaleString("en-US");
 }
 
 /** Hard-rail check applied to every weight value before deployment bounds. */

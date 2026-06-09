@@ -334,11 +334,11 @@ export function ScaleOperationView({
         )}
         <InfoCard
           label="وزن الفارغ"
-          value={tare != null ? `${tare.toLocaleString("ar-SY")} كغ` : "—"}
+          value={tare != null ? `${tare.toLocaleString("en-US")} كغ` : "—"}
         />
         <InfoCard
           label="وزن المحمّل"
-          value={gross != null ? `${gross.toLocaleString("ar-SY")} كغ` : "—"}
+          value={gross != null ? `${gross.toLocaleString("en-US")} كغ` : "—"}
         />
       </div>
 
@@ -346,7 +346,7 @@ export function ScaleOperationView({
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <InfoCard
             label="صافي القبان"
-            value={`${bridgeNetKg.toLocaleString("ar-SY")} كغ`}
+            value={`${bridgeNetKg.toLocaleString("en-US")} كغ`}
           />
           <InfoCard
             label="مجموع الوزنات الداخلية"
@@ -356,7 +356,7 @@ export function ScaleOperationView({
             label="الفرق"
             value={
               bridgeDiscrepancyKg != null
-                ? `${bridgeDiscrepancyKg.toLocaleString("ar-SY")} كغ`
+                ? `${bridgeDiscrepancyKg.toLocaleString("en-US")} كغ`
                 : "—"
             }
           />
@@ -365,8 +365,8 @@ export function ScaleOperationView({
               <div className="sm:col-span-3 rounded-lg border-2 border-red-500 bg-red-50 px-4 py-3 text-sm text-red-800 dark:bg-red-950/30 dark:text-red-200">
                 <p className="font-semibold">تنبيه: فرق كبير بين القبان والوزنات الداخلية</p>
                 <p className="mt-1 text-xs">
-                  الفرق {bridgeDiscrepancyKg.toLocaleString("ar-SY")} كغ يتجاوز الحد{" "}
-                  {discrepancyWarnKg.toLocaleString("ar-SY")} كغ
+                  الفرق {bridgeDiscrepancyKg.toLocaleString("en-US")} كغ يتجاوز الحد{" "}
+                  {discrepancyWarnKg.toLocaleString("en-US")} كغ
                 </p>
               </div>
             )}
@@ -639,7 +639,7 @@ export function ScaleOperationView({
                         <TableCell>{row.displayName}</TableCell>
                         <TableCell className="font-mono">
                           {row.totalBundles != null
-                            ? row.totalBundles.toLocaleString("ar-SY")
+                            ? row.totalBundles.toLocaleString("en-US")
                             : "—"}
                         </TableCell>
                         <TableCell className="font-mono font-semibold">
@@ -1072,7 +1072,7 @@ function WeightDialog({
             {currentValue !== undefined && (
               <div className="rounded-md bg-muted px-3 py-2 text-sm">
                 <span className="text-muted-foreground">القيمة الحالية: </span>
-                <span className="font-mono font-semibold">{currentValue.toLocaleString("ar-SY")} كغ</span>
+                <span className="font-mono font-semibold">{currentValue.toLocaleString("en-US")} كغ</span>
               </div>
             )}
             <div className="space-y-2">
@@ -1104,15 +1104,15 @@ function WeightDialog({
                 <div className="mt-2 space-y-1 font-mono text-xs sm:text-sm">
                   <p>
                     صافي القبان:{" "}
-                    {discrepancyPreview.bridgeNetKg.toLocaleString("ar-SY")} كغ
+                    {discrepancyPreview.bridgeNetKg.toLocaleString("en-US")} كغ
                   </p>
                   <p>
                     مجموع الداخلي:{" "}
-                    {discrepancyPreview.internalKg.toLocaleString("ar-SY")} كغ
+                    {discrepancyPreview.internalKg.toLocaleString("en-US")} كغ
                   </p>
                   <p className="font-semibold">
-                    الفرق: {discrepancyPreview.discrepancyKg.toLocaleString("ar-SY")} كغ
-                    {" "}(الحد: {crossCheck.discrepancyWarnKg.toLocaleString("ar-SY")} كغ)
+                    الفرق: {discrepancyPreview.discrepancyKg.toLocaleString("en-US")} كغ
+                    {" "}(الحد: {crossCheck.discrepancyWarnKg.toLocaleString("en-US")} كغ)
                   </p>
                 </div>
                 <p className="mt-2 text-xs">
@@ -1123,7 +1123,7 @@ function WeightDialog({
             <div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4 text-center dark:bg-amber-950/30 dark:border-amber-700">
               <p className="text-sm text-muted-foreground mb-1">هل أنت متأكد من القيمة التالية؟</p>
               <p className="text-3xl font-bold font-mono" dir="ltr">
-                {parsedKg.toLocaleString("ar-SY")} <span className="text-base font-normal">كغ</span>
+                {parsedKg.toLocaleString("en-US")} <span className="text-base font-normal">كغ</span>
               </p>
             </div>
             <DialogFooter className="gap-2">
@@ -1300,7 +1300,7 @@ function SessionDialog({
                 <div>
                   <span className="text-muted-foreground">الربطات: </span>
                   <span className="font-medium">
-                    {parsedBundles != null ? parsedBundles.toLocaleString("ar-SY") : "—"}
+                    {parsedBundles != null ? parsedBundles.toLocaleString("en-US") : "—"}
                   </span>
                 </div>
               </div>
@@ -1480,7 +1480,7 @@ function EditSessionButton({
                   <div>
                     <span className="text-muted-foreground">الربطات: </span>
                     <span className="font-medium">
-                      {parsedBundles != null ? parsedBundles.toLocaleString("ar-SY") : "—"}
+                      {parsedBundles != null ? parsedBundles.toLocaleString("en-US") : "—"}
                     </span>
                   </div>
                   <div className="pt-1 text-xs text-muted-foreground">
@@ -1780,7 +1780,7 @@ function LoadingCompleteDialog({
                       <TableCell>{row.displayName}</TableCell>
                       <TableCell className="font-mono">
                         {row.totalBundles != null
-                          ? row.totalBundles.toLocaleString("ar-SY")
+                          ? row.totalBundles.toLocaleString("en-US")
                           : "—"}
                       </TableCell>
                       <TableCell className="font-mono font-semibold">
@@ -1792,7 +1792,7 @@ function LoadingCompleteDialog({
                     <TableCell>المجموع الكلي</TableCell>
                     <TableCell className="font-mono">
                       {totalBundles != null
-                        ? totalBundles.toLocaleString("ar-SY")
+                        ? totalBundles.toLocaleString("en-US")
                         : "—"}
                     </TableCell>
                     <TableCell className="font-mono">{totalTons.toFixed(3)}</TableCell>
@@ -1803,8 +1803,8 @@ function LoadingCompleteDialog({
           )}
 
           <p className="text-xs text-muted-foreground">
-            {sessions.length.toLocaleString("ar-SY")} وزنة ·{" "}
-            {photoCount.toLocaleString("ar-SY")} صورة
+            {sessions.length.toLocaleString("en-US")} وزنة ·{" "}
+            {photoCount.toLocaleString("en-US")} صورة
           </p>
 
           {warnings.length > 0 && (
