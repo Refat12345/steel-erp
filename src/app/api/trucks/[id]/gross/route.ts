@@ -39,7 +39,12 @@ export async function PATCH(
     }
 
     try {
-      const truck = await enterGross(truckId, validated.data.weightKg, session.userId);
+      const truck = await enterGross(
+        truckId,
+        validated.data.weightKg,
+        session.userId,
+        validated.data.exit,
+      );
       return ok(truck);
     } catch (e) {
       return handleServiceError(e);

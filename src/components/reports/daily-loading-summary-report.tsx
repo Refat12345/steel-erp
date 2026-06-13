@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { sessionHasPermission } from "@/lib/client-permissions";
 import { formatDateTime } from "@/lib/date-format";
-import { toEnglishCity, toEnglishSize } from "@/lib/en-labels";
+import { toEnglishCity, toEnglishSize, productFilterLabelEn } from "@/lib/en-labels";
 import { BRAND } from "@/lib/brand";
 import { defaultOperationalDateInput } from "@/lib/operational-day";
 import { exportDailyLoadingSummaryExcel } from "@/lib/export/daily-loading-summary-excel";
@@ -62,9 +62,11 @@ interface CustomerOption {
   fullName: string;
 }
 
-const GRADE_OPTIONS = [
+const PRODUCT_FILTER_OPTIONS = [
   { value: "FIRST", label: "First grade" },
   { value: "SECOND", label: "Second grade" },
+  { value: "SHORTBAR", label: "Short bars" },
+  { value: "SCRAP", label: "Scrap" },
 ] as const;
 
 const PERIOD_OPTIONS = [
@@ -244,7 +246,7 @@ export function DailyLoadingSummaryView() {
   );
   const [period, setPeriod] = useState<string>("daily");
   const [customerId, setCustomerId] = useState<string>("all");
-  const [grade, setGrade] = useState<string>("all");
+  const [productFilter, setProductFilter] = useState<string>("all");
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [loadingCustomers, setLoadingCustomers] = useState(true);
   const [loadingReport, setLoadingReport] = useState(false);
@@ -280,7 +282,7 @@ export function DailyLoadingSummaryView() {
     try {
       const params = new URLSearchParams({ date: operationalDate, period });
       if (customerId !== "all") params.set("customerId", customerId);
-      if (grade !== "all") params.set("grade", grade);
+      if (productFilter !== "all") params.set("product", productFilter);
       const res = await fetch(
         `/api/reports/daily-loading-summary?${params.toString()}`,
       );
@@ -297,7 +299,7 @@ export function DailyLoadingSummaryView() {
     } finally {
       setLoadingReport(false);
     }
-  }, [operationalDate, period, customerId, grade]);
+  }, [operationalDate, period, customerId, productFilter]);
 
   useEffect(() => {
     if (status === "authenticated" && canView) {
@@ -434,14 +436,14 @@ export function DailyLoadingSummaryView() {
         </div>
 
         <div className="space-y-1.5 min-w-[10rem]">
-          <label className="text-xs font-medium text-muted-foreground">Grade</label>
-          <Select value={grade} onValueChange={(v) => setGrade(v ?? "all")}>
+          <label className="text-xs font-medium text-muted-foreground">Product</label>
+          <Select value={productFilter} onValueChange={(v) => setProductFilter(v ?? "all")}>
             <SelectTrigger className="w-full">
-              <SelectValue placeholder="All grades" />
+              <SelectValue placeholder="All products" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All grades</SelectItem>
-              {GRADE_OPTIONS.map((option) => (
+              <SelectItem value="all">All products</SelectItem>
+              {PRODUCT_FILTER_OPTIONS.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
                   {option.label}
                 </SelectItem>
@@ -466,7 +468,7 @@ export function DailyLoadingSummaryView() {
             setOperationalDate(defaultOperationalDateInput());
             setPeriod("daily");
             setCustomerId("all");
-            setGrade("all");
+            setProductFilter("all");
           }}
         >
           Clear filters
@@ -527,12 +529,15 @@ export function DailyLoadingSummaryView() {
               <span className="font-medium">{report.filters.customerName}</span>
             </p>
           ) : null}
-          {report.filters.grade ? (
+          {report.filters.productFilter ? (
             <p className="text-sm text-muted-foreground">
-              Grade filter:{" "}
+              Product filter:{" "}
               <span className="font-medium">
-                {report.filters.grade === "FIRST" ? "First grade" : "Second grade"}
+                {productFilterLabelEn(report.filters.productFilter)}
               </span>
+              {" · "}
+              Bridge tons from matching rounds only; mixed visits may appear in more
+              than one product filter.
             </p>
           ) : null}
 
@@ -905,10 +910,9 @@ function DailyLoadingSummaryPrintable({ report }: { report: DailyLoadingSummary 
         {report.filters.customerName ? (
           <p className="headline">Customer filter: {report.filters.customerName}</p>
         ) : null}
-        {report.filters.grade ? (
+        {report.filters.productFilter ? (
           <p className="headline">
-            Grade filter:{" "}
-            {report.filters.grade === "FIRST" ? "First grade" : "Second grade"}
+            Product filter: {productFilterLabelEn(report.filters.productFilter)}
           </p>
         ) : null}
 

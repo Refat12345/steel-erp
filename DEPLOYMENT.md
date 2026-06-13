@@ -579,7 +579,10 @@ psql -U steel_erp -d steel_erp_prod -h localhost
 
 ```bash
 # استخدم DIRECT_URL (port 5432) مش الـ pooler (port 6543) لأن pg_dump ما بيشتغل مع pooler
-pg_dump "postgresql://postgres.qdhopncrgjzojyykkgpz:DbPassword123%23%24ZZY%26@aws-1-ap-northeast-2.pooler.supabase.com:5432/postgres?sslmode=require" \
+# خذ الرابط من Supabase Dashboard → Settings → Database → Connection string (Direct)
+# لا تلصق كلمة المرور في هذا الملف — استخدم متغير بيئة محلي فقط:
+#   export DIRECT_URL='postgresql://USER:PASSWORD@HOST:5432/postgres?sslmode=require'
+pg_dump "$DIRECT_URL" \
   --no-owner \
   --no-acl \
   -Fc \

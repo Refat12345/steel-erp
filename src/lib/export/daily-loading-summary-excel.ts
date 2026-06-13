@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 import { formatDateTime } from "@/lib/date-format";
-import { toEnglishCity, toEnglishSize } from "@/lib/en-labels";
+import { toEnglishCity, toEnglishSize, productFilterLabelEn } from "@/lib/en-labels";
 import { BRAND } from "@/lib/brand";
 import type { DailyLoadingSummary } from "@/lib/services/report.service";
 
@@ -46,10 +46,10 @@ function buildSummarySheet(report: DailyLoadingSummary): XLSX.WorkSheet {
   if (report.filters.customerName) {
     rows.push(["Customer filter", report.filters.customerName]);
   }
-  if (report.filters.grade) {
+  if (report.filters.productFilter) {
     rows.push([
-      "Grade filter",
-      report.filters.grade === "FIRST" ? "First grade" : "Second grade",
+      "Product filter",
+      productFilterLabelEn(report.filters.productFilter),
     ]);
   }
   rows.push([]);

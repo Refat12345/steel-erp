@@ -1,9 +1,11 @@
 import { aggregateWeighSessionsBySize } from "@/lib/weigh-session-aggregate";
+import { sizeCodeSupportsGrade } from "@/lib/material-kind";
 
 const TON_EPS = 0.0005;
 
 export interface RequestVsLoadedRow {
   sizeId: number;
+  grade: "FIRST" | "SECOND" | null;
   displayName: string;
   requestedLabel: string;
   loadedLabel: string;
@@ -11,9 +13,10 @@ export interface RequestVsLoadedRow {
 
 type RequestItemInput = {
   sizeId: number;
+  grade?: "FIRST" | "SECOND" | null;
   bundleCount: number | null;
   requestedTons: string | number | null;
-  size: { displayName: string; isBundleType: boolean };
+  size: { displayName: string; isBundleType: boolean; code?: string };
 };
 
 type SessionInput = {
@@ -50,12 +53,50 @@ function formatLoaded(
   return `${loaded.totalTons.toFixed(3)} طن`;
 }
 
-/** Read-only request vs loaded rows and mismatch warnings (never blocks confirm). */
+/**
+ * Which request lines belong to the round being confirmed.
+ *
+ * - roundGrade FIRST/SECOND → that grade's rebar lines (+ legacy ungraded rebar);
+ *   shortbar/scrap (grade-less, non-rebar) belong to their own round only.
+ * - roundGrade null → shortbar/scrap lines only (non-rebar, grade-less).
+ * - roundGrade undefined → whole-operation comparison (all lines).
+ */
+function filterRequestItemsForRound(
+  requestItems: ReadonlyArray<RequestItemInput>,
+  roundGrade: "FIRST" | "SECOND" | null | undefined,
+): ReadonlyArray<RequestItemInput> {
+  if (roundGrade === undefined) return requestItems;
+
+  return requestItems.filter((item) => {
+    const itemGrade = item.grade ?? null;
+    const code = item.size.code ?? "";
+
+    if (roundGrade === null) {
+      if (itemGrade != null) return false;
+      return code ? !sizeCodeSupportsGrade(code) : true;
+    }
+
+    if (itemGrade === roundGrade) return true;
+    if (itemGrade === null && sizeCodeSupportsGrade(code)) return true;
+    return false;
+  });
+}
+
+/**
+ * Read-only request vs loaded rows and mismatch warnings (never blocks
+ * confirm).
+ *
+ * Multi-round: pass `roundGrade` and only the CURRENT round's sessions.
+ * Request lines are filtered to those relevant to this round — e.g.
+ * shortbar lines are not checked when confirming a FIRST rebar round.
+ */
 export function buildRequestVsLoadedComparison(
   requestItems: ReadonlyArray<RequestItemInput>,
   sessions: ReadonlyArray<SessionInput>,
+  roundGrade?: "FIRST" | "SECOND" | null,
 ): { rows: RequestVsLoadedRow[]; warnings: string[] } {
-  if (requestItems.length === 0) {
+  const items = filterRequestItemsForRound(requestItems, roundGrade);
+  if (items.length === 0 && requestItems.length === 0) {
     return { rows: [], warnings: [] };
   }
 
@@ -65,17 +106,18 @@ export function buildRequestVsLoadedComparison(
       .filter((r) => r.sizeId != null)
       .map((r) => [r.sizeId as number, r]),
   );
-  const requestedSizeIds = new Set(requestItems.map((i) => i.sizeId));
+  const requestedSizeIds = new Set(items.map((i) => i.sizeId));
   const warnings: string[] = [];
   const rows: RequestVsLoadedRow[] = [];
 
-  for (const item of requestItems) {
+  for (const item of items) {
     const loaded = loadedBySizeId.get(item.sizeId);
     const requestedLabel = formatRequested(item);
     const loadedLabel = formatLoaded(item.size.isBundleType, loaded);
 
     rows.push({
       sizeId: item.sizeId,
+      grade: item.grade ?? null,
       displayName: item.size.displayName,
       requestedLabel,
       loadedLabel,

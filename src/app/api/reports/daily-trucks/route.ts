@@ -21,6 +21,7 @@ export async function GET(req: NextRequest) {
   const parsed = dailyTrucksReportQuerySchema.safeParse({
     date: req.nextUrl.searchParams.get("date"),
     customerId: req.nextUrl.searchParams.get("customerId") ?? undefined,
+    product: req.nextUrl.searchParams.get("product") ?? undefined,
     grade: req.nextUrl.searchParams.get("grade") ?? undefined,
   });
 
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
     const data = await getDailyTrucksReport({
       operationalDate: parsed.data.date,
       customerId: parsed.data.customerId,
-      grade: parsed.data.grade,
+      productFilter: parsed.data.productFilter,
       canViewSensitiveTonnage: hasPermission(
         session,
         DAILY_TRUCKS_SENSITIVE_TONNAGE_PERMISSION,

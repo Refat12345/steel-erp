@@ -45,6 +45,58 @@ describe("operations dashboard operational periods", () => {
     );
   });
 
+  it("splits tonsByGrade per bridge round, with operationalGrade fallback for legacy trucks", async () => {
+    // First findMany call = completedInPeriod (the only one that feeds
+    // tonsByGrade); the 14d/30d calls fall back to the [] default.
+    mockPrisma.truckOperation.findMany.mockResolvedValueOnce([
+      // Multi-round truck: 15t FIRST + 5t SECOND in one visit.
+      {
+        id: 1,
+        customerId: 1,
+        destinationId: null,
+        grossWeightKg: 30_000,
+        tareWeightKg: 10_000,
+        closedAt: new Date(2026, 5, 7, 9, 0, 0, 0),
+        operationalGrade: null,
+        rounds: [
+          { grade: "FIRST", startWeightKg: 10_000, endWeightKg: 25_000 },
+          { grade: "SECOND", startWeightKg: 25_000, endWeightKg: 30_000 },
+        ],
+      },
+      // Legacy truck (pre-migration, no rounds): falls back to operationalGrade.
+      {
+        id: 2,
+        customerId: 2,
+        destinationId: null,
+        grossWeightKg: 22_000,
+        tareWeightKg: 10_000,
+        closedAt: new Date(2026, 5, 7, 9, 30, 0, 0),
+        operationalGrade: "FIRST",
+        rounds: [],
+      },
+      // Grade-less round (e.g. scrap) contributes to no grade bucket.
+      {
+        id: 3,
+        customerId: 3,
+        destinationId: null,
+        grossWeightKg: 18_000,
+        tareWeightKg: 10_000,
+        closedAt: new Date(2026, 5, 7, 9, 45, 0, 0),
+        operationalGrade: null,
+        rounds: [{ grade: null, startWeightKg: 10_000, endWeightKg: 18_000 }],
+      },
+    ]);
+
+    const stats = await getOwnerStatsCached("today");
+
+    expect(stats.tonsByGrade).toEqual([
+      { grade: "FIRST", label: "درجة أولى", tons: 27 },
+      { grade: "SECOND", label: "درجة ثانية", tons: 5 },
+    ]);
+    // KPI total still uses the operation-level net (whole visits).
+    expect(stats.kpis.totalTons).toBe(40);
+  });
+
   it("uses operational-day starts for week and month windows", async () => {
     await getOwnerStatsCached("week");
     expect(mockPrisma.truckOperation.findMany).toHaveBeenNthCalledWith(

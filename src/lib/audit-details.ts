@@ -25,10 +25,15 @@ const arabicDecimal = new Intl.NumberFormat("ar-EG", {
 });
 
 const EVENT_LABELS: Record<string, string> = {
+  truck_registered: "تم تسجيل الشاحنة",
   tare_recorded: "تم تسجيل وزن التار",
   gross_recorded: "تم تسجيل الوزن الإجمالي",
+  round_weighed_return: "وزنة خارجية ورجوع للتحميل (دورة جديدة)",
+  gross_correction: "تصحيح وزنة خارجية",
   loading_confirmed: "تم تأكيد التحميل",
   loading_reopened: "تم إعادة فتح التحميل",
+  session_reopened: "تم إعادة فتح التحميل قبل الوزن",
+  session_cancelled: "تم إلغاء العملية",
   cancelled: "تم الإلغاء",
   approved: "تمت الموافقة",
   rejected: "تم الرفض",
@@ -50,6 +55,11 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: "ملغى",
   pending: "قيد الانتظار",
   partial: "جزئي",
+};
+
+const GRADE_VALUE_LABELS: Record<string, string> = {
+  FIRST: "نخب أول",
+  SECOND: "نخب ثاني",
 };
 
 const ACTION_LABELS: Record<string, string> = {
@@ -74,6 +84,22 @@ const FIELD_LABELS: Record<string, string> = {
   loaderId: "المحمّل",
   truckId: "الشاحنة",
   sizeId: "المقاس",
+  roundNumber: "دورة القبان",
+  nextRoundNumber: "الدورة التالية",
+  roundGrade: "نخب الدورة",
+  roundStartWeightKg: "وزن بداية الدورة",
+  roundEndWeightKg: "وزن نهاية الدورة",
+  roundNetKg: "صافي الدورة",
+  isFinalRound: "وزنة الخروج النهائي",
+  cascadedToNextRound: "انعكس على بداية الدورة التالية",
+  rounds: "الدورات",
+  grade: "النخب",
+  oldGrossWeightKg: "الوزن الإجمالي السابق",
+  newGrossWeightKg: "الوزن الإجمالي الجديد",
+  oldTareWeightKg: "وزن التار السابق",
+  newTareWeightKg: "وزن التار الجديد",
+  sessionCount: "عدد الوزنات",
+  photoCount: "عدد الصور",
   customerId: "الزبون",
   contractId: "العقد",
   salesOrderId: "أمر البيع",
@@ -195,6 +221,9 @@ function formatScalar(key: string, value: unknown): string {
     }
     if (key === "event" || key === "action") {
       return EVENT_LABELS[value] ?? humanizeKey(value);
+    }
+    if (key === "grade" || key === "roundGrade" || key === "operationalGrade") {
+      return GRADE_VALUE_LABELS[value] ?? value;
     }
     if (key === "filePath" || key === "path") {
       return formatPathTail(value);

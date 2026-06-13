@@ -9,7 +9,7 @@ import { aggregateWeighSessionsBySize } from "@/lib/weigh-session-aggregate";
 import { formatDuration } from "@/lib/format-duration";
 import { formatDate, formatDateTime } from "@/lib/date-format";
 import type { TruckTimings } from "@/lib/truck-timing";
-import { getDisplayGradeLabel } from "@/lib/truck-grade";
+import { getDisplayGradeLabel, GRADE_LABELS } from "@/lib/truck-grade";
 import {
   computeA4PrintFitScale,
   SCALE_CARD_PRINT_HEIGHT_FUDGE,
@@ -18,6 +18,7 @@ import type { SalesOrderGrade } from "@prisma/client";
 
 interface WeighSessionItem {
   id: number;
+  bridgeRoundId: number | null;
   sessionNumber: number;
   sizeId: number | null;
   bundleCount: number | null;
@@ -27,9 +28,19 @@ interface WeighSessionItem {
 
 interface TruckRequestItemPrint {
   id: number;
+  grade: SalesOrderGrade | null;
   bundleCount: number | null;
   requestedTons: string | null;
   size: { displayName: string; isBundleType: boolean };
+}
+
+interface BridgeRoundPrint {
+  id: number;
+  roundNumber: number;
+  grade: SalesOrderGrade | null;
+  startWeightKg: string;
+  endWeightKg: string | null;
+  isFinal: boolean;
 }
 
 interface TruckDetail {
@@ -52,6 +63,7 @@ interface TruckDetail {
   loader: { fullName: string } | null;
   sessions: WeighSessionItem[];
   requestItems: TruckRequestItemPrint[];
+  rounds: BridgeRoundPrint[];
   operationalGrade: SalesOrderGrade | null;
   salesOrder: {
     orderNumber: string;
@@ -181,6 +193,9 @@ export function ScaleCardPrint({
   const discrepancyTons = bridgeNetTons - totalSessionsTons;
   const { waitMs, scaleMs, internalLoadingMs, totalMs, loaderName, loadingConfirmedAt } =
     truck.timings;
+
+  const rounds = truck.rounds ?? [];
+  const isMultiRound = rounds.length > 1;
 
   const sessionsBySize = aggregateWeighSessionsBySize(truck.sessions);
   const totalAggregateBundles =
@@ -336,6 +351,9 @@ export function ScaleCardPrint({
                 <thead>
                   <tr className="bg-gray-100 print:bg-gray-200">
                     <th className="py-1.5 px-2 text-start border-b border-black">القياس</th>
+                    {truck.requestItems.some((i) => i.grade) && (
+                      <th className="py-1.5 px-2 text-start border-b border-black">النخب</th>
+                    )}
                     <th className="py-1.5 px-2 text-start border-b border-black">الكمية المطلوبة</th>
                   </tr>
                 </thead>
@@ -343,6 +361,11 @@ export function ScaleCardPrint({
                   {truck.requestItems.map((item) => (
                     <tr key={item.id} className="border-b border-gray-200">
                       <td className="py-1 px-2">{item.size.displayName}</td>
+                      {truck.requestItems.some((i) => i.grade) && (
+                        <td className="py-1 px-2">
+                          {item.grade ? GRADE_LABELS[item.grade] : "—"}
+                        </td>
+                      )}
                       <td className="py-1 px-2 font-mono">
                         {item.size.isBundleType
                           ? item.bundleCount != null
@@ -410,6 +433,75 @@ export function ScaleCardPrint({
             </tbody>
           </table>
         </div>
+
+        {/* Bridge rounds breakdown — only for multi-round visits. The
+            per-round net is the authoritative weight of each batch
+            (grade/size group) per the external weighbridge. */}
+        {isMultiRound && (
+          <div className="mb-3 print:mb-2">
+            <h3 className="font-bold text-sm mb-2">
+              تفصيل دورات القبان ({rounds.length} دورات)
+            </h3>
+            <div className="border border-black rounded">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-100 print:bg-gray-200">
+                    <th className="py-1.5 px-2 text-start border-b border-black">الدورة</th>
+                    <th className="py-1.5 px-2 text-start border-b border-black">النخب</th>
+                    <th className="py-1.5 px-2 text-start border-b border-black">الأصناف</th>
+                    <th className="py-1.5 px-2 text-start border-b border-black">وزن الدخول (كغ)</th>
+                    <th className="py-1.5 px-2 text-start border-b border-black">وزن الخروج (كغ)</th>
+                    <th className="py-1.5 px-2 text-start border-b border-black">الصافي (كغ)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rounds.map((r) => {
+                    const startKg = Number(r.startWeightKg);
+                    const endKg =
+                      r.endWeightKg != null ? Number(r.endWeightKg) : null;
+                    const netKg = endKg != null ? endKg - startKg : null;
+                    const sizeNames = [
+                      ...new Set(
+                        truck.sessions
+                          .filter((s) => s.bridgeRoundId === r.id)
+                          .map((s) => s.size?.displayName)
+                          .filter((n): n is string => Boolean(n)),
+                      ),
+                    ];
+                    return (
+                      <tr key={r.id} className="border-b border-gray-200">
+                        <td className="py-1 px-2 font-mono">{r.roundNumber}</td>
+                        <td className="py-1 px-2">
+                          {r.grade ? GRADE_LABELS[r.grade] : "—"}
+                        </td>
+                        <td className="py-1 px-2 text-xs">
+                          {sizeNames.length > 0 ? sizeNames.join("، ") : "—"}
+                        </td>
+                        <td className="py-1 px-2 font-mono">
+                          {startKg.toLocaleString("en-US")}
+                        </td>
+                        <td className="py-1 px-2 font-mono">
+                          {endKg != null ? endKg.toLocaleString("en-US") : "—"}
+                        </td>
+                        <td className="py-1 px-2 font-mono font-bold">
+                          {netKg != null ? netKg.toLocaleString("en-US") : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  <tr className="bg-gray-50 font-bold">
+                    <td className="py-1.5 px-2" colSpan={5}>
+                      المجموع (= صافي القبان)
+                    </td>
+                    <td className="py-1.5 px-2 font-mono">
+                      {bridgeNetKg.toLocaleString("en-US")}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* Timing Summary — internal only */}
         {!isDriver && (

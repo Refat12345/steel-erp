@@ -23,6 +23,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Trash2, Plus } from "lucide-react";
 import { createClientIdempotencyKey } from "@/lib/browser-idempotency-key";
 import { GRADE_LABELS } from "@/lib/truck-grade";
+import { sizeCodeSupportsGrade, sizeCodeToKind } from "@/lib/material-kind";
 import type { SalesOrderGrade } from "@prisma/client";
 import { DestinationSelect } from "@/components/destinations/destination-select";
 
@@ -43,6 +44,8 @@ interface RequestItemRow {
   key: number;
   /** Size catalog `code` (e.g. "8mm"); maps to numeric id only when submitting. */
   sizeCode: string;
+  /** Grade for this line ("" = none). Same size may repeat once per grade. */
+  grade: SalesOrderGrade | "";
   bundleCount: string;
   requestedTons: string;
 }
@@ -107,7 +110,15 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
   const addRequestItem = () => {
     setRequestItems((prev) => [
       ...prev,
-      { key: ++rowKeyCounter, sizeCode: "", bundleCount: "", requestedTons: "" },
+      {
+        key: ++rowKeyCounter,
+        sizeCode: "",
+        // New rows inherit the operation-level grade so the common
+        // single-grade flow never needs the per-row grade field.
+        grade: isRebarLoad ? operationalGrade : "",
+        bundleCount: "",
+        requestedTons: "",
+      },
     ]);
   };
 
@@ -117,24 +128,39 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
 
   const updateRequestItem = (
     key: number,
-    field: "sizeCode" | "bundleCount" | "requestedTons",
+    field: "sizeCode" | "grade" | "bundleCount" | "requestedTons",
     value: string,
   ) => {
     setRequestItems((prev) =>
-      prev.map((r) =>
-        r.key === key
-          ? {
-              ...r,
-              [field]: value,
-              ...(field === "sizeCode" ? { bundleCount: "", requestedTons: "" } : {}),
-            }
-          : r,
-      ),
+      prev.map((r) => {
+        if (r.key !== key) return r;
+        if (field === "sizeCode") {
+          const kind = value ? sizeCodeToKind(value) : null;
+          const grade =
+            kind != null && kind !== "REBAR"
+              ? ""
+              : kind === "REBAR"
+                ? r.grade || operationalGrade || ""
+                : r.grade;
+          return {
+            ...r,
+            sizeCode: value,
+            bundleCount: "",
+            requestedTons: "",
+            grade,
+          };
+        }
+        return { ...r, [field]: value };
+      }),
     );
   };
 
-  const usedSizeCodes = new Set(
-    requestItems.map((r) => r.sizeCode).filter(Boolean),
+  // Uniqueness is per (size, grade): "12mm FIRST" and "12mm SECOND" may
+  // coexist on the same request.
+  const usedSizeGradeKeys = new Set(
+    requestItems
+      .filter((r) => r.sizeCode)
+      .map((r) => `${r.sizeCode}:${r.grade}`),
   );
 
   /** Lets Select.Value show the customer name; Base UI renders raw `value` without `items`. */
@@ -161,15 +187,25 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
 
     const items: {
       sizeId: number;
+      grade: SalesOrderGrade | null;
       bundleCount: number | null;
       requestedTons: number | null;
     }[] = [];
+    const seenKeys = new Set<string>();
     for (const r of requestItems.filter((x) => x.sizeCode)) {
       const sz = sizes.find((s) => s.code === r.sizeCode);
       if (!sz) {
         toast.error("قياس غير صالح، أعد تحميل الصفحة والمحاولة");
         return;
       }
+      const grade =
+        isRebarLoad && r.grade && sizeCodeSupportsGrade(r.sizeCode) ? r.grade : null;
+      const dupKey = `${sz.id}:${grade ?? ""}`;
+      if (seenKeys.has(dupKey)) {
+        toast.error("لا يمكن تكرار نفس القياس بنفس النخب في الطلبية");
+        return;
+      }
+      seenKeys.add(dupKey);
       const bundleCount = r.bundleCount ? Number(r.bundleCount) : null;
       const requestedTons = r.requestedTons ? Number(r.requestedTons) : null;
       if (sz.isBundleType) {
@@ -183,6 +219,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
       }
       items.push({
         sizeId: sz.id,
+        grade,
         bundleCount: sz.isBundleType ? bundleCount : null,
         requestedTons: sz.isBundleType ? null : requestedTons,
       });
@@ -223,11 +260,11 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-lg max-h-[90vh] min-w-0 overflow-x-hidden overflow-y-auto">
         <DialogHeader>
           <DialogTitle>تسجيل شاحنة جديدة</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="min-w-0 space-y-4">
           {/* Customer */}
           <div className="space-y-2">
             <Label>الزبون *</Label>
@@ -271,9 +308,13 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
               onValueChange={(v) => {
                 const rebar = v === "REBAR";
                 setIsRebarLoad(rebar);
-                // Clear grade immediately when kind changes away from REBAR
-                // so no stale value survives in the payload.
-                if (!rebar) setOperationalGrade("");
+                // Clear grades immediately when kind changes away from REBAR
+                // so no stale value survives in the payload — including the
+                // per-row grades on request items.
+                if (!rebar) {
+                  setOperationalGrade("");
+                  setRequestItems((prev) => prev.map((r) => ({ ...r, grade: "" })));
+                }
               }}
             >
               <SelectTrigger className="w-full">
@@ -358,13 +399,13 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
               </p>
             )}
 
-            <div className="space-y-2">
+            <div className="min-w-0 space-y-2">
               {requestItems.map((row) => {
                 const selectedSize = sizes.find((s) => s.code === row.sizeCode);
                 return (
                   <div
                     key={row.key}
-                    className="grid grid-cols-1 gap-2 rounded-md border p-2 sm:grid-cols-[1fr_7rem_auto]"
+                    className="min-w-0 space-y-2 rounded-md border p-2"
                   >
                     <Select
                       value={row.sizeCode}
@@ -372,7 +413,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                         updateRequestItem(row.key, "sizeCode", v ?? "")
                       }
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger className="w-full min-w-0">
                         <SelectValue placeholder="القياس" />
                       </SelectTrigger>
                       <SelectContent>
@@ -380,7 +421,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                           .filter(
                             (s) =>
                               s.code === row.sizeCode ||
-                              !usedSizeCodes.has(s.code),
+                              !usedSizeGradeKeys.has(`${s.code}:${row.grade}`),
                           )
                           .map((s) => (
                             <SelectItem key={s.id} value={s.code}>
@@ -389,37 +430,63 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                           ))}
                       </SelectContent>
                     </Select>
-                    {selectedSize?.isBundleType === false ? (
-                      <Input
-                        type="number"
-                        min={0}
-                        step="0.001"
-                        value={row.requestedTons}
-                        onChange={(e) =>
-                          updateRequestItem(row.key, "requestedTons", e.target.value)
+                    {isRebarLoad && sizeCodeSupportsGrade(row.sizeCode) && (
+                      <Select
+                        value={row.grade}
+                        onValueChange={(v) =>
+                          updateRequestItem(row.key, "grade", v ?? "")
                         }
-                        placeholder="طن"
-                      />
-                    ) : (
-                      <Input
-                        type="number"
-                        min={1}
-                        value={row.bundleCount}
-                        onChange={(e) =>
-                          updateRequestItem(row.key, "bundleCount", e.target.value)
-                        }
-                        placeholder="ربطات"
-                      />
+                      >
+                        <SelectTrigger className="w-full min-w-0">
+                          <SelectValue placeholder="النخب" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">بلا نخب</SelectItem>
+                          {(Object.entries(GRADE_LABELS) as [SalesOrderGrade, string][]).map(
+                            ([key, label]) => (
+                              <SelectItem key={key} value={key}>
+                                {label}
+                              </SelectItem>
+                            ),
+                          )}
+                        </SelectContent>
+                      </Select>
                     )}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive"
-                      onClick={() => removeRequestItem(row.key)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex min-w-0 items-center gap-2">
+                      {selectedSize?.isBundleType === false ? (
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.001"
+                          className="min-w-0 flex-1"
+                          value={row.requestedTons}
+                          onChange={(e) =>
+                            updateRequestItem(row.key, "requestedTons", e.target.value)
+                          }
+                          placeholder="طن"
+                        />
+                      ) : (
+                        <Input
+                          type="number"
+                          min={1}
+                          className="min-w-0 flex-1"
+                          value={row.bundleCount}
+                          onChange={(e) =>
+                            updateRequestItem(row.key, "bundleCount", e.target.value)
+                          }
+                          placeholder="ربطات"
+                        />
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="shrink-0 text-destructive"
+                        onClick={() => removeRequestItem(row.key)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 );
               })}

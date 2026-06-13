@@ -37,6 +37,7 @@ const mockPrisma = vi.hoisted(() => ({
     count: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
   },
   truckRequestItem: { createMany: vi.fn(), deleteMany: vi.fn() },
   weighSession: {
@@ -45,7 +46,13 @@ const mockPrisma = vi.hoisted(() => ({
     count: vi.fn(),
     deleteMany: vi.fn(),
   },
-  truckPhoto: { count: vi.fn() },
+  truckPhoto: { count: vi.fn(), updateMany: vi.fn() },
+  bridgeRound: {
+    findFirst: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    updateMany: vi.fn(),
+  },
   auditLog: { create: vi.fn() },
   $transaction: vi.fn(),
   $queryRaw: vi.fn(),
@@ -67,10 +74,13 @@ import {
   updateTruckBeforeWeigh,
   listOperations,
   enterTare,
+  correctTare,
+  correctGross,
   confirmLoadingComplete,
   enterGross,
   cancelOperation,
   reopenBeforeGross,
+  editWeighSession,
   deleteWeighSession,
 } from "./truck.service";
 import { ServiceError } from "./errors";
@@ -88,7 +98,46 @@ beforeEach(() => {
   // Default: FOR UPDATE lock resolves "row exists" unless a test overrides.
   mockPrisma.$queryRaw.mockResolvedValue([{ id: 1 }]);
   mockPrisma.auditLog.create.mockResolvedValue({});
+  // Round-machinery defaults — individual suites override findFirst via
+  // mockRounds() below.
+  mockPrisma.bridgeRound.create.mockResolvedValue({ id: 11, roundNumber: 1 });
+  mockPrisma.bridgeRound.update.mockResolvedValue({});
+  mockPrisma.bridgeRound.updateMany.mockResolvedValue({ count: 0 });
+  mockPrisma.truckPhoto.updateMany.mockResolvedValue({ count: 0 });
 });
+
+// ─── Round helpers ─────────────────────────────────────────────
+//
+// `bridgeRound.findFirst` serves two distinct service queries:
+//   - getOpenRound        → where.endWeightKg === null
+//   - last/any closed round → where.endWeightKg = { not: null }
+// Dispatch on the where clause so a single mock serves both.
+interface MockRound {
+  id: number;
+  roundNumber: number;
+  grade?: string | null;
+  startWeightKg?: number;
+  endWeightKg?: number | null;
+  isFinal?: boolean;
+  version?: number;
+}
+
+function mockRounds({
+  open = null,
+  lastClosed = null,
+}: {
+  open?: MockRound | null;
+  lastClosed?: MockRound | null;
+}) {
+  mockPrisma.bridgeRound.findFirst.mockImplementation(
+    async (args: { where?: Record<string, unknown> } | undefined) => {
+      const endWeightKg = args?.where?.endWeightKg;
+      if (endWeightKg === null) return open;
+      if (typeof endWeightKg === "object" && endWeightKg !== null) return lastClosed;
+      return null;
+    },
+  );
+}
 
 // ─── List Operations ─────────────────────────────────────────────
 
@@ -432,6 +481,33 @@ describe("enterTare", () => {
     expect(audit.data.details.newValue).toEqual({
       status: "FirstWeigh",
       tareWeightKg: 10_000,
+      roundNumber: 1,
+    });
+  });
+
+  it("opens bridge round 1 at the tare weight and adopts pre-tare photos", async () => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValueOnce({
+      id: 1,
+      status: "Queued",
+      tareWeightKg: null,
+      operationalGrade: "FIRST",
+    });
+    mockPrisma.bridgeRound.create.mockResolvedValueOnce({ id: 77, roundNumber: 1 });
+
+    await enterTare(1, 10_000, 5);
+
+    expect(mockPrisma.bridgeRound.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        truckOperationId: 1,
+        roundNumber: 1,
+        grade: "FIRST",
+        startWeightKg: 10_000,
+      }),
+    });
+    // Photos uploaded while Queued have no round; round 1 adopts them.
+    expect(mockPrisma.truckPhoto.updateMany).toHaveBeenCalledWith({
+      where: { truckOperationId: 1, bridgeRoundId: null },
+      data: { bridgeRoundId: 77 },
     });
   });
 
@@ -484,6 +560,7 @@ describe("confirmLoadingComplete", () => {
       loadingConfirmedAt: null,
       loaderId: null,
     });
+    mockRounds({ open: { id: 11, roundNumber: 1, grade: null } });
     mockPrisma.weighSession.findMany.mockResolvedValue([
       { weightTons: 5 },
       { weightTons: 4 },
@@ -521,6 +598,49 @@ describe("confirmLoadingComplete", () => {
     mockPrisma.truckPhoto.count.mockResolvedValueOnce(0);
     await expect(confirmLoadingComplete(1, 99)).rejects.toThrow(/صورة واحدة/);
   });
+
+  it("scopes session/photo requirements to the OPEN round, not the whole operation", async () => {
+    await confirmLoadingComplete(1, 99);
+
+    expect(mockPrisma.weighSession.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { bridgeRoundId: 11 } }),
+    );
+    expect(mockPrisma.truckPhoto.count).toHaveBeenCalledWith({
+      where: { bridgeRoundId: 11 },
+    });
+  });
+
+  it("stamps the loader confirmation and chosen grade onto the round", async () => {
+    await confirmLoadingComplete(1, 99, "SECOND");
+
+    expect(mockPrisma.bridgeRound.update).toHaveBeenCalledWith({
+      where: { id: 11 },
+      data: expect.objectContaining({
+        loaderId: 99,
+        loadingConfirmedAt: expect.any(Date),
+        grade: "SECOND",
+      }),
+    });
+    const audit = mockPrisma.auditLog.create.mock.calls[0][0];
+    expect(audit.data.details.newValue.roundNumber).toBe(1);
+    expect(audit.data.details.newValue.roundGrade).toBe("SECOND");
+  });
+
+  it("keeps the round's existing grade when none is passed", async () => {
+    mockRounds({ open: { id: 11, roundNumber: 2, grade: "FIRST" } });
+
+    await confirmLoadingComplete(1, 99);
+
+    expect(mockPrisma.bridgeRound.update).toHaveBeenCalledWith({
+      where: { id: 11 },
+      data: expect.objectContaining({ grade: "FIRST" }),
+    });
+  });
+
+  it("refuses when no open round exists", async () => {
+    mockRounds({ open: null });
+    await expect(confirmLoadingComplete(1, 99)).rejects.toThrow(/دورة قبان مفتوحة/);
+  });
 });
 
 // ─── 4. Record gross + 5. Net weight + 7. Block gross before confirmation ──
@@ -535,6 +655,9 @@ describe("enterGross", () => {
       grossWeightKg: null,
       loadingConfirmedAt: new Date("2026-04-22T10:00:00Z"),
       loaderId: 99,
+    });
+    mockRounds({
+      open: { id: 11, roundNumber: 1, grade: null, startWeightKg: 10_000 },
     });
     mockPrisma.weighSession.findMany.mockResolvedValue([{ weightTons: 15.05 }]);
     mockPrisma.truckOperation.update.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
@@ -594,13 +717,27 @@ describe("enterGross", () => {
     expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
   });
 
-  it("rejects gross <= tare (weight integrity)", async () => {
+  it("rejects gross <= round start weight (weight integrity)", async () => {
     await expect(enterGross(1, 10_000, 7)).rejects.toThrow(
-      /Gross weight must be greater than tare weight/,
+      /Gross weight must be greater than the round start weight/,
     );
     await expect(enterGross(1, 9_999, 7)).rejects.toThrow(
-      /Gross weight must be greater than tare weight/,
+      /Gross weight must be greater than the round start weight/,
     );
+  });
+
+  it("closes round 1 as final and marks it isFinal on exit", async () => {
+    await enterGross(1, 25_000, 7);
+
+    expect(mockPrisma.bridgeRound.update).toHaveBeenCalledWith({
+      where: { id: 11 },
+      data: expect.objectContaining({
+        endWeightKg: 25_000,
+        isFinal: true,
+      }),
+    });
+    // Final exit never opens a next round.
+    expect(mockPrisma.bridgeRound.create).not.toHaveBeenCalled();
   });
 
   it("prevents double-gross (CONFLICT)", async () => {
@@ -624,6 +761,333 @@ describe("enterGross", () => {
     ["Infinity", Number.POSITIVE_INFINITY],
   ])("rejects invalid gross weight = %s early", async (_l, kg) => {
     await expect(enterGross(1, kg, 7)).rejects.toThrow(ServiceError);
+  });
+});
+
+// ─── Multi-round: weigh-and-return cycle ───────────────────────
+
+describe("enterGross — exit='return' (multi-round)", () => {
+  beforeEach(() => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValue({
+      id: 1,
+      status: "LoadingComplete",
+      tareWeightKg: 10_000,
+      grossWeightKg: null,
+      loadingConfirmedAt: new Date("2026-06-10T08:00:00Z"),
+      loaderId: 99,
+    });
+    mockRounds({
+      open: { id: 11, roundNumber: 1, grade: "FIRST", startWeightKg: 10_000 },
+    });
+    mockPrisma.weighSession.findMany.mockResolvedValue([{ weightTons: 15 }]);
+    mockPrisma.truckOperation.update.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => ({
+        id: 1,
+        ...data,
+      }),
+    );
+    mockPrisma.bridgeRound.create.mockResolvedValue({ id: 12, roundNumber: 2 });
+  });
+
+  it("closes the round (not final), opens the next round chained at this weighing, and resets to FirstWeigh", async () => {
+    await enterGross(1, 25_000, 7, "return");
+
+    // Round 1 closed but NOT final.
+    expect(mockPrisma.bridgeRound.update).toHaveBeenCalledWith({
+      where: { id: 11 },
+      data: expect.objectContaining({ endWeightKg: 25_000, isFinal: false }),
+    });
+    // Round 2 opens at exactly the round-1 end weight — copied by the
+    // service, never typed by an operator.
+    expect(mockPrisma.bridgeRound.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        truckOperationId: 1,
+        roundNumber: 2,
+        grade: null,
+        startWeightKg: 25_000,
+      }),
+    });
+    // Operation-level gross stays empty — only the FINAL weighing sets it.
+    const opUpdate = mockPrisma.truckOperation.update.mock.calls[0][0];
+    expect(opUpdate.data.status).toBe("FirstWeigh");
+    expect(opUpdate.data).not.toHaveProperty("grossWeightKg");
+    // Two-role rule re-arms for the new round: loader must confirm again.
+    expect(opUpdate.data.loadingConfirmedAt).toBeNull();
+    expect(opUpdate.data.loaderId).toBeNull();
+  });
+
+  it("writes round_weighed_return audit with per-round net and next round number", async () => {
+    await enterGross(1, 25_000, 7, "return");
+
+    const audit = mockPrisma.auditLog.create.mock.calls[0][0];
+    expect(audit.data.details.event).toBe("round_weighed_return");
+    expect(audit.data.details.newValue).toMatchObject({
+      status: "FirstWeigh",
+      roundNumber: 1,
+      roundGrade: "FIRST",
+      roundStartWeightKg: 10_000,
+      roundEndWeightKg: 25_000,
+      roundNetKg: 15_000,
+      nextRoundNumber: 2,
+    });
+    expect(audit.data.details.newValue).not.toHaveProperty("netWeightKg");
+  });
+
+  it("validates against the ROUND start weight, not the original tare (round 2+)", async () => {
+    // Round 2: truck already carries 15t — bridge shows 25_000 going in.
+    mockRounds({
+      open: { id: 12, roundNumber: 2, grade: null, startWeightKg: 25_000 },
+    });
+
+    // 24_000 is far above the 10_000 tare but BELOW the round start — must fail.
+    await expect(enterGross(1, 24_000, 7, "return")).rejects.toThrow(
+      /round start weight/,
+    );
+    expect(mockPrisma.bridgeRound.update).not.toHaveBeenCalled();
+  });
+
+  it("computes per-round discrepancy from the round's own sessions and start weight", async () => {
+    // Round 2 starts at 25_000; internal sessions for THIS round total 5.05t;
+    // bridge says 30_300 → bridge net 5_300 vs internal 5_050 → 250 kg gap.
+    mockRounds({
+      open: { id: 12, roundNumber: 2, grade: "SECOND", startWeightKg: 25_000 },
+    });
+    mockPrisma.weighSession.findMany.mockResolvedValue([{ weightTons: 5.05 }]);
+
+    await enterGross(1, 30_300, 7, "return");
+
+    expect(mockPrisma.weighSession.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { bridgeRoundId: 12 } }),
+    );
+    const audit = mockPrisma.auditLog.create.mock.calls[0][0];
+    expect(audit.data.details.newValue.bridgeNetKg).toBe(5_300);
+    expect(audit.data.details.newValue.discrepancyKg).toBe(250);
+    expect(audit.data.details.newValue.discrepancyWarning).toBe(true);
+  });
+
+  it("final exit on a later round records operation gross = last weighing", async () => {
+    mockRounds({
+      open: { id: 12, roundNumber: 2, grade: null, startWeightKg: 25_000 },
+    });
+    mockPrisma.weighSession.findMany.mockResolvedValue([{ weightTons: 5 }]);
+
+    await enterGross(1, 30_000, 7, "final");
+
+    expect(mockPrisma.bridgeRound.update).toHaveBeenCalledWith({
+      where: { id: 12 },
+      data: expect.objectContaining({ endWeightKg: 30_000, isFinal: true }),
+    });
+    const opUpdate = mockPrisma.truckOperation.update.mock.calls[0][0];
+    expect(opUpdate.data.grossWeightKg).toBe(30_000);
+    expect(opUpdate.data.status).toBe("SecondWeigh");
+
+    const audit = mockPrisma.auditLog.create.mock.calls[0][0];
+    expect(audit.data.details.event).toBe("gross_recorded");
+    // Operation net spans the WHOLE visit (final gross - original tare)…
+    expect(audit.data.details.newValue.netWeightKg).toBe(20_000);
+    // …while the round net covers only this round.
+    expect(audit.data.details.newValue.roundNetKg).toBe(5_000);
+  });
+
+  it("still requires loader confirmation before a return weighing", async () => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValue({
+      id: 1,
+      status: "OnScale",
+      tareWeightKg: 10_000,
+      grossWeightKg: null,
+      loadingConfirmedAt: null,
+      loaderId: null,
+    });
+
+    await expect(enterGross(1, 25_000, 7, "return")).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
+});
+
+// ─── Multi-round: tare correction freeze ───────────────────────
+
+describe("correctTare — round chain protection", () => {
+  beforeEach(() => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValue({
+      id: 1,
+      status: "OnScale",
+      tareWeightKg: 10_000,
+      version: 3,
+    });
+    mockPrisma.truckOperation.updateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("corrects tare and keeps round 1's start weight in sync", async () => {
+    mockRounds({ open: { id: 11, roundNumber: 1 }, lastClosed: null });
+
+    await correctTare(1, 9_800, 3, 7);
+
+    expect(mockPrisma.bridgeRound.updateMany).toHaveBeenCalledWith({
+      where: { truckOperationId: 1, roundNumber: 1 },
+      data: expect.objectContaining({ startWeightKg: 9_800 }),
+    });
+    const audit = mockPrisma.auditLog.create.mock.calls[0][0];
+    expect(audit.data.details.action).toBe("tare_correction");
+    expect(audit.data.details.newTareWeightKg).toBe(9_800);
+  });
+
+  it("refuses once any round is closed — the tare is chained into later rounds", async () => {
+    mockRounds({
+      open: { id: 12, roundNumber: 2, startWeightKg: 25_000 },
+      lastClosed: { id: 11, roundNumber: 1, endWeightKg: 25_000 },
+    });
+
+    await expect(correctTare(1, 9_800, 3, 7)).rejects.toThrow(
+      /استخدم تصحيح آخر وزنة/,
+    );
+    expect(mockPrisma.truckOperation.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Multi-round: gross correction targets the last closed round ──
+
+describe("correctGross — last closed round", () => {
+  beforeEach(() => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValue({
+      id: 1,
+      status: "SecondWeigh",
+      tareWeightKg: 10_000,
+      grossWeightKg: 30_000,
+      version: 5,
+    });
+    mockPrisma.truckOperation.updateMany.mockResolvedValue({ count: 1 });
+    mockPrisma.weighSession.findMany.mockResolvedValue([{ weightTons: 5 }]);
+  });
+
+  it("corrects a FINAL round: updates the round AND the operation gross", async () => {
+    mockRounds({
+      lastClosed: {
+        id: 12,
+        roundNumber: 2,
+        startWeightKg: 25_000,
+        endWeightKg: 30_000,
+        isFinal: true,
+      },
+    });
+
+    await correctGross(1, 30_500, 5, 7);
+
+    expect(mockPrisma.truckOperation.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 1, version: 5 },
+        data: expect.objectContaining({ grossWeightKg: 30_500 }),
+      }),
+    );
+    expect(mockPrisma.bridgeRound.update).toHaveBeenCalledWith({
+      where: { id: 12 },
+      data: expect.objectContaining({ endWeightKg: 30_500 }),
+    });
+    const audit = mockPrisma.auditLog.create.mock.calls[0][0];
+    expect(audit.data.details.action).toBe("gross_correction");
+    expect(audit.data.details.roundNumber).toBe(2);
+    expect(audit.data.details.isFinalRound).toBe(true);
+    expect(audit.data.details.oldGrossWeightKg).toBe(30_000);
+    expect(audit.data.details.newGrossWeightKg).toBe(30_500);
+  });
+
+  it("corrects a MID-VISIT round and cascades the new end weight into the next round's start", async () => {
+    // Truck is back inside loading round 2; round 1's weighing was mistyped.
+    mockPrisma.truckOperation.findUnique.mockResolvedValue({
+      id: 1,
+      status: "OnScale",
+      tareWeightKg: 10_000,
+      grossWeightKg: null,
+      version: 5,
+    });
+    mockRounds({
+      lastClosed: {
+        id: 11,
+        roundNumber: 1,
+        startWeightKg: 10_000,
+        endWeightKg: 25_000,
+        isFinal: false,
+      },
+    });
+    mockPrisma.bridgeRound.updateMany.mockResolvedValue({ count: 1 });
+
+    await correctGross(1, 24_700, 5, 7);
+
+    // Operation gross untouched (no final weighing yet) — version bump only.
+    const opUpdate = mockPrisma.truckOperation.updateMany.mock.calls[0][0];
+    expect(opUpdate.data).not.toHaveProperty("grossWeightKg");
+    expect(opUpdate.data.version).toEqual({ increment: 1 });
+    // The chain stays intact: round 2 now starts at the corrected weight.
+    expect(mockPrisma.bridgeRound.updateMany).toHaveBeenCalledWith({
+      where: { truckOperationId: 1, roundNumber: 2 },
+      data: { startWeightKg: 24_700 },
+    });
+    const audit = mockPrisma.auditLog.create.mock.calls[0][0];
+    expect(audit.data.details.cascadedToNextRound).toBe(true);
+    expect(audit.data.details.isFinalRound).toBe(false);
+  });
+
+  it("rejects a correction at or below the round's start weight", async () => {
+    mockRounds({
+      lastClosed: {
+        id: 12,
+        roundNumber: 2,
+        startWeightKg: 25_000,
+        endWeightKg: 30_000,
+        isFinal: true,
+      },
+    });
+
+    await expect(correctGross(1, 25_000, 5, 7)).rejects.toThrow(
+      /أكبر من وزن بداية الدورة/,
+    );
+    expect(mockPrisma.truckOperation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("refuses when no external weighing exists yet", async () => {
+    mockRounds({ open: { id: 11, roundNumber: 1 }, lastClosed: null });
+
+    await expect(correctGross(1, 25_000, 5, 7)).rejects.toThrow(
+      /لا توجد وزنة خارجية/,
+    );
+  });
+});
+
+// ─── Multi-round: closed-round sessions are frozen ─────────────
+
+describe("weigh sessions of closed rounds are immutable", () => {
+  const oldRoundSession = {
+    id: 10,
+    truckOperationId: 1,
+    bridgeRoundId: 11, // belongs to round 1 (closed)
+    sessionNumber: 1,
+    sizeId: 3,
+    bundleCount: 5,
+    weightTons: 6,
+    version: 1,
+  };
+
+  beforeEach(() => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValue({
+      id: 1,
+      status: "OnScale",
+    });
+    // Round 2 is now open; the session above belongs to closed round 1.
+    mockRounds({ open: { id: 12, roundNumber: 2 } });
+    mockPrisma.weighSession.findUnique.mockResolvedValue(oldRoundSession);
+  });
+
+  it("rejects editing a session from a previous round", async () => {
+    await expect(
+      editWeighSession(1, 10, 1, { weightTons: 7 }, 7),
+    ).rejects.toThrow(/دورة قبان سابقة/);
+  });
+
+  it("rejects deleting a session from a previous round", async () => {
+    await expect(deleteWeighSession(1, 10, 1, 7)).rejects.toThrow(
+      /دورة قبان سابقة/,
+    );
+    expect(mockPrisma.weighSession.deleteMany).not.toHaveBeenCalled();
   });
 });
 
@@ -727,6 +1191,15 @@ describe("reopenBeforeGross", () => {
     expect(updateCall.data.loaderId).toBeNull();
     expect(updateCall.data.lastReopenedAt).toBeInstanceOf(Date);
 
+    // The open round's confirmation is reset in lock-step with the operation.
+    expect(mockPrisma.bridgeRound.updateMany).toHaveBeenCalledWith({
+      where: { truckOperationId: 1, endWeightKg: null },
+      data: expect.objectContaining({
+        loadingConfirmedAt: null,
+        loaderId: null,
+      }),
+    });
+
     const audit = mockPrisma.auditLog.create.mock.calls[0][0];
     expect(audit.data.details.event).toBe("session_reopened");
     expect(audit.data.details.previousValue.loaderId).toBe(99);
@@ -750,6 +1223,7 @@ describe("deleteWeighSession", () => {
   const weighRow = {
     id: 10,
     truckOperationId: 1,
+    bridgeRoundId: 11,
     sessionNumber: 2,
     sizeId: 3,
     bundleCount: 5,
@@ -762,6 +1236,7 @@ describe("deleteWeighSession", () => {
       id: 1,
       status: "OnScale",
     });
+    mockRounds({ open: { id: 11, roundNumber: 1 } });
     mockPrisma.weighSession.findUnique.mockResolvedValue(weighRow);
     mockPrisma.weighSession.deleteMany.mockResolvedValue({ count: 1 });
     mockPrisma.weighSession.count.mockResolvedValue(1);

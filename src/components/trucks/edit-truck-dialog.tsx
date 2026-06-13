@@ -23,6 +23,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { DestinationSelect } from "@/components/destinations/destination-select";
 import { createClientIdempotencyKey } from "@/lib/browser-idempotency-key";
 import { GRADE_LABELS } from "@/lib/truck-grade";
+import { sizeCodeSupportsGrade, sizeCodeToKind } from "@/lib/material-kind";
 import { notesForPatch, operationalGradeIfChanged } from "@/lib/truck-edit-ui";
 import { Plus, Trash2 } from "lucide-react";
 import type { SalesOrderGrade } from "@prisma/client";
@@ -43,6 +44,8 @@ interface SizeOption {
 interface RequestItemRow {
   key: number;
   sizeCode: string;
+  /** Grade for this line ("" = none). Same size may repeat once per grade. */
+  grade: SalesOrderGrade | "";
   bundleCount: string;
   requestedTons: string;
 }
@@ -60,6 +63,7 @@ export interface EditableTruck {
   operationalGrade: SalesOrderGrade | null;
   requestItems: {
     sizeId: number;
+    grade: SalesOrderGrade | null;
     bundleCount: number | null;
     requestedTons: string | null;
     size: { id: number; code: string; displayName: string; isBundleType: boolean };
@@ -101,6 +105,7 @@ function populateFormFromTruck(
     truck.requestItems.map((item) => ({
       key: ++rowKeyCounter,
       sizeCode: item.size.code,
+      grade: item.grade ?? "",
       bundleCount: item.bundleCount ? String(item.bundleCount) : "",
       requestedTons: item.requestedTons ? String(item.requestedTons) : "",
     })),
@@ -236,12 +241,24 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
     [customers],
   );
 
-  const usedSizeCodes = new Set(requestItems.map((r) => r.sizeCode).filter(Boolean));
+  // Uniqueness is per (size, grade): "12mm FIRST" and "12mm SECOND" may
+  // coexist on the same request.
+  const usedSizeGradeKeys = new Set(
+    requestItems.filter((r) => r.sizeCode).map((r) => `${r.sizeCode}:${r.grade}`),
+  );
 
   const addRequestItem = () => {
     setRequestItems((prev) => [
       ...prev,
-      { key: ++rowKeyCounter, sizeCode: "", bundleCount: "", requestedTons: "" },
+      {
+        key: ++rowKeyCounter,
+        sizeCode: "",
+        // New rows inherit the operation-level grade so the common
+        // single-grade flow never needs the per-row grade field.
+        grade: isRebarLoad ? operationalGrade : "",
+        bundleCount: "",
+        requestedTons: "",
+      },
     ]);
   };
 
@@ -251,19 +268,30 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
 
   const updateRequestItem = (
     key: number,
-    field: "sizeCode" | "bundleCount" | "requestedTons",
+    field: "sizeCode" | "grade" | "bundleCount" | "requestedTons",
     value: string,
   ) => {
     setRequestItems((prev) =>
-      prev.map((row) =>
-        row.key === key
-          ? {
-              ...row,
-              [field]: value,
-              ...(field === "sizeCode" ? { bundleCount: "", requestedTons: "" } : {}),
-            }
-          : row,
-      ),
+      prev.map((row) => {
+        if (row.key !== key) return row;
+        if (field === "sizeCode") {
+          const kind = value ? sizeCodeToKind(value) : null;
+          const grade =
+            kind != null && kind !== "REBAR"
+              ? ""
+              : kind === "REBAR"
+                ? row.grade || operationalGrade || ""
+                : row.grade;
+          return {
+            ...row,
+            sizeCode: value,
+            bundleCount: "",
+            requestedTons: "",
+            grade,
+          };
+        }
+        return { ...row, [field]: value };
+      }),
     );
   };
 
@@ -282,15 +310,27 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
 
     const items: {
       sizeId: number;
+      grade: SalesOrderGrade | null;
       bundleCount: number | null;
       requestedTons: number | null;
     }[] = [];
+    const seenKeys = new Set<string>();
     for (const row of requestItems.filter((x) => x.sizeCode)) {
       const size = sizes.find((s) => s.code === row.sizeCode);
       if (!size) {
         toast.error("قياس غير صالح، أعد تحميل الصفحة والمحاولة");
         return;
       }
+      const grade =
+        isRebarLoad && row.grade && sizeCodeSupportsGrade(row.sizeCode)
+          ? row.grade
+          : null;
+      const dupKey = `${size.id}:${grade ?? ""}`;
+      if (seenKeys.has(dupKey)) {
+        toast.error("لا يمكن تكرار نفس القياس بنفس النخب في الطلبية");
+        return;
+      }
+      seenKeys.add(dupKey);
       const bundleCount = row.bundleCount ? Number(row.bundleCount) : null;
       const requestedTons = row.requestedTons ? Number(row.requestedTons) : null;
       if (size.isBundleType) {
@@ -304,6 +344,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
       }
       items.push({
         sizeId: size.id,
+        grade,
         bundleCount: size.isBundleType ? bundleCount : null,
         requestedTons: size.isBundleType ? null : requestedTons,
       });
@@ -366,7 +407,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-lg max-h-[90vh] min-w-0 overflow-x-hidden overflow-y-auto">
         <DialogHeader>
           <DialogTitle>تعديل الشاحنة #{truckId ?? truck?.id}</DialogTitle>
         </DialogHeader>
@@ -377,7 +418,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
             <div className="h-24 animate-pulse rounded-md bg-muted" />
           </div>
         ) : (
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="min-w-0 space-y-4">
           {requestItemsOnly && (
             <p className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
               الشاحنة معتمدة، لذلك يمكن تعديل تفاصيل الطلبية فقط قبل بدء الوزن.
@@ -432,7 +473,10 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
               onValueChange={(v) => {
                 const rebar = v === "REBAR";
                 setIsRebarLoad(rebar);
-                if (!rebar) setOperationalGrade("");
+                if (!rebar) {
+                  setOperationalGrade("");
+                  setRequestItems((prev) => prev.map((r) => ({ ...r, grade: "" })));
+                }
               }}
               disabled={requestItemsOnly || saving}
             >
@@ -509,13 +553,13 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
               </Button>
             </div>
 
-            <div className="space-y-2">
+            <div className="min-w-0 space-y-2">
               {requestItems.map((row) => {
                 const selectedSize = sizes.find((s) => s.code === row.sizeCode);
                 return (
                   <div
                     key={row.key}
-                    className="grid grid-cols-1 gap-2 rounded-md border p-2 sm:grid-cols-[1fr_7rem_auto]"
+                    className="min-w-0 space-y-2 rounded-md border p-2"
                   >
                     <Select
                       value={row.sizeCode}
@@ -524,7 +568,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
                       }
                       disabled={saving}
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger className="w-full min-w-0">
                         <SelectValue placeholder="القياس" />
                       </SelectTrigger>
                       <SelectContent>
@@ -532,7 +576,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
                           .filter(
                             (s) =>
                               s.code === row.sizeCode ||
-                              !usedSizeCodes.has(s.code),
+                              !usedSizeGradeKeys.has(`${s.code}:${row.grade}`),
                           )
                           .map((s) => (
                             <SelectItem key={s.id} value={s.code}>
@@ -541,40 +585,67 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
                           ))}
                       </SelectContent>
                     </Select>
-                    {selectedSize?.isBundleType === false ? (
-                      <Input
-                        type="number"
-                        min={0}
-                        step="0.001"
-                        value={row.requestedTons}
-                        onChange={(e) =>
-                          updateRequestItem(row.key, "requestedTons", e.target.value)
+                    {isRebarLoad && sizeCodeSupportsGrade(row.sizeCode) && (
+                      <Select
+                        value={row.grade}
+                        onValueChange={(v) =>
+                          updateRequestItem(row.key, "grade", v ?? "")
                         }
-                        placeholder="طن"
                         disabled={saving}
-                      />
-                    ) : (
-                      <Input
-                        type="number"
-                        min={1}
-                        value={row.bundleCount}
-                        onChange={(e) =>
-                          updateRequestItem(row.key, "bundleCount", e.target.value)
-                        }
-                        placeholder="ربطات"
-                        disabled={saving}
-                      />
+                      >
+                        <SelectTrigger className="w-full min-w-0">
+                          <SelectValue placeholder="النخب" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">بلا نخب</SelectItem>
+                          {(Object.entries(GRADE_LABELS) as [SalesOrderGrade, string][]).map(
+                            ([key, label]) => (
+                              <SelectItem key={key} value={key}>
+                                {label}
+                              </SelectItem>
+                            ),
+                          )}
+                        </SelectContent>
+                      </Select>
                     )}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive"
-                      onClick={() => removeRequestItem(row.key)}
-                      disabled={saving}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex min-w-0 items-center gap-2">
+                      {selectedSize?.isBundleType === false ? (
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.001"
+                          className="min-w-0 flex-1"
+                          value={row.requestedTons}
+                          onChange={(e) =>
+                            updateRequestItem(row.key, "requestedTons", e.target.value)
+                          }
+                          placeholder="طن"
+                          disabled={saving}
+                        />
+                      ) : (
+                        <Input
+                          type="number"
+                          min={1}
+                          className="min-w-0 flex-1"
+                          value={row.bundleCount}
+                          onChange={(e) =>
+                            updateRequestItem(row.key, "bundleCount", e.target.value)
+                          }
+                          placeholder="ربطات"
+                          disabled={saving}
+                        />
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="shrink-0 text-destructive"
+                        onClick={() => removeRequestItem(row.key)}
+                        disabled={saving}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 );
               })}
