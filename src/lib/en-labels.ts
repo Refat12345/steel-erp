@@ -10,6 +10,7 @@
  */
 
 import type { SalesOrderGrade, TruckStatus } from "@prisma/client";
+import type { ReportProductFilter } from "@/lib/material-kind";
 
 const CITY_EN: Record<string, string> = {
   دمشق: "Damascus",
@@ -97,6 +98,17 @@ export function gradeLabelEn(grade: SalesOrderGrade | null | undefined): string 
   return "—";
 }
 
+/** English product filter label (rebar grade, shortbar, scrap). */
+export function productFilterLabelEn(
+  filter: ReportProductFilter | null | undefined,
+): string {
+  if (filter === "FIRST") return "First grade";
+  if (filter === "SECOND") return "Second grade";
+  if (filter === "SHORTBAR") return "Short bars";
+  if (filter === "SCRAP") return "Scrap";
+  return "—";
+}
+
 /**
  * English tonnage note — mirrors TONNAGE_NOTE / buildNote in report.service.ts.
  * For cancelled trucks the raw (Arabic) cancel reason is passed through unchanged.
@@ -104,15 +116,18 @@ export function gradeLabelEn(grade: SalesOrderGrade | null | undefined): string 
 export function tonnageNoteEn(
   status: string,
   cancelReason: string | null | undefined,
+  isPartialVisit = false,
 ): string | null {
+  const parts: string[] = [];
   if (status === "excluded_cancelled") {
-    return cancelReason?.trim() ? cancelReason.trim() : null;
+    if (cancelReason?.trim()) parts.push(cancelReason.trim());
+  } else if (status === "excluded_late_close") {
+    parts.push("Completed after the operational day ended");
+  } else if (status === "excluded_open") {
+    parts.push("Not completed yet");
   }
-  if (status === "excluded_late_close") {
-    return "Completed after the operational day ended";
+  if (isPartialVisit) {
+    parts.push("Mixed visit — filtered product portion only");
   }
-  if (status === "excluded_open") {
-    return "Not completed yet";
-  }
-  return null;
+  return parts.length > 0 ? parts.join(" · ") : null;
 }

@@ -19,9 +19,10 @@ import {
 
 type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
-async function loadInternalTotalTons(tx: TxClient, truckId: number): Promise<number> {
+/** Internal tons for one bridge round (sum of its weigh sessions). */
+async function loadRoundInternalTons(tx: TxClient, roundId: number): Promise<number> {
   const sessions = await tx.weighSession.findMany({
-    where: { truckOperationId: truckId },
+    where: { bridgeRoundId: roundId },
     select: { weightTons: true },
   });
   return sessions
@@ -29,13 +30,25 @@ async function loadInternalTotalTons(tx: TxClient, truckId: number): Promise<num
     .toNumber();
 }
 
+/**
+ * The currently open bridge round (endWeightKg = null). At most one exists
+ * per operation (partial unique index bridge_rounds_open_round_uniq).
+ */
+async function getOpenRound(tx: TxClient, truckId: number) {
+  return tx.bridgeRound.findFirst({
+    where: { truckOperationId: truckId, endWeightKg: null },
+  });
+}
+
+// `LoadingComplete → FirstWeigh` is the multi-round path: the truck was
+// weighed on the external bridge and returned to load the next round.
 const VALID_TRANSITIONS: Record<TruckStatus, TruckStatus[]> = {
   Queued: ["FirstWeigh", "Cancelled"],
   Approved: ["FirstWeigh", "Cancelled"],
   FirstWeigh: ["OnScale", "Cancelled"],
   Loading: ["OnScale", "Cancelled"],
   OnScale: ["LoadingComplete", "Cancelled"],
-  LoadingComplete: ["OnScale", "SecondWeigh", "Cancelled"],
+  LoadingComplete: ["OnScale", "FirstWeigh", "SecondWeigh", "Cancelled"],
   SecondWeigh: ["Completed", "Cancelled"],
   Completed: [],
   Cancelled: [],
@@ -53,6 +66,8 @@ function assertTransition(current: TruckStatus, next: TruckStatus) {
 
 export interface RequestItemInput {
   sizeId: number;
+  /** Grade for this line — lets the same size appear once per grade. */
+  grade?: SalesOrderGrade | null;
   bundleCount?: number | null;
   requestedTons?: number | null;
 }
@@ -132,11 +147,13 @@ async function validateTruckReferences(
 async function validateTruckRequestItems(tx: TxClient, requestItems?: RequestItemInput[]) {
   if (!requestItems?.length) return;
 
-  const sizeIds = requestItems.map((i) => i.sizeId);
-  const uniqueIds = new Set(sizeIds);
-  if (uniqueIds.size !== sizeIds.length) {
-    throw new ServiceError("لا يمكن تكرار نفس القياس في الطلبية");
+  // Uniqueness is per (size, grade): "12mm FIRST" and "12mm SECOND" may
+  // coexist; "12mm" without grade may appear only once.
+  const keys = requestItems.map((i) => `${i.sizeId}:${i.grade ?? ""}`);
+  if (new Set(keys).size !== keys.length) {
+    throw new ServiceError("لا يمكن تكرار نفس القياس بنفس النخب في الطلبية");
   }
+  const sizeIds = [...new Set(requestItems.map((i) => i.sizeId))];
   const sizes = await tx.sizeLookup.findMany({
     where: { id: { in: sizeIds }, isActive: true },
   });
@@ -192,6 +209,7 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
               data: data.requestItems.map((item) => ({
                 truckOperationId: created.id,
                 sizeId: item.sizeId,
+                grade: item.grade ?? null,
                 bundleCount: item.bundleCount ?? null,
                 requestedTons: item.requestedTons ?? null,
               })),
@@ -271,7 +289,7 @@ export async function updateTruckBeforeWeigh(
           include: {
             requestItems: {
               orderBy: { sizeId: "asc" },
-              select: { sizeId: true, bundleCount: true, requestedTons: true },
+              select: { sizeId: true, grade: true, bundleCount: true, requestedTons: true },
             },
           },
         });
@@ -385,6 +403,7 @@ export async function updateTruckBeforeWeigh(
           operationalGrade: truck.operationalGrade,
           requestItems: truck.requestItems.map((item) => ({
             sizeId: item.sizeId,
+            grade: item.grade,
             bundleCount: item.bundleCount,
             requestedTons: item.requestedTons ? Number(item.requestedTons) : null,
           })),
@@ -427,6 +446,20 @@ export async function updateTruckBeforeWeigh(
           data: updateData,
         });
 
+        // Keep the open (still unconfirmed) round's grade in sync with the
+        // operation-level grade — round 1 inherits it at tare time, so an
+        // edit before loading starts must propagate.
+        if (truck.status === "FirstWeigh" && data.operationalGrade !== undefined) {
+          await tx.bridgeRound.updateMany({
+            where: {
+              truckOperationId: truckId,
+              endWeightKg: null,
+              loadingConfirmedAt: null,
+            },
+            data: { grade: data.operationalGrade },
+          });
+        }
+
         if (data.requestItems !== undefined) {
           await tx.truckRequestItem.deleteMany({ where: { truckOperationId: truckId } });
           if (data.requestItems.length > 0) {
@@ -434,6 +467,7 @@ export async function updateTruckBeforeWeigh(
               data: data.requestItems.map((item) => ({
                 truckOperationId: truckId,
                 sizeId: item.sizeId,
+                grade: item.grade ?? null,
                 bundleCount: item.bundleCount ?? null,
                 requestedTons: item.requestedTons ?? null,
               })),
@@ -517,13 +551,33 @@ export async function enterTare(truckId: number, weightKg: number, userId: numbe
 
         assertTransition(truck.status, "FirstWeigh");
 
+        const tareTime = new Date();
         const updated = await tx.truckOperation.update({
           where: { id: truckId },
           data: {
             tareWeightKg: weightKg,
-            tareTime: new Date(),
+            tareTime,
             status: "FirstWeigh",
           },
+        });
+
+        // Open bridge round 1: starts at the tare weight, inherits the
+        // operation-level grade as a default (loader can override at
+        // loading-complete time).
+        const round = await tx.bridgeRound.create({
+          data: {
+            truckOperationId: truckId,
+            roundNumber: 1,
+            grade: truck.operationalGrade ?? null,
+            startWeightKg: weightKg,
+            startTime: tareTime,
+          },
+        });
+
+        // Adopt photos uploaded before the tare (no round existed yet).
+        await tx.truckPhoto.updateMany({
+          where: { truckOperationId: truckId, bridgeRoundId: null },
+          data: { bridgeRoundId: round.id },
         });
 
         await logAudit(tx, {
@@ -534,7 +588,7 @@ export async function enterTare(truckId: number, weightKg: number, userId: numbe
           details: {
             event: "tare_recorded",
             previousValue: { status: truck.status, tareWeightKg: null },
-            newValue: { status: "FirstWeigh", tareWeightKg: weightKg },
+            newValue: { status: "FirstWeigh", tareWeightKg: weightKg, roundNumber: 1 },
           },
         });
 
@@ -569,17 +623,30 @@ export async function correctTare(
           throw new ServiceError("لا يمكن تصحيح وزن الفارغ بعد إدخال وزن المحمّل");
         }
 
+        // Once any round is closed its end weight chains into the next
+        // round's start — changing the tare then would break the chain.
+        const closedRound = await tx.bridgeRound.findFirst({
+          where: { truckOperationId: truckId, endWeightKg: { not: null } },
+          select: { id: true },
+        });
+        if (closedRound) {
+          throw new ServiceError(
+            "لا يمكن تصحيح وزن الفارغ بعد تسجيل وزنة خارجية — استخدم تصحيح آخر وزنة",
+          );
+        }
+
         const oldWeight = truck.tareWeightKg ? Number(truck.tareWeightKg) : null;
 
         // Optimistic lock: update only if the version the client saw is still
         // the current version. Two operators correcting at the same time will
         // both target the same expectedVersion; only the first commits, the
         // second sees count=0 and is asked to reload.
+        const correctedAt = new Date();
         const result = await tx.truckOperation.updateMany({
           where: { id: truckId, version: expectedVersion },
           data: {
             tareWeightKg: newWeightKg,
-            tareTime: new Date(),
+            tareTime: correctedAt,
             version: { increment: 1 },
           },
         });
@@ -588,6 +655,12 @@ export async function correctTare(
             "تم تعديل السجل من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
           );
         }
+
+        // Round 1 starts at the tare — keep its start weight in sync.
+        await tx.bridgeRound.updateMany({
+          where: { truckOperationId: truckId, roundNumber: 1 },
+          data: { startWeightKg: newWeightKg, startTime: correctedAt },
+        });
 
         const updated = await tx.truckOperation.findUnique({ where: { id: truckId } });
 
@@ -612,7 +685,7 @@ export async function correctTare(
   );
 }
 
-// ─── Correct Gross (before close only) ────────────────────────────
+// ─── Correct Gross (last external weighing, before close only) ────
 
 export async function correctGross(
   truckId: number,
@@ -628,42 +701,79 @@ export async function correctGross(
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
         if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
 
-        if (truck.status !== "SecondWeigh") {
+        const allowed: TruckStatus[] = [
+          "FirstWeigh",
+          "OnScale",
+          "LoadingComplete",
+          "SecondWeigh",
+        ];
+        if (!allowed.includes(truck.status)) {
           throw new ServiceError("لا يمكن تصحيح وزن المحمّل إلا قبل الإغلاق النهائي");
         }
 
-        if (!truck.tareWeightKg) {
-          throw new ServiceError("يجب إدخال وزن الفارغ أولاً");
+        // Only the LAST closed round may be corrected: earlier rounds' end
+        // weights are already chained into later rounds that may be closed.
+        const round = await tx.bridgeRound.findFirst({
+          where: { truckOperationId: truckId, endWeightKg: { not: null } },
+          orderBy: { roundNumber: "desc" },
+        });
+        if (!round) {
+          throw new ServiceError("لا توجد وزنة خارجية لتصحيحها");
         }
-        if (new Decimal(newWeightKg).lte(truck.tareWeightKg)) {
-          throw new ServiceError("وزن المحمّل يجب أن يكون أكبر من وزن الفارغ");
+
+        const startKg = Number(round.startWeightKg);
+        if (new Decimal(newWeightKg).lte(round.startWeightKg)) {
+          throw new ServiceError(
+            "وزن المحمّل يجب أن يكون أكبر من وزن بداية الدورة",
+          );
         }
-        const grossError = validateGrossWeight(newWeightKg, Number(truck.tareWeightKg));
+        const grossError = validateGrossWeight(newWeightKg, startKg);
         if (grossError) throw new ServiceError(grossError);
 
-        const internalTotalTons = await loadInternalTotalTons(tx, truckId);
+        const internalTotalTons = await loadRoundInternalTons(tx, round.id);
         const discrepancyFields = buildWeighbridgeDiscrepancyAuditFields({
-          tareKg: Number(truck.tareWeightKg),
+          tareKg: startKg,
           grossKg: newWeightKg,
           internalTotalTons,
         });
 
-        const oldWeight = truck.grossWeightKg ? Number(truck.grossWeightKg) : null;
+        const oldWeight = Number(round.endWeightKg);
+        const correctedAt = new Date();
 
-        // Optimistic lock — see correctTare for the full rationale.
+        // Optimistic lock — see correctTare for the full rationale. The
+        // operation-level version guards both the final-gross case and the
+        // mid-visit case (every correction bumps it).
         const result = await tx.truckOperation.updateMany({
           where: { id: truckId, version: expectedVersion },
-          data: {
-            grossWeightKg: newWeightKg,
-            grossTime: new Date(),
-            version: { increment: 1 },
-          },
+          data: round.isFinal
+            ? {
+                grossWeightKg: newWeightKg,
+                grossTime: correctedAt,
+                version: { increment: 1 },
+              }
+            : { version: { increment: 1 } },
         });
         if (result.count === 0) {
           throw new ServiceError(
             "تم تعديل السجل من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
           );
         }
+
+        await tx.bridgeRound.update({
+          where: { id: round.id },
+          data: {
+            endWeightKg: newWeightKg,
+            endTime: correctedAt,
+            version: { increment: 1 },
+          },
+        });
+
+        // Cascade: the corrected end weight is the start weight of the next
+        // (open) round — keep the chain intact.
+        const cascaded = await tx.bridgeRound.updateMany({
+          where: { truckOperationId: truckId, roundNumber: round.roundNumber + 1 },
+          data: { startWeightKg: newWeightKg },
+        });
 
         const updated = await tx.truckOperation.findUnique({ where: { id: truckId } });
 
@@ -674,6 +784,9 @@ export async function correctGross(
           entityId: String(truckId),
           details: {
             action: "gross_correction",
+            roundNumber: round.roundNumber,
+            isFinalRound: round.isFinal,
+            cascadedToNextRound: cascaded.count > 0,
             oldGrossWeightKg: oldWeight,
             newGrossWeightKg: newWeightKg,
             expectedVersion,
@@ -681,7 +794,10 @@ export async function correctGross(
           },
         });
 
-        logger.info({ truckId, oldWeight, newWeightKg }, "gross corrected");
+        logger.info(
+          { truckId, roundNumber: round.roundNumber, oldWeight, newWeightKg },
+          "gross corrected",
+        );
         return updated!;
       },
       { isolationLevel: "Serializable" },
@@ -732,6 +848,12 @@ export async function enterWeighSession(
           throw new ServiceError("لا يمكن إضافة وزنة في الحالة الحالية");
         }
 
+        const openRound = await getOpenRound(tx, truckId);
+        if (!openRound) {
+          // Defensive: FirstWeigh/OnScale always implies an open round.
+          throw new ServiceError("لا توجد دورة قبان مفتوحة لهذه العملية");
+        }
+
         if (data.sizeId) {
           const size = await tx.sizeLookup.findUnique({ where: { id: data.sizeId } });
           if (!size || !size.isActive) throw new ServiceError("القياس غير صالح");
@@ -746,6 +868,7 @@ export async function enterWeighSession(
         const session = await tx.weighSession.create({
           data: {
             truckOperationId: truckId,
+            bridgeRoundId: openRound.id,
             sessionNumber: nextNumber,
             sizeId: data.sizeId || null,
             bundleCount: data.bundleCount || null,
@@ -767,6 +890,7 @@ export async function enterWeighSession(
           entityId: String(session.id),
           details: {
             truckId,
+            roundNumber: openRound.roundNumber,
             sessionNumber: nextNumber,
             weightTons: data.weightTons,
             sizeId: data.sizeId,
@@ -803,6 +927,15 @@ export async function editWeighSession(
         const session = await tx.weighSession.findUnique({ where: { id: sessionId } });
         if (!session || session.truckOperationId !== truckId) {
           throw new ServiceError("الوزنة غير موجودة", "NOT_FOUND");
+        }
+
+        // Sessions of an already-weighed round are frozen — their round's
+        // external net is recorded and must stay reconcilable.
+        const openRound = await getOpenRound(tx, truckId);
+        if (!openRound || session.bridgeRoundId !== openRound.id) {
+          throw new ServiceError(
+            "لا يمكن تعديل وزنة تعود لدورة قبان سابقة بعد تسجيل وزنتها الخارجية",
+          );
         }
 
         if (data.weightTons !== undefined && data.weightTons <= 0) {
@@ -880,6 +1013,7 @@ export async function deleteWeighSession(
           select: {
             id: true,
             truckOperationId: true,
+            bridgeRoundId: true,
             sessionNumber: true,
             sizeId: true,
             bundleCount: true,
@@ -889,6 +1023,15 @@ export async function deleteWeighSession(
         });
         if (!session || session.truckOperationId !== truckId) {
           throw new ServiceError("الوزنة غير موجودة", "NOT_FOUND");
+        }
+
+        // Same freeze rule as editWeighSession: only the open round's
+        // sessions may be deleted.
+        const openRoundForDelete = await getOpenRound(tx, truckId);
+        if (!openRoundForDelete || session.bridgeRoundId !== openRoundForDelete.id) {
+          throw new ServiceError(
+            "لا يمكن حذف وزنة تعود لدورة قبان سابقة بعد تسجيل وزنتها الخارجية",
+          );
         }
 
         const deletedSnapshot = {
@@ -911,8 +1054,10 @@ export async function deleteWeighSession(
 
         let newStatus = truck.status;
         if (truck.status === "OnScale") {
+          // Only the open round's sessions matter: earlier rounds' sessions
+          // never reset the status of the current round.
           const remaining = await tx.weighSession.count({
-            where: { truckOperationId: truckId },
+            where: { bridgeRoundId: openRoundForDelete.id },
           });
           if (remaining === 0) {
             await tx.truckOperation.update({
@@ -961,8 +1106,16 @@ export async function uploadPhoto(truckId: number, filePath: string, userId: num
           throw new ServiceError("لا يمكن رفع صورة لعملية مغلقة أو ملغاة");
         }
 
+        // Attach to the open round when one exists; pre-tare photos stay
+        // unassigned and are adopted by round 1 in enterTare.
+        const openRound = await getOpenRound(tx, truckId);
+
         const created = await tx.truckPhoto.create({
-          data: { truckOperationId: truckId, filePath },
+          data: {
+            truckOperationId: truckId,
+            bridgeRoundId: openRound?.id ?? null,
+            filePath,
+          },
         });
 
         await logAudit(tx, {
@@ -970,7 +1123,7 @@ export async function uploadPhoto(truckId: number, filePath: string, userId: num
           action: "upload",
           entityType: "TruckPhoto",
           entityId: String(created.id),
-          details: { truckId, filePath },
+          details: { truckId, roundNumber: openRound?.roundNumber ?? null, filePath },
         });
 
         return created;
@@ -985,7 +1138,11 @@ export async function uploadPhoto(truckId: number, filePath: string, userId: num
 
 // ─── Loading Complete (Stage 1) ───────────────────────────────────
 
-export async function confirmLoadingComplete(truckId: number, userId: number) {
+export async function confirmLoadingComplete(
+  truckId: number,
+  userId: number,
+  roundGrade?: SalesOrderGrade | null,
+) {
   return withRetry(() =>
     prisma.$transaction(
       async (tx: TxClient) => {
@@ -1006,13 +1163,20 @@ export async function confirmLoadingComplete(truckId: number, userId: number) {
         if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
         assertTransition(truck.status, "LoadingComplete");
 
+        const openRound = await getOpenRound(tx, truckId);
+        if (!openRound) {
+          throw new ServiceError("لا توجد دورة قبان مفتوحة لهذه العملية");
+        }
+
         // Re-query after the lock so both collections are up-to-date.
+        // Requirements are PER ROUND: the current round needs at least one
+        // session and one photo before its external weighing.
         const [sessions, photoCount] = await Promise.all([
           tx.weighSession.findMany({
-            where: { truckOperationId: truckId },
+            where: { bridgeRoundId: openRound.id },
             select: { weightTons: true },
           }),
-          tx.truckPhoto.count({ where: { truckOperationId: truckId } }),
+          tx.truckPhoto.count({ where: { bridgeRoundId: openRound.id } }),
         ]);
 
         if (sessions.length === 0) {
@@ -1027,16 +1191,25 @@ export async function confirmLoadingComplete(truckId: number, userId: number) {
           new Decimal(0),
         );
 
-        // Stamp loader identity + timestamp atomically with the transition.
-        // `enterGross` will refuse to run while either is null — this is the
-        // primary enforcement of the two-role workflow rule (Part 1).
+        // Stamp loader identity + timestamp atomically with the transition,
+        // on both the operation (two-role rule enforcement for enterGross)
+        // and the round (per-round audit/dispute traceability).
         const confirmedAt = new Date();
+        const nextGrade = roundGrade !== undefined ? roundGrade : openRound.grade;
         const updated = await tx.truckOperation.update({
           where: { id: truckId },
           data: {
             status: "LoadingComplete",
             loadingConfirmedAt: confirmedAt,
             loaderId: userId,
+          },
+        });
+        await tx.bridgeRound.update({
+          where: { id: openRound.id },
+          data: {
+            loadingConfirmedAt: confirmedAt,
+            loaderId: userId,
+            grade: nextGrade,
           },
         });
 
@@ -1056,13 +1229,18 @@ export async function confirmLoadingComplete(truckId: number, userId: number) {
               status: "LoadingComplete",
               loadingConfirmedAt: confirmedAt.toISOString(),
               loaderId: userId,
+              roundNumber: openRound.roundNumber,
+              roundGrade: nextGrade ?? null,
               sessionCount: sessions.length,
               totalInternalTons: totalInternalTons.toNumber(),
             },
           },
         });
 
-        logger.info({ truckId, sessions: sessions.length, loaderId: userId }, "loading complete confirmed");
+        logger.info(
+          { truckId, roundNumber: openRound.roundNumber, sessions: sessions.length, loaderId: userId },
+          "loading complete confirmed",
+        );
         return updated;
       },
       // The FOR UPDATE lock above already serialises every writer of this
@@ -1114,6 +1292,16 @@ export async function reopenBeforeGross(truckId: number, userId: number) {
           },
         });
 
+        // Mirror the reset on the open round (same null-together CHECK).
+        await tx.bridgeRound.updateMany({
+          where: { truckOperationId: truckId, endWeightKg: null },
+          data: {
+            loadingConfirmedAt: null,
+            loaderId: null,
+            lastReopenedAt: reopenedAt,
+          },
+        });
+
         await logAudit(tx, {
           userId,
           action: "status_change",
@@ -1142,9 +1330,28 @@ export async function reopenBeforeGross(truckId: number, userId: number) {
   );
 }
 
-// ─── Enter Gross ──────────────────────────────────────────────────
+// ─── Enter Gross (external weighing — final exit or return) ───────
 
-export async function enterGross(truckId: number, weightKg: number, userId: number) {
+export type GrossExitMode = "final" | "return";
+
+/**
+ * Records an external-bridge weighing for the currently open round.
+ *
+ * - `exit = "final"` (default, single-round behaviour unchanged): closes the
+ *   round as final, writes the operation-level gross weight, and moves the
+ *   operation to `SecondWeigh` awaiting close.
+ * - `exit = "return"` (multi-round): closes the round, then immediately opens
+ *   the next round whose start weight IS this weighing — the truck goes back
+ *   inside to load the next batch (other size/grade). The operation returns
+ *   to `FirstWeigh` and the loader must confirm again before the next
+ *   weighing.
+ */
+export async function enterGross(
+  truckId: number,
+  weightKg: number,
+  userId: number,
+  exit: GrossExitMode = "final",
+) {
   // Hard-rail weight check before touching the DB.
   const rangeError = validateWeightRange(weightKg);
   if (rangeError) throw new ServiceError(rangeError);
@@ -1186,51 +1393,110 @@ export async function enterGross(truckId: number, weightKg: number, userId: numb
           );
         }
 
-        assertTransition(truck.status, "SecondWeigh");
+        assertTransition(truck.status, exit === "final" ? "SecondWeigh" : "FirstWeigh");
+
+        const openRound = await getOpenRound(tx, truckId);
+        if (!openRound) {
+          throw new ServiceError("لا توجد دورة قبان مفتوحة لهذه العملية");
+        }
 
         if (!truck.tareWeightKg) {
           throw new ServiceError("يجب إدخال وزن الفارغ أولاً");
         }
-        if (new Decimal(weightKg).lte(truck.tareWeightKg)) {
+
+        // The weighing must exceed the ROUND's start weight (= previous
+        // external weighing), not just the original tare.
+        const roundStartKg = Number(openRound.startWeightKg);
+        if (new Decimal(weightKg).lte(openRound.startWeightKg)) {
           throw new ServiceError(
-            "Gross weight must be greater than tare weight / وزن المحمّل يجب أن يكون أكبر من وزن الفارغ",
+            "Gross weight must be greater than the round start weight / وزن المحمّل يجب أن يكون أكبر من وزن بداية الدورة",
           );
         }
-        const grossError = validateGrossWeight(weightKg, Number(truck.tareWeightKg));
+        const grossError = validateGrossWeight(weightKg, roundStartKg);
         if (grossError) throw new ServiceError(grossError);
 
-        const internalTotalTons = await loadInternalTotalTons(tx, truckId);
+        // Per-round discrepancy: this round's external net vs the sum of
+        // ITS internal weigh sessions.
+        const internalTotalTons = await loadRoundInternalTons(tx, openRound.id);
         const discrepancyFields = buildWeighbridgeDiscrepancyAuditFields({
-          tareKg: Number(truck.tareWeightKg),
+          tareKg: roundStartKg,
           grossKg: weightKg,
           internalTotalTons,
         });
 
-        const updated = await tx.truckOperation.update({
-          where: { id: truckId },
+        const weighedAt = new Date();
+
+        // Close the current round.
+        await tx.bridgeRound.update({
+          where: { id: openRound.id },
           data: {
-            grossWeightKg: weightKg,
-            grossTime: new Date(),
-            status: "SecondWeigh",
+            endWeightKg: weightKg,
+            endTime: weighedAt,
+            isFinal: exit === "final",
+            version: { increment: 1 },
           },
         });
 
+        let updated;
+        if (exit === "final") {
+          updated = await tx.truckOperation.update({
+            where: { id: truckId },
+            data: {
+              grossWeightKg: weightKg,
+              grossTime: weighedAt,
+              status: "SecondWeigh",
+            },
+          });
+        } else {
+          // Open the next round: its start weight is this weighing — copied
+          // automatically, never typed by an operator. Loader confirmation
+          // resets so the two-role rule applies to the new round as well
+          // (operation columns are null-together per the CHECK constraint).
+          await tx.bridgeRound.create({
+            data: {
+              truckOperationId: truckId,
+              roundNumber: openRound.roundNumber + 1,
+              grade: null,
+              startWeightKg: weightKg,
+              startTime: weighedAt,
+            },
+          });
+          updated = await tx.truckOperation.update({
+            where: { id: truckId },
+            data: {
+              status: "FirstWeigh",
+              loadingConfirmedAt: null,
+              loaderId: null,
+            },
+          });
+        }
+
+        const roundNetKg = weightKg - roundStartKg;
         await logAudit(tx, {
           userId,
           action: "status_change",
           entityType: "TruckOperation",
           entityId: String(truckId),
           details: {
-            event: "gross_recorded",
+            event: exit === "final" ? "gross_recorded" : "round_weighed_return",
             previousValue: {
               status: truck.status,
               grossWeightKg: null,
             },
             newValue: {
-              status: "SecondWeigh",
-              grossWeightKg: weightKg,
-              tareWeightKg: Number(truck.tareWeightKg),
-              netWeightKg: weightKg - Number(truck.tareWeightKg),
+              status: exit === "final" ? "SecondWeigh" : "FirstWeigh",
+              roundNumber: openRound.roundNumber,
+              roundGrade: openRound.grade ?? null,
+              roundStartWeightKg: roundStartKg,
+              roundEndWeightKg: weightKg,
+              roundNetKg,
+              ...(exit === "final"
+                ? {
+                    grossWeightKg: weightKg,
+                    tareWeightKg: Number(truck.tareWeightKg),
+                    netWeightKg: weightKg - Number(truck.tareWeightKg),
+                  }
+                : { nextRoundNumber: openRound.roundNumber + 1 }),
               loaderId: truck.loaderId,
               loadingConfirmedAt: truck.loadingConfirmedAt,
               ...discrepancyFields,
@@ -1238,7 +1504,10 @@ export async function enterGross(truckId: number, weightKg: number, userId: numb
           },
         });
 
-        logger.info({ truckId, weightKg }, "gross entered");
+        logger.info(
+          { truckId, weightKg, exit, roundNumber: openRound.roundNumber, roundNetKg },
+          "external weighing entered",
+        );
         return updated;
       },
       { isolationLevel: "ReadCommitted" },
@@ -1265,7 +1534,10 @@ export async function closeOperation(truckId: number, userId: number) {
 
         const truck = await tx.truckOperation.findUnique({
           where: { id: truckId },
-          include: { sessions: true },
+          include: {
+            sessions: true,
+            rounds: { orderBy: { roundNumber: "asc" } },
+          },
         });
         if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
         assertTransition(truck.status, "Completed");
@@ -1303,6 +1575,16 @@ export async function closeOperation(truckId: number, userId: number) {
             internalTotalTons: internalTotalTons.toNumber(),
             bridgeNetTons: bridgeNetTons.toNumber(),
             discrepancyTons: bridgeNetTons.minus(internalTotalTons).toNumber(),
+            rounds: truck.rounds.map((r) => ({
+              roundNumber: r.roundNumber,
+              grade: r.grade,
+              startWeightKg: Number(r.startWeightKg),
+              endWeightKg: r.endWeightKg != null ? Number(r.endWeightKg) : null,
+              netKg:
+                r.endWeightKg != null
+                  ? new Decimal(r.endWeightKg).minus(r.startWeightKg).toNumber()
+                  : null,
+            })),
           },
         });
 
@@ -1391,7 +1673,15 @@ const DETAIL_INCLUDE = {
   },
   sessions: {
     orderBy: { sessionNumber: "asc" as const },
-    include: { size: { select: { id: true, code: true, displayName: true } } },
+    include: {
+      size: {
+        select: { id: true, code: true, displayName: true, isBundleType: true },
+      },
+    },
+  },
+  rounds: {
+    orderBy: { roundNumber: "asc" as const },
+    include: { loader: { select: { id: true, fullName: true, username: true } } },
   },
   photos: { orderBy: { capturedAt: "asc" as const } },
   creator: { select: { id: true, fullName: true, username: true } },
@@ -1438,7 +1728,7 @@ export type TruckListItem = Prisma.TruckOperationGetPayload<{
       include: { size: { select: { id: true; code: true; displayName: true; isBundleType: true } } };
     };
     creator: { select: { id: true; fullName: true } };
-    _count: { select: { sessions: true } };
+    _count: { select: { sessions: true; rounds: true } };
   };
 }>;
 
@@ -1473,7 +1763,7 @@ export async function listOperations(
           include: { size: { select: { id: true, code: true, displayName: true, isBundleType: true } } },
         },
         creator: { select: { id: true, fullName: true } },
-        _count: { select: { sessions: true } },
+        _count: { select: { sessions: true, rounds: true } },
       },
     }),
     prisma.truckOperation.count({ where }),
@@ -1505,12 +1795,15 @@ export interface LoadedTruckListItem {
  * Simplified, read-only listing for the factory owner. Returns only the
  * columns the owner cares about (customer, destination, bridge net, date)
  * plus the actually-loaded sizes aggregated per size from weigh sessions.
+ * Cancelled operations are always excluded.
  */
 export async function listLoadedTrucks(
   filters: LoadedTruckFilters,
   pagination: PaginationParams,
 ): Promise<PaginatedResult<LoadedTruckListItem>> {
-  const where: Prisma.TruckOperationWhereInput = {};
+  const where: Prisma.TruckOperationWhereInput = {
+    status: { not: "Cancelled" },
+  };
 
   if (filters.customer) {
     where.customer = {

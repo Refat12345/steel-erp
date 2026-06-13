@@ -54,6 +54,53 @@ describe("formatAuditDetails", () => {
     expect(out).toContain(`المحمّل: #${intFmt.format(1)}`);
   });
 
+  it("describes a round-weighed-return event with round details in Arabic", () => {
+    const out = formatAuditDetails("status_change", {
+      event: "round_weighed_return",
+      newValue: {
+        status: "FirstWeigh",
+        roundNumber: 1,
+        roundGrade: "FIRST",
+        roundNetKg: 15000,
+        nextRoundNumber: 2,
+      },
+    });
+    expect(out).toContain("وزنة خارجية ورجوع للتحميل");
+    expect(out).toContain(`دورة القبان: #${intFmt.format(1)}`);
+    expect(out).toContain("نخب الدورة: نخب أول");
+    expect(out).toContain(`صافي الدورة: ${intFmt.format(15000)} كغ`);
+    expect(out).toContain(`الدورة التالية: #${intFmt.format(2)}`);
+  });
+
+  it("describes a gross correction with old/new weights and cascade flag", () => {
+    const out = formatAuditDetails("update", {
+      action: "gross_correction",
+      roundNumber: 2,
+      isFinalRound: false,
+      cascadedToNextRound: true,
+      oldGrossWeightKg: 25000,
+      newGrossWeightKg: 24700,
+    });
+    expect(out).toContain("تصحيح وزنة خارجية");
+    expect(out).toContain(`الوزن الإجمالي السابق: ${intFmt.format(25000)} كغ`);
+    expect(out).toContain(`الوزن الإجمالي الجديد: ${intFmt.format(24700)} كغ`);
+    expect(out).toContain("انعكس على بداية الدورة التالية: نعم");
+    expect(out).toContain("وزنة الخروج النهائي: لا");
+  });
+
+  it("translates grade enum values to Arabic labels", () => {
+    const out = formatAuditDetails("update", { grade: "SECOND" });
+    expect(out).toContain("النخب: نخب ثاني");
+  });
+
+  it("describes a session_reopened event (gap fix)", () => {
+    const out = formatAuditDetails("status_change", {
+      event: "session_reopened",
+      newValue: { status: "OnScale" },
+    });
+    expect(out).toContain("تم إعادة فتح التحميل قبل الوزن");
+  });
+
   it("merges bridge-net kg + tons into a single fragment on status close", () => {
     const out = formatAuditDetails("status_change", {
       to: "Completed",

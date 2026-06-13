@@ -4,6 +4,7 @@ import { formatDurationCompactEn } from "@/lib/format-duration";
 import {
   TRUCK_STATUS_EN,
   gradeLabelEn,
+  productFilterLabelEn,
   tonnageNoteEn,
   toEnglishCity,
   toEnglishSize,
@@ -36,8 +37,11 @@ function buildSummarySheet(report: DailyTrucksReport): XLSX.WorkSheet {
   if (report.filters.customerName) {
     rows.push(["Customer filter", report.filters.customerName]);
   }
-  if (report.filters.grade) {
-    rows.push(["Grade filter", gradeLabelEn(report.filters.grade)]);
+  if (report.filters.productFilter) {
+    rows.push([
+      "Product filter",
+      productFilterLabelEn(report.filters.productFilter),
+    ]);
   }
   rows.push([]);
   rows.push(["Registered", report.summary.registered]);
@@ -85,7 +89,7 @@ function buildTrucksSheet(report: DailyTrucksReport): XLSX.WorkSheet {
     TRUCK_STATUS_EN[row.status],
     tons(row.bridgeTons),
     ...(canSensitive ? [tons(row.internalTons), tons(row.discrepancyTons)] : []),
-    tonnageNoteEn(row.tonnageStatus, row.cancelReason) ?? "—",
+    tonnageNoteEn(row.tonnageStatus, row.cancelReason, row.isPartialVisit) ?? "—",
   ]);
 
   const sheet = XLSX.utils.aoa_to_sheet([header, ...body]);

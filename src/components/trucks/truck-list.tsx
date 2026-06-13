@@ -62,7 +62,7 @@ interface TruckListItem extends EditableTruck {
   customer: { id: number; fullName: string; code: string } | null;
   destination: { id: number; name: string; details: string | null } | null;
   creator: { id: number; fullName: string };
-  _count: { sessions: number };
+  _count: { sessions: number; rounds: number };
 }
 
 const statusMap: Record<
@@ -297,7 +297,18 @@ export function TruckList() {
                         </TableCell>
                         <TableCell>{truck.driverName}</TableCell>
                         <TableCell>
-                          <Badge variant={st.variant}>{st.label}</Badge>
+                          <div className="flex items-center gap-1">
+                            <Badge variant={st.variant}>{st.label}</Badge>
+                            {(truck._count?.rounds ?? 0) > 1 && (
+                              <Badge
+                                variant="outline"
+                                className="border-violet-300 text-violet-700"
+                                title="عدد دورات القبان"
+                              >
+                                {truck._count.rounds} دورات
+                              </Badge>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell className="text-sm">
                           {getDisplayGradeLabel(truck) ?? "—"}

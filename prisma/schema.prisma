@@ -115,6 +115,7 @@ model User {
   trucksCreated        TruckOperation[]          @relation("TruckCreator")
   trucksClosed         TruckOperation[]          @relation("TruckCloser")
   trucksLoaded         TruckOperation[]          @relation("TruckLoader")
+  bridgeRoundsLoaded   BridgeRound[]             @relation("BridgeRoundLoader")
   idempotencyKeys      IdempotencyKey[]
 
   @@map("users")
@@ -451,6 +452,7 @@ model TruckOperation {
   sessions     WeighSession[]
   photos       TruckPhoto[]
   requestItems TruckRequestItem[]
+  rounds       BridgeRound[]
 
   @@index([customerId])
   @@index([destinationId])
@@ -467,20 +469,68 @@ model TruckRequestItem {
   id               Int     @id @default(autoincrement())
   truckOperationId Int     @map("truck_operation_id")
   sizeId           Int     @map("size_id")
+  /// Grade requested for this line. Allows the same size to appear twice on
+  /// one truck request (e.g. 12mm FIRST + 12mm SECOND). Null = non-rebar or
+  /// unspecified. Postgres treats NULLs as distinct in the composite unique
+  /// below, so a partial unique index (grade IS NULL) in the migration keeps
+  /// "same size, no grade" from duplicating.
+  grade            SalesOrderGrade? 
   bundleCount      Int?    @map("bundle_count")
   requestedTons    Decimal? @map("requested_tons") @db.Decimal(10, 3)
 
   truckOperation TruckOperation @relation(fields: [truckOperationId], references: [id])
   size           SizeLookup     @relation(fields: [sizeId], references: [id])
 
-  @@unique([truckOperationId, sizeId])
+  @@unique([truckOperationId, sizeId, grade])
   @@index([truckOperationId])
   @@map("truck_request_items")
+}
+
+/// One external-weighbridge round: the period between two consecutive bridge
+/// weighings of the same truck visit. Round 1 starts at the tare weight; each
+/// later round starts at the previous round's end weight (copied automatically
+/// — never typed by an operator). The authoritative per-round net is
+/// endWeightKg − startWeightKg. A round with endWeightKg = null is the
+/// currently open round; `isFinal` marks the round closed by the final exit
+/// weighing (its end weight equals TruckOperation.grossWeightKg).
+model BridgeRound {
+  id                 Int              @id @default(autoincrement())
+  truckOperationId   Int              @map("truck_operation_id")
+  roundNumber        Int              @map("round_number")
+  /// One grade per round (management rule): a round may load several sizes
+  /// but never mixes FIRST and SECOND grade rebar.
+  grade              SalesOrderGrade?
+  startWeightKg      Decimal          @map("start_weight_kg") @db.Decimal(10, 1)
+  endWeightKg        Decimal?         @map("end_weight_kg") @db.Decimal(10, 1)
+  startTime          DateTime         @map("start_time")
+  endTime            DateTime?        @map("end_time")
+  isFinal            Boolean          @default(false) @map("is_final")
+  loadingConfirmedAt DateTime?        @map("loading_confirmed_at")
+  loaderId           Int?             @map("loader_id")
+  lastReopenedAt     DateTime?        @map("last_reopened_at")
+  /// Optimistic-lock counter, mirrors TruckOperation.version semantics.
+  version            Int              @default(0)
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+
+  truckOperation TruckOperation @relation(fields: [truckOperationId], references: [id])
+  loader         User?          @relation("BridgeRoundLoader", fields: [loaderId], references: [id])
+  sessions       WeighSession[]
+  photos         TruckPhoto[]
+
+  @@unique([truckOperationId, roundNumber])
+  @@index([truckOperationId])
+  @@index([loaderId])
+  @@map("bridge_rounds")
 }
 
 model WeighSession {
   id               Int      @id @default(autoincrement())
   truckOperationId Int      @map("truck_operation_id")
+  /// Bridge round this internal weighing belongs to. Nullable only for rows
+  /// created before the multi-round migration; new sessions always attach to
+  /// the currently open round.
+  bridgeRoundId    Int?     @map("bridge_round_id")
   sessionNumber    Int      @map("session_number")
   sizeId           Int?     @map("size_id")
   bundleCount      Int?     @map("bundle_count")
@@ -492,22 +542,30 @@ model WeighSession {
   updatedAt        DateTime @updatedAt @map("updated_at")
 
   truckOperation TruckOperation @relation(fields: [truckOperationId], references: [id])
+  bridgeRound    BridgeRound?   @relation(fields: [bridgeRoundId], references: [id])
   size           SizeLookup?    @relation(fields: [sizeId], references: [id])
 
   @@unique([truckOperationId, sessionNumber])
   @@index([truckOperationId])
+  @@index([bridgeRoundId])
   @@map("weigh_sessions")
 }
 
 model TruckPhoto {
   id               Int      @id @default(autoincrement())
   truckOperationId Int      @map("truck_operation_id")
+  /// Bridge round this photo documents. Null for photos uploaded before the
+  /// first round opens (pre-tare) — those are adopted into round 1 when it is
+  /// created — and for rows that predate the multi-round migration.
+  bridgeRoundId    Int?     @map("bridge_round_id")
   filePath         String   @map("file_path")
   capturedAt       DateTime @default(now()) @map("captured_at")
 
   truckOperation TruckOperation @relation(fields: [truckOperationId], references: [id])
+  bridgeRound    BridgeRound?   @relation(fields: [bridgeRoundId], references: [id])
 
   @@index([truckOperationId])
+  @@index([bridgeRoundId])
   @@map("truck_photos")
 }
 

@@ -7,7 +7,7 @@ const mockPrisma = vi.hoisted(() => ({
 
 vi.mock("@/lib/db", () => ({ prisma: mockPrisma }));
 
-import { getDailyTrucksReport } from "./report.service";
+import { getDailyTrucksReport, getDailyLoadingSummary } from "./report.service";
 import { ServiceError } from "./errors";
 
 beforeEach(() => {
@@ -59,6 +59,7 @@ describe("getDailyTrucksReport", () => {
         salesOrder: null,
         customer: { id: 1, fullName: "ز", code: "C-1" },
         destination: null,
+        rounds: [],
         sessions: [
           {
             sizeId: 8,
@@ -93,6 +94,7 @@ describe("getDailyTrucksReport", () => {
         salesOrder: null,
         customer: null,
         destination: null,
+        rounds: [],
         sessions: [
           {
             sizeId: 8,
@@ -120,6 +122,7 @@ describe("getDailyTrucksReport", () => {
         salesOrder: null,
         customer: null,
         destination: null,
+        rounds: [],
         sessions: [],
       },
     ]);
@@ -175,6 +178,7 @@ describe("getDailyTrucksReport", () => {
         salesOrder: { grade: "FIRST" },
         customer: null,
         destination: null,
+        rounds: [],
         sessions: [
           {
             sizeId: 8,
@@ -200,6 +204,7 @@ describe("getDailyTrucksReport", () => {
         salesOrder: null,
         customer: null,
         destination: null,
+        rounds: [],
         sessions: [
           {
             sizeId: 12,
@@ -214,12 +219,12 @@ describe("getDailyTrucksReport", () => {
 
     const report = await getDailyTrucksReport({
       operationalDate: "2026-05-23",
-      grade: "FIRST",
+      productFilter: "FIRST",
       canViewSensitiveTonnage: true,
     });
 
-    expect(report.filters.grade).toBe("FIRST");
-    expect(report.filters.gradeLabelAr).toBe("نخب أول");
+    expect(report.filters.productFilter).toBe("FIRST");
+    expect(report.filters.productFilterLabelAr).toBe("نخب أول");
     expect(report.summary.registered).toBe(1);
     expect(report.summary.totalInternalTons).toBe(12);
     expect(report.rows).toHaveLength(1);
@@ -234,6 +239,132 @@ describe("getDailyTrucksReport", () => {
         truckCount: 1,
       },
     ]);
+  });
+
+  it("includes mixed multi-round trucks with grade-filtered bridge tons", async () => {
+    mockPrisma.truckOperation.findMany.mockResolvedValue([
+      {
+        id: 50,
+        plateNumber: "MIX-1",
+        driverName: "سائق",
+        salesOrderNumber: null,
+        status: "Completed",
+        tareWeightKg: 10_000,
+        grossWeightKg: 30_000,
+        createdAt: new Date(2026, 4, 23, 10, 0, 0, 0),
+        closedAt: new Date(2026, 4, 23, 14, 0, 0, 0),
+        loadingConfirmedAt: null,
+        lastReopenedAt: null,
+        cancelReason: null,
+        operationalGrade: "FIRST",
+        salesOrder: null,
+        customer: null,
+        destination: null,
+        rounds: [
+          {
+            id: 1,
+            roundNumber: 1,
+            grade: "FIRST",
+            startWeightKg: 10_000,
+            endWeightKg: 25_000,
+          },
+          {
+            id: 2,
+            roundNumber: 2,
+            grade: "SECOND",
+            startWeightKg: 25_000,
+            endWeightKg: 30_000,
+          },
+        ],
+        sessions: [
+          {
+            bridgeRoundId: 1,
+            sizeId: 8,
+            bundleCount: 10,
+            weightTons: 12,
+            createdAt: new Date(2026, 4, 23, 11, 0, 0, 0),
+            size: { displayName: "8 مم", sortOrder: 8 },
+          },
+          {
+            bridgeRoundId: 2,
+            sizeId: 12,
+            bundleCount: 4,
+            weightTons: 5,
+            createdAt: new Date(2026, 4, 23, 12, 0, 0, 0),
+            size: { displayName: "12 مم", sortOrder: 12 },
+          },
+        ],
+      },
+      {
+        id: 51,
+        plateNumber: "PURE-1",
+        driverName: "سائق",
+        salesOrderNumber: null,
+        status: "Completed",
+        tareWeightKg: 10_000,
+        grossWeightKg: 25_000,
+        createdAt: new Date(2026, 4, 23, 11, 0, 0, 0),
+        closedAt: new Date(2026, 4, 23, 13, 0, 0, 0),
+        loadingConfirmedAt: null,
+        lastReopenedAt: null,
+        cancelReason: null,
+        operationalGrade: "FIRST",
+        salesOrder: null,
+        customer: null,
+        destination: null,
+        rounds: [
+          {
+            id: 3,
+            roundNumber: 1,
+            grade: "FIRST",
+            startWeightKg: 10_000,
+            endWeightKg: 25_000,
+          },
+        ],
+        sessions: [
+          {
+            bridgeRoundId: 3,
+            sizeId: 8,
+            bundleCount: 10,
+            weightTons: 15,
+            createdAt: new Date(2026, 4, 23, 12, 0, 0, 0),
+            size: { displayName: "8 مم", sortOrder: 8 },
+          },
+        ],
+      },
+    ]);
+
+    const firstReport = await getDailyTrucksReport({
+      operationalDate: "2026-05-23",
+      productFilter: "FIRST",
+      canViewSensitiveTonnage: true,
+    });
+
+    expect(firstReport.rows).toHaveLength(2);
+    const mixed = firstReport.rows.find((r) => r.id === 50);
+    expect(mixed?.bridgeTons).toBe(15);
+    expect(mixed?.internalTons).toBe(12);
+    expect(mixed?.isPartialVisit).toBe(true);
+    expect(firstReport.summary.totalBridgeTons).toBe(30);
+
+    const secondReport = await getDailyTrucksReport({
+      operationalDate: "2026-05-23",
+      productFilter: "SECOND",
+      canViewSensitiveTonnage: true,
+    });
+
+    expect(secondReport.rows).toHaveLength(1);
+    expect(secondReport.rows[0]?.id).toBe(50);
+    expect(secondReport.rows[0]?.bridgeTons).toBe(5);
+    expect(secondReport.rows[0]?.internalTons).toBe(5);
+
+    const allReport = await getDailyTrucksReport({
+      operationalDate: "2026-05-23",
+      canViewSensitiveTonnage: true,
+    });
+
+    expect(allReport.rows).toHaveLength(2);
+    expect(allReport.summary.totalBridgeTons).toBe(35);
   });
 
   it("includes bridge-only totals when internal sessions are missing", async () => {
@@ -255,6 +386,7 @@ describe("getDailyTrucksReport", () => {
         salesOrder: null,
         customer: null,
         destination: null,
+        rounds: [],
         sessions: [],
       },
     ]);
@@ -268,6 +400,46 @@ describe("getDailyTrucksReport", () => {
     expect(report.summary.totalInternalTons).toBe(0);
     expect(report.rows[0].bridgeTons).toBe(12);
     expect(report.rows[0].internalTons).toBeNull();
+  });
+
+  it("exposes a per-round breakdown only for multi-round included trucks", async () => {
+    mockPrisma.truckOperation.findMany.mockResolvedValue([
+      {
+        id: 30,
+        plateNumber: "M-1",
+        driverName: "سائق",
+        salesOrderNumber: null,
+        status: "Completed",
+        tareWeightKg: 10_000,
+        grossWeightKg: 30_000,
+        createdAt: new Date(2026, 4, 23, 10, 0, 0, 0),
+        closedAt: new Date(2026, 4, 23, 14, 0, 0, 0),
+        loadingConfirmedAt: null,
+        lastReopenedAt: null,
+        cancelReason: null,
+        operationalGrade: null,
+        salesOrder: null,
+        customer: null,
+        destination: null,
+        rounds: [
+          { roundNumber: 1, grade: "FIRST", startWeightKg: 10_000, endWeightKg: 25_000 },
+          { roundNumber: 2, grade: "SECOND", startWeightKg: 25_000, endWeightKg: 30_000 },
+        ],
+        sessions: [],
+      },
+    ]);
+
+    const report = await getDailyTrucksReport({
+      operationalDate: "2026-05-23",
+      canViewSensitiveTonnage: true,
+    });
+
+    expect(report.rows[0].rounds).toEqual([
+      { roundNumber: 1, grade: "FIRST", gradeLabelAr: "نخب أول", netTons: 15 },
+      { roundNumber: 2, grade: "SECOND", gradeLabelAr: "نخب ثاني", netTons: 5 },
+    ]);
+    // The whole-visit bridge net is unchanged by the round split.
+    expect(report.rows[0].bridgeTons).toBe(20);
   });
 
   it("redacts row and summary sensitive tonnage without hiding size totals", async () => {
@@ -289,6 +461,7 @@ describe("getDailyTrucksReport", () => {
         salesOrder: null,
         customer: null,
         destination: null,
+        rounds: [],
         sessions: [
           {
             sizeId: 8,
@@ -329,5 +502,124 @@ describe("getDailyTrucksReport", () => {
     await expect(
       getDailyTrucksReport({ operationalDate: "2026-05-23", customerId: 99 }),
     ).rejects.toThrow(ServiceError);
+  });
+});
+
+describe("getDailyLoadingSummary", () => {
+  it("includes mixed FIRST + shortbar with FIRST-round tons only", async () => {
+    mockPrisma.truckOperation.findMany.mockResolvedValue([
+      {
+        id: 50,
+        status: "Completed",
+        tareWeightKg: 10_000,
+        grossWeightKg: 28_000,
+        closedAt: new Date(2026, 4, 23, 14, 0, 0, 0),
+        operationalGrade: "FIRST",
+        customer: { id: 1, fullName: "زبون" },
+        destination: { id: 2, name: "دمشق" },
+        salesOrder: null,
+        rounds: [
+          { id: 1, grade: "FIRST", startWeightKg: 10_000, endWeightKg: 25_000 },
+          { id: 2, grade: null, startWeightKg: 25_000, endWeightKg: 28_000 },
+        ],
+        sessions: [
+          {
+            bridgeRoundId: 1,
+            sizeId: 8,
+            weightTons: 12,
+            size: { code: "8", displayName: "8 مم", sortOrder: 8 },
+          },
+          {
+            bridgeRoundId: 2,
+            sizeId: 99,
+            weightTons: 2,
+            size: { code: "shortbar_1_4m", displayName: "قصائر", sortOrder: 99 },
+          },
+        ],
+      },
+      {
+        id: 51,
+        status: "Completed",
+        tareWeightKg: 10_000,
+        grossWeightKg: 25_000,
+        closedAt: new Date(2026, 4, 23, 13, 0, 0, 0),
+        operationalGrade: "FIRST",
+        customer: { id: 1, fullName: "زبون" },
+        destination: { id: 2, name: "دمشق" },
+        salesOrder: null,
+        rounds: [{ id: 3, grade: "FIRST", startWeightKg: 10_000, endWeightKg: 25_000 }],
+        sessions: [
+          {
+            bridgeRoundId: 3,
+            sizeId: 8,
+            weightTons: 15,
+            size: { code: "8", displayName: "8 مم", sortOrder: 8 },
+          },
+        ],
+      },
+    ]);
+
+    const report = await getDailyLoadingSummary({
+      operationalDate: "2026-05-23",
+      productFilter: "FIRST",
+    });
+
+    expect(report.totals.truckCount).toBe(2);
+    expect(report.totals.totalBridgeTons).toBe(30);
+    expect(report.totals.totalInternalTons).toBe(27);
+    expect(report.byCustomer).toHaveLength(1);
+    expect(report.byCustomer[0]?.loads).toBe(2);
+
+    const allReport = await getDailyLoadingSummary({
+      operationalDate: "2026-05-23",
+    });
+
+    expect(allReport.totals.truckCount).toBe(2);
+    expect(allReport.totals.totalBridgeTons).toBe(33);
+  });
+
+  it("combines shortbar rounds under SHORTBAR product filter", async () => {
+    mockPrisma.truckOperation.findMany.mockResolvedValue([
+      {
+        id: 60,
+        status: "Completed",
+        tareWeightKg: 10_000,
+        grossWeightKg: 20_000,
+        closedAt: new Date(2026, 4, 23, 14, 0, 0, 0),
+        operationalGrade: null,
+        customer: { id: 1, fullName: "زبون" },
+        destination: { id: 2, name: "دمشق" },
+        salesOrder: null,
+        rounds: [
+          { id: 10, grade: null, startWeightKg: 10_000, endWeightKg: 15_000 },
+          { id: 11, grade: null, startWeightKg: 15_000, endWeightKg: 20_000 },
+        ],
+        sessions: [
+          {
+            bridgeRoundId: 10,
+            sizeId: 101,
+            weightTons: 4,
+            size: { code: "shortbar_1_4m", displayName: "قص 1-4", sortOrder: 101 },
+          },
+          {
+            bridgeRoundId: 11,
+            sizeId: 102,
+            weightTons: 5,
+            size: { code: "shortbar_4_12m", displayName: "قص 4-12", sortOrder: 102 },
+          },
+        ],
+      },
+    ]);
+
+    const report = await getDailyLoadingSummary({
+      operationalDate: "2026-05-23",
+      productFilter: "SHORTBAR",
+    });
+
+    expect(report.filters.productFilter).toBe("SHORTBAR");
+    expect(report.filters.productFilterLabelAr).toBe("قصائر");
+    expect(report.totals.truckCount).toBe(1);
+    expect(report.totals.totalBridgeTons).toBe(10);
+    expect(report.totals.totalInternalTons).toBe(9);
   });
 });

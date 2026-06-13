@@ -22,6 +22,7 @@ import { formatDurationCompactEn } from "@/lib/format-duration";
 import {
   TRUCK_STATUS_EN,
   gradeLabelEn,
+  productFilterLabelEn,
   tonnageNoteEn,
   toEnglishCity,
   toEnglishSize,
@@ -76,9 +77,11 @@ const STATUS_BADGE: Record<
   excluded_open: "default",
 };
 
-const GRADE_OPTIONS = [
+const PRODUCT_FILTER_OPTIONS = [
   { value: "FIRST", label: "First grade" },
   { value: "SECOND", label: "Second grade" },
+  { value: "SHORTBAR", label: "Short bars" },
+  { value: "SCRAP", label: "Scrap" },
 ] as const;
 
 function formatTons(value: number | null): string {
@@ -124,7 +127,7 @@ export function DailyTrucksReportView() {
     defaultOperationalDateInput(),
   );
   const [customerId, setCustomerId] = useState<string>("all");
-  const [grade, setGrade] = useState<string>("all");
+  const [productFilter, setProductFilter] = useState<string>("all");
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [loadingCustomers, setLoadingCustomers] = useState(true);
   const [loadingReport, setLoadingReport] = useState(false);
@@ -161,7 +164,7 @@ export function DailyTrucksReportView() {
     try {
       const params = new URLSearchParams({ date: operationalDate });
       if (customerId !== "all") params.set("customerId", customerId);
-      if (grade !== "all") params.set("grade", grade);
+      if (productFilter !== "all") params.set("product", productFilter);
       const res = await fetch(`/api/reports/daily-trucks?${params.toString()}`);
       const json = await res.json();
       if (!res.ok || !json.success) {
@@ -176,7 +179,7 @@ export function DailyTrucksReportView() {
     } finally {
       setLoadingReport(false);
     }
-  }, [operationalDate, customerId, grade]);
+  }, [operationalDate, customerId, productFilter]);
 
   useEffect(() => {
     if (status === "authenticated" && canView) {
@@ -289,14 +292,14 @@ export function DailyTrucksReportView() {
         </div>
 
         <div className="space-y-1.5 min-w-[10rem]">
-          <label className="text-xs font-medium text-muted-foreground">Grade</label>
-          <Select value={grade} onValueChange={(v) => setGrade(v ?? "all")}>
+          <label className="text-xs font-medium text-muted-foreground">Product</label>
+          <Select value={productFilter} onValueChange={(v) => setProductFilter(v ?? "all")}>
             <SelectTrigger className="w-full">
-              <SelectValue placeholder="All grades" />
+              <SelectValue placeholder="All products" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All grades</SelectItem>
-              {GRADE_OPTIONS.map((option) => (
+              <SelectItem value="all">All products</SelectItem>
+              {PRODUCT_FILTER_OPTIONS.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
                   {option.label}
                 </SelectItem>
@@ -320,7 +323,7 @@ export function DailyTrucksReportView() {
           onClick={() => {
             setOperationalDate(defaultOperationalDateInput());
             setCustomerId("all");
-            setGrade("all");
+            setProductFilter("all");
           }}
         >
           Clear filters
@@ -402,9 +405,15 @@ export function DailyTrucksReportView() {
               Customer filter: <span className="font-medium">{report.filters.customerName}</span>
             </p>
           ) : null}
-          {report.filters.grade ? (
+          {report.filters.productFilter ? (
             <p className="text-sm text-muted-foreground">
-              Grade filter: <span className="font-medium">{gradeLabelEn(report.filters.grade)}</span>
+              Product filter:{" "}
+              <span className="font-medium">
+                {productFilterLabelEn(report.filters.productFilter)}
+              </span>
+              {" · "}
+              Shows bridge tons for matching rounds only; mixed visits may appear in
+              more than one product filter.
             </p>
           ) : null}
 
@@ -550,7 +559,25 @@ export function DailyTrucksReportView() {
                         </>
                       ) : null}
                       <TableCell className="text-xs text-muted-foreground max-w-[10rem]">
-                        {tonnageNoteEn(row.tonnageStatus, row.cancelReason) ?? "—"}
+                        {tonnageNoteEn(
+                          row.tonnageStatus,
+                          row.cancelReason,
+                          row.isPartialVisit,
+                        ) ?? "—"}
+                        {row.rounds.length > 0 ? (
+                          <div className="mt-1 space-y-0.5">
+                            {row.rounds.map((r) => (
+                              <div
+                                key={r.roundNumber}
+                                className="font-mono tabular-nums whitespace-nowrap"
+                              >
+                                R{r.roundNumber}
+                                {r.grade ? ` (${gradeLabelEn(r.grade)})` : ""}:{" "}
+                                {formatTons(r.netTons)} t
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
                       </TableCell>
                     </TableRow>
                   ))
@@ -622,8 +649,10 @@ function DailyTrucksPrintable({
         {report.filters.customerName ? (
           <p className="meta">Customer filter: {report.filters.customerName}</p>
         ) : null}
-        {report.filters.grade ? (
-          <p className="meta">Grade filter: {gradeLabelEn(report.filters.grade)}</p>
+        {report.filters.productFilter ? (
+          <p className="meta">
+            Product filter: {productFilterLabelEn(report.filters.productFilter)}
+          </p>
         ) : null}
 
         <h2>Summary</h2>
@@ -728,7 +757,11 @@ function DailyTrucksPrintable({
                     </>
                   ) : null}
                   <td>
-                    {tonnageNoteEn(row.tonnageStatus, row.cancelReason) ?? "—"}
+                    {tonnageNoteEn(
+                      row.tonnageStatus,
+                      row.cancelReason,
+                      row.isPartialVisit,
+                    ) ?? "—"}
                     {includeDetails && row.sizeBreakdown.length > 0 ? (
                       <div className="sizes">
                         {row.sizeBreakdown
@@ -739,6 +772,18 @@ function DailyTrucksPrintable({
                                   ? ` (${item.bundleCount} bundles)`
                                   : ""
                               }`,
+                          )
+                          .join(", ")}
+                      </div>
+                    ) : null}
+                    {includeDetails && row.rounds.length > 0 ? (
+                      <div className="sizes">
+                        {row.rounds
+                          .map(
+                            (r) =>
+                              `Round ${r.roundNumber}${
+                                r.grade ? ` (${gradeLabelEn(r.grade)})` : ""
+                              }: ${formatTons(r.netTons)} t`,
                           )
                           .join(", ")}
                       </div>

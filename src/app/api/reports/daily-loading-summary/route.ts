@@ -21,6 +21,7 @@ export async function GET(req: NextRequest) {
     date: req.nextUrl.searchParams.get("date"),
     period: req.nextUrl.searchParams.get("period") ?? undefined,
     customerId: req.nextUrl.searchParams.get("customerId") ?? undefined,
+    product: req.nextUrl.searchParams.get("product") ?? undefined,
     grade: req.nextUrl.searchParams.get("grade") ?? undefined,
   });
 
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest) {
       operationalDate: parsed.data.date,
       period: parsed.data.period,
       customerId: parsed.data.customerId,
-      grade: parsed.data.grade,
+      productFilter: parsed.data.productFilter,
     });
     return ok(data);
   } catch (err) {

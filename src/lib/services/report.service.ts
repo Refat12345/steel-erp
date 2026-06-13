@@ -1,12 +1,19 @@
 import { prisma } from "@/lib/db";
 import type { SalesOrderGrade, TruckStatus } from "@prisma/client";
-import { GRADE_LABELS, getDisplayGrade } from "@/lib/truck-grade";
+import {
+  GRADE_LABELS,
+  getDisplayGrade,
+} from "@/lib/truck-grade";
+import {
+  PRODUCT_FILTER_LABELS_AR,
+  type ReportProductFilter,
+} from "@/lib/material-kind";
+import { sliceReportByProductFilter } from "@/lib/report-product-filter";
 import {
   OPERATIONAL_DAY_CUTOFF_HOUR,
   REPORT_DISCREPANCY_WARN_TONS,
   computeBridgeTons,
   computeDiscrepancyTons,
-  computeInternalTons,
   formatLocalDateInput,
   formatOperationalWindowLabel,
   getOperationalDayWindow,
@@ -40,7 +47,8 @@ const TONNAGE_NOTE: Record<ReportTonnageStatus, string | null> = {
 export interface DailyTrucksReportParams {
   operationalDate: string;
   customerId?: number;
-  grade?: SalesOrderGrade;
+  /** Rebar grade, combined shortbar, or scrap — null/omitted = all products. */
+  productFilter?: ReportProductFilter;
   canViewSensitiveTonnage?: boolean;
 }
 
@@ -64,7 +72,11 @@ export interface DailyTruckRow {
   tonnageStatus: ReportTonnageStatus;
   cancelReason: string | null;
   noteAr: string | null;
+  /** True when a grade filter is active and only part of the visit matches. */
+  isPartialVisit: boolean;
   sizeBreakdown: DailyTruckSizeBreakdown[];
+  /** Per-bridge-round breakdown — populated only for multi-round visits. */
+  rounds: DailyTruckRoundBreakdown[];
 }
 
 export interface DailyTruckSizeBreakdown {
@@ -72,6 +84,13 @@ export interface DailyTruckSizeBreakdown {
   displayName: string;
   weightTons: number;
   bundleCount: number | null;
+}
+
+export interface DailyTruckRoundBreakdown {
+  roundNumber: number;
+  grade: SalesOrderGrade | null;
+  gradeLabelAr: string | null;
+  netTons: number | null;
 }
 
 export interface DailyTrucksReportSummary {
@@ -101,8 +120,8 @@ export interface DailyTrucksReport {
   filters: {
     customerId?: number;
     customerName?: string;
-    grade?: SalesOrderGrade;
-    gradeLabelAr?: string;
+    productFilter?: ReportProductFilter;
+    productFilterLabelAr?: string;
   };
   summary: DailyTrucksReportSummary;
   sizeTotals: DailyTrucksReportSizeTotal[];
@@ -115,11 +134,30 @@ export interface DailyTrucksReport {
 function buildNote(
   tonnageStatus: ReportTonnageStatus,
   cancelReason: string | null,
+  isPartialVisit = false,
 ): string | null {
+  const parts: string[] = [];
   if (tonnageStatus === "excluded_cancelled" && cancelReason?.trim()) {
-    return cancelReason.trim();
+    parts.push(cancelReason.trim());
+  } else {
+    const statusNote = TONNAGE_NOTE[tonnageStatus];
+    if (statusNote) parts.push(statusNote);
   }
-  return TONNAGE_NOTE[tonnageStatus];
+  if (isPartialVisit) {
+    parts.push("زيارة مختلطة — يُعرض جزء الفلتر المحدد فقط");
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+/** Full session rows for aggregation — preserves size/bundle metadata. */
+function resolveReportSessions<
+  T extends { bridgeRoundId: number | null },
+>(allSessions: T[], matchingRoundIds: ReadonlyArray<number> | null): T[] {
+  if (matchingRoundIds == null) return allSessions;
+  const idSet = new Set(matchingRoundIds);
+  return allSessions.filter(
+    (s) => s.bridgeRoundId != null && idSet.has(s.bridgeRoundId),
+  );
 }
 
 export async function getDailyTrucksReport(
@@ -147,9 +185,12 @@ export async function getDailyTrucksReport(
       customerName: customer.fullName,
     };
   }
-  const gradeFilter =
-    params.grade != null
-      ? { grade: params.grade, gradeLabelAr: GRADE_LABELS[params.grade] }
+  const productFilterMeta =
+    params.productFilter != null
+      ? {
+          productFilter: params.productFilter,
+          productFilterLabelAr: PRODUCT_FILTER_LABELS_AR[params.productFilter],
+        }
       : {};
 
   const trucks = await prisma.truckOperation.findMany({
@@ -177,11 +218,22 @@ export async function getDailyTrucksReport(
       salesOrder: { select: { grade: true } },
       sessions: {
         select: {
+          bridgeRoundId: true,
           sizeId: true,
           bundleCount: true,
           weightTons: true,
           createdAt: true,
-          size: { select: { displayName: true, sortOrder: true } },
+          size: { select: { displayName: true, sortOrder: true, code: true } },
+        },
+      },
+      rounds: {
+        orderBy: { roundNumber: "asc" },
+        select: {
+          id: true,
+          roundNumber: true,
+          grade: true,
+          startWeightKg: true,
+          endWeightKg: true,
         },
       },
     },
@@ -217,10 +269,27 @@ export async function getDailyTrucksReport(
       window,
     });
 
-    const bridgeTons = computeBridgeTons(truck.grossWeightKg, truck.tareWeightKg);
-    const internalTons = computeInternalTons(truck.sessions);
+    const fullBridgeTons = computeBridgeTons(truck.grossWeightKg, truck.tareWeightKg);
+    const gradeSlice = sliceReportByProductFilter(
+      truck,
+      params.productFilter ?? null,
+      fullBridgeTons,
+      truck.sessions,
+    );
+
+    if (!gradeSlice.included) {
+      return null;
+    }
+
+    const bridgeTons = gradeSlice.bridgeTons;
+    const internalTons = gradeSlice.internalTons;
+    const reportSessions = resolveReportSessions(
+      truck.sessions,
+      gradeSlice.matchingRoundIds,
+    );
     const discrepancyTons = computeDiscrepancyTons(bridgeTons, internalTons);
     const grade = getDisplayGrade(truck);
+    const isPartialVisit = gradeSlice.isPartialVisit;
     const discrepancyWarning =
       discrepancyTons != null &&
       Math.abs(discrepancyTons) > REPORT_DISCREPANCY_WARN_TONS;
@@ -233,10 +302,6 @@ export async function getDailyTrucksReport(
       sessions: truck.sessions.map((session) => ({ createdAt: session.createdAt })),
     });
 
-    if (params.grade != null && grade !== params.grade) {
-      return null;
-    }
-
     summary.registered += 1;
     if (truck.status === "Completed") summary.completed += 1;
     else if (truck.status === "Cancelled") summary.cancelled += 1;
@@ -247,7 +312,7 @@ export async function getDailyTrucksReport(
       if (internalTons != null) totalInternalTons += internalTons;
       if (discrepancyTons != null) totalDiscrepancyTons += discrepancyTons;
 
-      for (const session of truck.sessions) {
+      for (const session of reportSessions) {
         const weightTons = Number(session.weightTons);
         if (!Number.isFinite(weightTons)) continue;
 
@@ -284,7 +349,7 @@ export async function getDailyTrucksReport(
 
     type SizeBreakdownAcc = DailyTruckSizeBreakdown & { sortOrder: number };
     const breakdownMap = new Map<string, SizeBreakdownAcc>();
-    for (const session of truck.sessions) {
+    for (const session of reportSessions) {
       const weightTons = Number(session.weightTons);
       if (!Number.isFinite(weightTons)) continue;
       const key = session.sizeId != null ? `id:${session.sizeId}` : "none";
@@ -335,8 +400,24 @@ export async function getDailyTrucksReport(
         canViewSensitiveTonnage && tonnageStatus === "included" ? discrepancyWarning : false,
       tonnageStatus,
       cancelReason: truck.cancelReason,
-      noteAr: buildNote(tonnageStatus, truck.cancelReason),
+      noteAr: buildNote(tonnageStatus, truck.cancelReason, isPartialVisit),
+      isPartialVisit,
       sizeBreakdown,
+      rounds:
+        truck.rounds.length > 1 && tonnageStatus === "included"
+          ? truck.rounds.map((r) => ({
+              roundNumber: r.roundNumber,
+              grade: r.grade,
+              gradeLabelAr: r.grade ? GRADE_LABELS[r.grade] : null,
+              netTons:
+                r.endWeightKg != null
+                  ? Math.round(
+                      ((Number(r.endWeightKg) - Number(r.startWeightKg)) / 1000) *
+                        1000,
+                    ) / 1000
+                  : null,
+            }))
+          : [],
     };
   }).filter((row): row is DailyTruckRow => row !== null);
 
@@ -364,7 +445,7 @@ export async function getDailyTrucksReport(
     windowTo: window.to.toISOString(),
     windowLabelAr: formatOperationalWindowLabel(window),
     cutoffHour: OPERATIONAL_DAY_CUTOFF_HOUR,
-    filters: { ...customerFilter, ...gradeFilter },
+    filters: { ...customerFilter, ...productFilterMeta },
     summary,
     sizeTotals,
     rows,
@@ -387,7 +468,7 @@ export interface DailyLoadingSummaryParams {
   operationalDate: string;
   period?: ReportPeriod;
   customerId?: number;
-  grade?: SalesOrderGrade;
+  productFilter?: ReportProductFilter;
 }
 
 export interface LoadingSummaryByCustomerRow {
@@ -433,8 +514,8 @@ export interface DailyLoadingSummary {
   filters: {
     customerId?: number;
     customerName?: string;
-    grade?: SalesOrderGrade;
-    gradeLabelAr?: string;
+    productFilter?: ReportProductFilter;
+    productFilterLabelAr?: string;
   };
   totals: {
     truckCount: number;
@@ -483,9 +564,12 @@ export async function getDailyLoadingSummary(
     }
     customerFilter = { customerId: customer.id, customerName: customer.fullName };
   }
-  const gradeFilter =
-    params.grade != null
-      ? { grade: params.grade, gradeLabelAr: GRADE_LABELS[params.grade] }
+  const productFilterMeta =
+    params.productFilter != null
+      ? {
+          productFilter: params.productFilter,
+          productFilterLabelAr: PRODUCT_FILTER_LABELS_AR[params.productFilter],
+        }
       : {};
 
   const trucks = await prisma.truckOperation.findMany({
@@ -503,8 +587,18 @@ export async function getDailyLoadingSummary(
       customer: { select: { id: true, fullName: true } },
       destination: { select: { id: true, name: true } },
       salesOrder: { select: { grade: true } },
+      rounds: {
+        orderBy: { roundNumber: "asc" },
+        select: {
+          id: true,
+          grade: true,
+          startWeightKg: true,
+          endWeightKg: true,
+        },
+      },
       sessions: {
         select: {
+          bridgeRoundId: true,
           sizeId: true,
           weightTons: true,
           size: { select: { code: true, displayName: true, sortOrder: true } },
@@ -547,10 +641,21 @@ export async function getDailyLoadingSummary(
     });
     if (tonnageStatus !== "included") continue;
 
-    if (params.grade != null && getDisplayGrade(truck) !== params.grade) continue;
+    const fullBridgeTons = computeBridgeTons(truck.grossWeightKg, truck.tareWeightKg);
+    const gradeSlice = sliceReportByProductFilter(
+      truck,
+      params.productFilter ?? null,
+      fullBridgeTons,
+      truck.sessions,
+    );
+    if (!gradeSlice.included) continue;
 
-    const bridgeTons = computeBridgeTons(truck.grossWeightKg, truck.tareWeightKg) ?? 0;
-    const internalTons = computeInternalTons(truck.sessions) ?? 0;
+    const bridgeTons = gradeSlice.bridgeTons ?? 0;
+    const internalTons = gradeSlice.internalTons ?? 0;
+    const reportSessions = resolveReportSessions(
+      truck.sessions,
+      gradeSlice.matchingRoundIds,
+    );
 
     truckCount += 1;
     totalBridgeTons += bridgeTons;
@@ -599,7 +704,7 @@ export async function getDailyLoadingSummary(
       citySizeMap.set(cityKey, citySizeAcc);
     }
 
-    for (const session of truck.sessions) {
+    for (const session of reportSessions) {
       const weightTons = Number(session.weightTons);
       if (!Number.isFinite(weightTons)) continue;
       const sizeKey = session.sizeId != null ? `id:${session.sizeId}` : "none";
@@ -688,7 +793,7 @@ export async function getDailyLoadingSummary(
     windowLabelAr: formatOperationalWindowLabel(window),
     cutoffHour: OPERATIONAL_DAY_CUTOFF_HOUR,
     generatedAt: new Date().toISOString(),
-    filters: { ...customerFilter, ...gradeFilter },
+    filters: { ...customerFilter, ...productFilterMeta },
     totals: {
       truckCount,
       totalBridgeTons: round3(totalBridgeTons),

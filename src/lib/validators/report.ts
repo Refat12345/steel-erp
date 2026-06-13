@@ -1,6 +1,8 @@
 import { z } from "zod";
 
-export const dailyTrucksReportQuerySchema = z.object({
+const productFilterValues = ["FIRST", "SECOND", "SHORTBAR", "SCRAP"] as const;
+
+const baseReportQuerySchema = z.object({
   date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "صيغة التاريخ غير صالحة (YYYY-MM-DD)"),
@@ -9,6 +11,13 @@ export const dailyTrucksReportQuerySchema = z.object({
       (v) => (v === "" || v === null || v === undefined ? undefined : v),
       z.coerce.number().int().positive().optional(),
     ),
+  /** Preferred query param — rebar grade, combined shortbar, or scrap. */
+  product: z
+    .preprocess(
+      (v) => (v === "" || v === null || v === undefined ? undefined : v),
+      z.enum(productFilterValues).optional(),
+    ),
+  /** @deprecated Use `product` — kept for existing report links. */
   grade: z
     .preprocess(
       (v) => (v === "" || v === null || v === undefined ? undefined : v),
@@ -16,13 +25,28 @@ export const dailyTrucksReportQuerySchema = z.object({
     ),
 });
 
+export const dailyTrucksReportQuerySchema = baseReportQuerySchema.transform(
+  (data) => ({
+    date: data.date,
+    customerId: data.customerId,
+    productFilter: data.product ?? data.grade,
+  }),
+);
+
 export type DailyTrucksReportQuery = z.infer<typeof dailyTrucksReportQuerySchema>;
 
-export const loadingSummaryQuerySchema = dailyTrucksReportQuerySchema.extend({
-  period: z.preprocess(
-    (v) => (v === "" || v === null || v === undefined ? undefined : v),
-    z.enum(["daily", "weekly", "monthly"]).optional(),
-  ),
-});
+export const loadingSummaryQuerySchema = baseReportQuerySchema
+  .extend({
+    period: z.preprocess(
+      (v) => (v === "" || v === null || v === undefined ? undefined : v),
+      z.enum(["daily", "weekly", "monthly"]).optional(),
+    ),
+  })
+  .transform((data) => ({
+    date: data.date,
+    customerId: data.customerId,
+    productFilter: data.product ?? data.grade,
+    period: data.period,
+  }));
 
 export type LoadingSummaryQuery = z.infer<typeof loadingSummaryQuerySchema>;

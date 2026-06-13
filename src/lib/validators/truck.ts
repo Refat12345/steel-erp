@@ -3,6 +3,9 @@ import { MIN_WEIGHT_KG, MAX_WEIGHT_KG } from "@/lib/weight-bounds";
 
 const requestItemSchema = z.object({
   sizeId: z.number().int().positive("القياس مطلوب"),
+  // Grade per request line: the same size may be requested once per grade
+  // (e.g. 12mm FIRST + 12mm SECOND on one truck).
+  grade: z.enum(["FIRST", "SECOND"]).optional().nullable(),
   bundleCount: z.number().int().min(1, "عدد الربطات يجب أن يكون 1 على الأقل").optional().nullable(),
   requestedTons: z
     .number()
@@ -46,16 +49,32 @@ const weightKgSchema = z
 
 export const tareSchema = z.object({ weightKg: weightKgSchema });
 
-export const grossSchema = z.object({ weightKg: weightKgSchema });
+// `exit` selects what happens after the external weighing:
+//   "final"  — truck leaves; operation moves to SecondWeigh (default,
+//              backward-compatible with clients that omit the field).
+//   "return" — truck goes back inside to load the next round; a new bridge
+//              round opens automatically at this weight.
+export const grossSchema = z.object({
+  weightKg: weightKgSchema,
+  exit: z.enum(["final", "return"]).default("final"),
+});
+
+// Loader's confirmation of the current round; optionally declares the grade
+// actually loaded in this round (one grade per round — management rule).
+export const loadingCompleteSchema = z.object({
+  grade: z.enum(["FIRST", "SECOND"]).optional().nullable(),
+});
 
 // Corrections carry the version the client read, so concurrent edits are
 // detected via optimistic locking. See correctTare/correctGross in
-// truck.service.ts.
+// truck.service.ts. (No `exit` here — corrections never change the round
+// chain shape, only the recorded weight.)
 export const correctTareSchema = tareSchema.extend({
   expectedVersion: z.number().int().nonnegative("الإصدار المتوقّع غير صالح"),
 });
 
-export const correctGrossSchema = grossSchema.extend({
+export const correctGrossSchema = z.object({
+  weightKg: weightKgSchema,
   expectedVersion: z.number().int().nonnegative("الإصدار المتوقّع غير صالح"),
 });
 

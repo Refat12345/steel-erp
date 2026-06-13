@@ -55,7 +55,8 @@ import {
   computeWeighbridgeDiscrepancy,
   isWeighbridgeDiscrepancyWarning,
 } from "@/lib/weighbridge-discrepancy";
-import { getDisplayGradeLabel } from "@/lib/truck-grade";
+import { getDisplayGradeLabel, GRADE_LABELS } from "@/lib/truck-grade";
+import { shouldWarnBridgeRoundProductMix } from "@/lib/material-kind";
 import type { SalesOrderGrade } from "@prisma/client";
 import { compressImage } from "@/lib/compress-image";
 import {
@@ -69,20 +70,28 @@ interface SizeOption {
   id: number;
   code: string;
   displayName: string;
+  isBundleType: boolean;
 }
 
 interface WeighSessionItem {
   id: number;
+  bridgeRoundId: number | null;
   sessionNumber: number;
   sizeId: number | null;
   bundleCount: number | null;
   weightTons: string;
   version: number;
-  size: { id: number; code: string; displayName: string } | null;
+  size: {
+    id: number;
+    code: string;
+    displayName: string;
+    isBundleType: boolean;
+  } | null;
 }
 
 interface TruckPhoto {
   id: number;
+  bridgeRoundId: number | null;
   filePath: string;
   capturedAt: string;
 }
@@ -90,9 +99,24 @@ interface TruckPhoto {
 interface TruckRequestItemData {
   id: number;
   sizeId: number;
+  grade: SalesOrderGrade | null;
   bundleCount: number | null;
   requestedTons: string | null;
   size: { id: number; code: string; displayName: string; isBundleType: boolean };
+}
+
+interface BridgeRoundItem {
+  id: number;
+  roundNumber: number;
+  grade: SalesOrderGrade | null;
+  startWeightKg: string;
+  endWeightKg: string | null;
+  startTime: string;
+  endTime: string | null;
+  isFinal: boolean;
+  loadingConfirmedAt: string | null;
+  loader: { id: number; fullName: string; username: string } | null;
+  version: number;
 }
 
 interface TruckDetail {
@@ -122,6 +146,7 @@ interface TruckDetail {
   sessions: WeighSessionItem[];
   photos: TruckPhoto[];
   requestItems: TruckRequestItemData[];
+  rounds: BridgeRoundItem[];
   operationalGrade: SalesOrderGrade | null;
   salesOrder: {
     orderNumber: string;
@@ -272,7 +297,6 @@ export function ScaleOperationView({
     );
   }
 
-  const st = statusMap[truck.status] ?? { label: truck.status, color: "" };
   const totalSessionsTons = truck.sessions.reduce(
     (sum, s) => sum + Number(s.weightTons),
     0,
@@ -291,6 +315,37 @@ export function ScaleOperationView({
   const isActive = !["Completed", "Cancelled"].includes(truck.status);
   const timings = truck.timings;
 
+  // ── Bridge rounds ──────────────────────────────────────────────
+  const rounds = truck.rounds ?? [];
+  const openRound = rounds.find((r) => r.endWeightKg == null) ?? null;
+  const hasClosedRound = rounds.some((r) => r.endWeightKg != null);
+  const isMultiRound = rounds.length > 1;
+  const currentRoundSessions = openRound
+    ? truck.sessions.filter((s) => s.bridgeRoundId === openRound.id)
+    : [];
+  const currentRoundTons = currentRoundSessions.reduce(
+    (sum, s) => sum + Number(s.weightTons),
+    0,
+  );
+  const currentRoundPhotoCount = openRound
+    ? truck.photos.filter((p) => p.bridgeRoundId === openRound.id).length
+    : truck.photos.length;
+  const lastClosedRound =
+    [...rounds].reverse().find((r) => r.endWeightKg != null) ?? null;
+  const lastClosedRoundTons = lastClosedRound
+    ? truck.sessions
+        .filter((s) => s.bridgeRoundId === lastClosedRound.id)
+        .reduce((sum, s) => sum + Number(s.weightTons), 0)
+    : 0;
+
+  const st = statusMap[truck.status] ?? { label: truck.status, color: "" };
+  // FirstWeigh on round ≥ 2 means "weighed out, came back to load more" —
+  // the default label ("وزن فارغ") would be misleading.
+  const statusLabel =
+    truck.status === "FirstWeigh" && openRound && openRound.roundNumber > 1
+      ? `بانتظار التحميل — دورة ${openRound.roundNumber}`
+      : st.label;
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -305,8 +360,15 @@ export function ScaleOperationView({
           عملية #{truck.id}
         </h2>
         <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${st.color}`}>
-          {st.label}
+          {statusLabel}
         </span>
+        {isMultiRound && (
+          <span className="inline-flex items-center rounded-full bg-violet-100 px-3 py-1 text-sm font-medium text-violet-800">
+            {openRound
+              ? `دورة ${openRound.roundNumber} من ${rounds.length}`
+              : `${rounds.length} دورات قبان`}
+          </span>
+        )}
       </div>
 
       {/* Info Cards */}
@@ -373,6 +435,15 @@ export function ScaleOperationView({
         </div>
       )}
 
+      {/* Bridge Rounds (multi-round visits only) */}
+      {isMultiRound && (
+        <RoundsCard
+          rounds={rounds}
+          sessions={truck.sessions}
+          discrepancyWarnKg={discrepancyWarnKg}
+        />
+      )}
+
       {/* Timeline / Timing Breakdown */}
       <TimingCard
         createdAt={truck.createdAt}
@@ -395,6 +466,9 @@ export function ScaleOperationView({
                 <TableHeader>
                   <TableRow>
                     <TableHead>القياس</TableHead>
+                    {truck.requestItems.some((i) => i.grade) && (
+                      <TableHead>النخب</TableHead>
+                    )}
                     <TableHead>الكمية المطلوبة</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -402,6 +476,11 @@ export function ScaleOperationView({
                   {truck.requestItems.map((item) => (
                     <TableRow key={item.id}>
                       <TableCell>{item.size.displayName}</TableCell>
+                      {truck.requestItems.some((i) => i.grade) && (
+                        <TableCell>
+                          {item.grade ? GRADE_LABELS[item.grade] : "—"}
+                        </TableCell>
+                      )}
                       <TableCell className="font-mono">
                         {item.size.isBundleType
                           ? item.bundleCount != null
@@ -453,7 +532,9 @@ export function ScaleOperationView({
                 إدخال وزن الفارغ
               </Button>
             )}
-            {["FirstWeigh", "OnScale", "LoadingComplete"].includes(truck.status) && canTare && (
+            {["FirstWeigh", "OnScale", "LoadingComplete"].includes(truck.status) &&
+              canTare &&
+              !hasClosedRound && (
               <Button
                 variant="outline"
                 onClick={() => setShowCorrectTareDialog(true)}
@@ -498,14 +579,19 @@ export function ScaleOperationView({
                 إدخال وزن المحمّل
               </Button>
             )}
-            {truck.status === "SecondWeigh" && canGross && (
+            {(truck.status === "SecondWeigh" ||
+              (["FirstWeigh", "OnScale", "LoadingComplete"].includes(truck.status) &&
+                hasClosedRound)) &&
+              canGross && (
               <Button
                 variant="outline"
                 onClick={() => setShowCorrectGrossDialog(true)}
                 disabled={actionLoading}
               >
                 <Pencil className="h-4 w-4 me-1" />
-                تصحيح وزن المحمّل
+                {truck.status === "SecondWeigh"
+                  ? "تصحيح وزن المحمّل"
+                  : "تصحيح آخر وزنة خارجية"}
               </Button>
             )}
             {truck.status === "SecondWeigh" && canClose && (
@@ -568,6 +654,7 @@ export function ScaleOperationView({
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[50px]">#</TableHead>
+                    {isMultiRound && <TableHead className="w-[60px]">الدورة</TableHead>}
                     <TableHead>القياس</TableHead>
                     <TableHead>الربطات</TableHead>
                     <TableHead>الوزن (طن)</TableHead>
@@ -575,9 +662,22 @@ export function ScaleOperationView({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {truck.sessions.map((s) => (
+                  {truck.sessions.map((s) => {
+                    // Sessions of an already-weighed round are frozen — the
+                    // service rejects edits, so don't offer the buttons.
+                    const inOpenRound =
+                      openRound != null && s.bridgeRoundId === openRound.id;
+                    const roundNumber =
+                      rounds.find((r) => r.id === s.bridgeRoundId)?.roundNumber ??
+                      null;
+                    return (
                     <TableRow key={s.id}>
                       <TableCell className="font-mono">{s.sessionNumber}</TableCell>
+                      {isMultiRound && (
+                        <TableCell className="font-mono">
+                          {roundNumber ?? "—"}
+                        </TableCell>
+                      )}
                       <TableCell>{s.size?.displayName ?? "—"}</TableCell>
                       <TableCell>{s.bundleCount ?? "—"}</TableCell>
                       <TableCell className="font-mono">
@@ -585,29 +685,37 @@ export function ScaleOperationView({
                       </TableCell>
                       {canManageSession && (
                         <TableCell>
-                          <div className="flex items-center gap-0.5">
-                            {canEditSession && (
-                              <EditSessionButton
-                                truckId={truck.id}
-                                session={s}
-                                sizes={sizes}
-                                onEdited={fetchTruck}
-                              />
-                            )}
-                            {canDeleteSession && (
-                              <DeleteSessionButton
-                                truckId={truck.id}
-                                session={s}
-                                onDeleted={fetchTruck}
-                              />
-                            )}
-                          </div>
+                          {inOpenRound ? (
+                            <div className="flex items-center gap-0.5">
+                              {canEditSession && (
+                                <EditSessionButton
+                                  truckId={truck.id}
+                                  session={s}
+                                  sizes={sizes}
+                                  onEdited={fetchTruck}
+                                />
+                              )}
+                              {canDeleteSession && (
+                                <DeleteSessionButton
+                                  truckId={truck.id}
+                                  session={s}
+                                  onDeleted={fetchTruck}
+                                />
+                              )}
+                            </div>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                              <Lock className="h-3 w-3" aria-hidden />
+                              مُرحَّلة
+                            </span>
+                          )}
                         </TableCell>
                       )}
                     </TableRow>
-                  ))}
+                    );
+                  })}
                   <TableRow className="font-bold">
-                    <TableCell colSpan={3}>المجموع الكلي (كل الوزنات)</TableCell>
+                    <TableCell colSpan={isMultiRound ? 4 : 3}>المجموع الكلي (كل الوزنات)</TableCell>
                     <TableCell className="font-mono">
                       {totalSessionsTons.toFixed(3)}
                     </TableCell>
@@ -709,17 +817,30 @@ export function ScaleOperationView({
       <WeightDialog
         open={showGrossDialog}
         onOpenChange={setShowGrossDialog}
-        title="إدخال وزن المحمّل (كغ)"
+        title={
+          openRound && openRound.roundNumber > 1
+            ? `إدخال وزنة الدورة ${openRound.roundNumber} (كغ)`
+            : "إدخال وزن المحمّل (كغ)"
+        }
         crossCheck={
-          tare != null
+          openRound
             ? {
-                tareKg: tare,
-                internalTotalTons: totalSessionsTons,
+                tareKg: Number(openRound.startWeightKg),
+                internalTotalTons: currentRoundTons,
                 discrepancyWarnKg,
               }
             : undefined
         }
-        onSubmit={(kg) => doAction(`/api/trucks/${truck.id}/gross`, "PATCH", { weightKg: kg })}
+        exitChoice={{
+          roundNumber: openRound?.roundNumber ?? 1,
+          roundStartKg: openRound ? Number(openRound.startWeightKg) : tare ?? 0,
+        }}
+        onSubmit={(kg, exit) =>
+          doAction(`/api/trucks/${truck.id}/gross`, "PATCH", {
+            weightKg: kg,
+            exit: exit ?? "final",
+          })
+        }
       />
       <WeightDialog
         open={showCorrectTareDialog}
@@ -736,16 +857,30 @@ export function ScaleOperationView({
       <WeightDialog
         open={showCorrectGrossDialog}
         onOpenChange={setShowCorrectGrossDialog}
-        title="تصحيح وزن المحمّل (كغ)"
-        currentValue={gross ?? undefined}
+        title={
+          lastClosedRound && !lastClosedRound.isFinal
+            ? `تصحيح وزنة الدورة ${lastClosedRound.roundNumber} (كغ)`
+            : "تصحيح وزن المحمّل (كغ)"
+        }
+        currentValue={
+          lastClosedRound
+            ? Number(lastClosedRound.endWeightKg)
+            : gross ?? undefined
+        }
         crossCheck={
-          tare != null
+          lastClosedRound
             ? {
-                tareKg: tare,
-                internalTotalTons: totalSessionsTons,
+                tareKg: Number(lastClosedRound.startWeightKg),
+                internalTotalTons: lastClosedRoundTons,
                 discrepancyWarnKg,
               }
-            : undefined
+            : tare != null
+              ? {
+                  tareKg: tare,
+                  internalTotalTons: totalSessionsTons,
+                  discrepancyWarnKg,
+                }
+              : undefined
         }
         onSubmit={(kg) =>
           doAction(`/api/trucks/${truck.id}/correct-gross`, "PATCH", {
@@ -759,6 +894,8 @@ export function ScaleOperationView({
         onOpenChange={setShowSessionDialog}
         truckId={truck.id}
         sizes={sizes}
+        currentRoundSessions={currentRoundSessions}
+        roundNumber={openRound?.roundNumber ?? 1}
         onSuccess={fetchTruck}
       />
       <LoadingCompleteDialog
@@ -771,11 +908,22 @@ export function ScaleOperationView({
             ? `${truck.customer.fullName} (${truck.customer.code})`
             : null
         }
-        sessions={truck.sessions}
+        sessions={currentRoundSessions}
         requestItems={truck.requestItems}
-        photoCount={truck.photos.length}
-        onConfirm={async () => {
-          const ok = await doAction(`/api/trucks/${truck.id}/loading-complete`, "POST");
+        photoCount={currentRoundPhotoCount}
+        roundNumber={openRound?.roundNumber ?? 1}
+        initialGrade={openRound?.grade ?? null}
+        showGradeSelect={
+          truck.operationalGrade != null ||
+          truck.requestItems.some((i) => i.grade != null) ||
+          isMultiRound
+        }
+        onConfirm={async (grade) => {
+          const ok = await doAction(
+            `/api/trucks/${truck.id}/loading-complete`,
+            "POST",
+            grade === undefined ? undefined : { grade },
+          );
           if (ok) setShowLoadingCompleteDialog(false);
           return ok;
         }}
@@ -796,6 +944,121 @@ function InfoCard({ label, value }: { label: string; value: string }) {
       <CardContent className="py-3">
         <div className="text-xs text-muted-foreground">{label}</div>
         <div className="text-sm font-semibold mt-0.5">{value}</div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Bridge Rounds Card ───────────────────────────────────────────
+
+function RoundsCard({
+  rounds,
+  sessions,
+  discrepancyWarnKg,
+}: {
+  rounds: BridgeRoundItem[];
+  sessions: WeighSessionItem[];
+  discrepancyWarnKg: number;
+}) {
+  const totalNetKg = rounds.reduce((sum, r) => {
+    if (r.endWeightKg == null) return sum;
+    return sum + (Number(r.endWeightKg) - Number(r.startWeightKg));
+  }, 0);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">دورات القبان ({rounds.length})</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-xs text-muted-foreground mb-2">
+          كل دورة = ما بين وزنتين خارجيتين. صافي الدورة هو الوزن المعتمد لما
+          حُمِّل فيها، ووزن بداية كل دورة يُنسخ تلقائياً من نهاية الدورة السابقة.
+        </p>
+        <div className="overflow-x-auto">
+          <Table className="min-w-[640px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[50px]">#</TableHead>
+                <TableHead>النخب</TableHead>
+                <TableHead>الأصناف المحمّلة</TableHead>
+                <TableHead>وزن البداية (كغ)</TableHead>
+                <TableHead>وزن النهاية (كغ)</TableHead>
+                <TableHead>الصافي المعتمد (كغ)</TableHead>
+                <TableHead>الفرق عن الداخلي</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rounds.map((r) => {
+                const startKg = Number(r.startWeightKg);
+                const endKg = r.endWeightKg != null ? Number(r.endWeightKg) : null;
+                const netKg = endKg != null ? endKg - startKg : null;
+                const roundSessions = sessions.filter(
+                  (s) => s.bridgeRoundId === r.id,
+                );
+                const internalKg =
+                  roundSessions.reduce((sum, s) => sum + Number(s.weightTons), 0) *
+                  1000;
+                const discrepancyKg =
+                  netKg != null ? Math.abs(netKg - internalKg) : null;
+                const sizeNames = [
+                  ...new Set(
+                    roundSessions
+                      .map((s) => s.size?.displayName)
+                      .filter((n): n is string => Boolean(n)),
+                  ),
+                ];
+                return (
+                  <TableRow key={r.id}>
+                    <TableCell className="font-mono">{r.roundNumber}</TableCell>
+                    <TableCell>{r.grade ? GRADE_LABELS[r.grade] : "—"}</TableCell>
+                    <TableCell className="text-xs">
+                      {sizeNames.length > 0 ? sizeNames.join("، ") : "—"}
+                    </TableCell>
+                    <TableCell className="font-mono">
+                      {startKg.toLocaleString("en-US")}
+                    </TableCell>
+                    <TableCell className="font-mono">
+                      {endKg != null ? (
+                        endKg.toLocaleString("en-US")
+                      ) : (
+                        <span className="text-amber-600">دورة جارية</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="font-mono font-semibold">
+                      {netKg != null ? netKg.toLocaleString("en-US") : "—"}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {discrepancyKg != null ? (
+                        <span
+                          className={
+                            isWeighbridgeDiscrepancyWarning(
+                              discrepancyKg,
+                              discrepancyWarnKg,
+                            )
+                              ? "font-bold text-red-600"
+                              : ""
+                          }
+                        >
+                          {Math.round(discrepancyKg).toLocaleString("en-US")} كغ
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              <TableRow className="font-bold bg-muted/50">
+                <TableCell colSpan={5}>مجموع الصافي المعتمد</TableCell>
+                <TableCell className="font-mono">
+                  {totalNetKg.toLocaleString("en-US")}
+                </TableCell>
+                <TableCell />
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
       </CardContent>
     </Card>
   );
@@ -998,6 +1261,7 @@ function WeightDialog({
   title,
   currentValue,
   crossCheck,
+  exitChoice,
   onSubmit,
 }: {
   open: boolean;
@@ -1009,14 +1273,27 @@ function WeightDialog({
     internalTotalTons: number;
     discrepancyWarnKg: number;
   };
-  onSubmit: (kg: number) => Promise<boolean>;
+  /**
+   * When set, the confirm step offers two outcomes for the external
+   * weighing: final exit, or return inside to load another round.
+   */
+  exitChoice?: {
+    roundNumber: number;
+    roundStartKg: number;
+  };
+  onSubmit: (kg: number, exit?: "final" | "return") => Promise<boolean>;
 }) {
   const [value, setValue] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submittingExit, setSubmittingExit] = useState<"final" | "return" | null>(
+    null,
+  );
 
   const parsedKg = parseFloat(value);
   const isValid = !isNaN(parsedKg) && parsedKg > 0;
+  const roundNetPreview =
+    exitChoice && isValid ? parsedKg - exitChoice.roundStartKg : null;
   const discrepancyPreview =
     crossCheck && isValid
       ? computeWeighbridgeDiscrepancy({
@@ -1041,10 +1318,12 @@ function WeightDialog({
     setConfirming(true);
   };
 
-  const handleConfirm = async () => {
+  const handleConfirm = async (exit?: "final" | "return") => {
     setSubmitting(true);
-    const ok = await onSubmit(parsedKg);
+    if (exit) setSubmittingExit(exit);
+    const ok = await onSubmit(parsedKg, exit);
     setSubmitting(false);
+    setSubmittingExit(null);
     if (ok) {
       setValue("");
       setConfirming(false);
@@ -1125,24 +1404,75 @@ function WeightDialog({
               <p className="text-3xl font-bold font-mono" dir="ltr">
                 {parsedKg.toLocaleString("en-US")} <span className="text-base font-normal">كغ</span>
               </p>
+              {exitChoice && roundNetPreview != null && (
+                <p className="mt-2 text-sm">
+                  <span className="text-muted-foreground">
+                    صافي الدورة {exitChoice.roundNumber}:{" "}
+                  </span>
+                  <span className="font-mono font-semibold" dir="ltr">
+                    {roundNetPreview.toLocaleString("en-US")} كغ
+                  </span>
+                </p>
+              )}
             </div>
-            <DialogFooter className="gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setConfirming(false)}
-              >
-                تعديل القيمة
-              </Button>
-              <Button
-                type="button"
-                onClick={() => void handleConfirm()}
-                disabled={submitting}
-                className="bg-green-600 hover:bg-green-700"
-              >
-                {submitting ? "جاري الحفظ..." : "تأكيد الحفظ"}
-              </Button>
-            </DialogFooter>
+            {exitChoice ? (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  «خروج نهائي» يُنهي الوزن ويجهّز العملية للإغلاق. «رجوع
+                  للتحميل» يفتح دورة جديدة تبدأ من هذه الوزنة لتحميل صنف أو نخب
+                  آخر.
+                </p>
+                <div className="grid grid-cols-1 gap-2">
+                  <Button
+                    type="button"
+                    onClick={() => void handleConfirm("final")}
+                    disabled={submitting}
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    {submittingExit === "final"
+                      ? "جاري الحفظ..."
+                      : "تأكيد — وزنة وخروج نهائي"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => void handleConfirm("return")}
+                    disabled={submitting}
+                    className="border border-violet-300 bg-violet-50 text-violet-900 hover:bg-violet-100 dark:bg-violet-950/30 dark:text-violet-100"
+                  >
+                    {submittingExit === "return"
+                      ? "جاري الحفظ..."
+                      : `تأكيد — وزنة ورجوع للتحميل (دورة ${exitChoice.roundNumber + 1})`}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setConfirming(false)}
+                    disabled={submitting}
+                  >
+                    تعديل القيمة
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <DialogFooter className="gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setConfirming(false)}
+                >
+                  تعديل القيمة
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void handleConfirm()}
+                  disabled={submitting}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  {submitting ? "جاري الحفظ..." : "تأكيد الحفظ"}
+                </Button>
+              </DialogFooter>
+            )}
           </div>
         )}
       </DialogContent>
@@ -1157,12 +1487,17 @@ function SessionDialog({
   onOpenChange,
   truckId,
   sizes,
+  currentRoundSessions,
+  roundNumber,
   onSuccess,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   truckId: number;
   sizes: SizeOption[];
+  /** Sessions already recorded in the current bridge round. */
+  currentRoundSessions: WeighSessionItem[];
+  roundNumber: number;
   onSuccess: () => void;
 }) {
   const [sizeCode, setSizeCode] = useState<string>("");
@@ -1175,6 +1510,17 @@ function SessionDialog({
   const parsedBundles = bundleCount ? parseInt(bundleCount, 10) : null;
   const selectedSize = sizes.find((s) => s.code === sizeCode);
   const isValid = !isNaN(parsedWeight) && parsedWeight > 0;
+
+  const existingSizeCodes = currentRoundSessions
+    .map(
+      (s) =>
+        s.size?.code ?? sizes.find((sz) => sz.id === s.sizeId)?.code ?? null,
+    )
+    .filter((code): code is string => code != null);
+
+  const mixedSizeWarning =
+    selectedSize != null &&
+    shouldWarnBridgeRoundProductMix(existingSizeCodes, selectedSize.code);
 
   const reset = () => {
     setSizeCode("");
@@ -1255,6 +1601,7 @@ function SessionDialog({
                 </SelectContent>
               </Select>
             </div>
+            {selectedSize?.isBundleType && (
             <div className="space-y-2">
               <Label>عدد الربطات (اختياري)</Label>
               <Input
@@ -1264,6 +1611,7 @@ function SessionDialog({
                 onChange={(e) => setBundleCount(e.target.value)}
               />
             </div>
+            )}
             <div className="space-y-2">
               <Label>الوزن بالطن</Label>
               <Input
@@ -1305,6 +1653,20 @@ function SessionDialog({
                 </div>
               </div>
             </div>
+            {mixedSizeWarning && (
+              <div
+                className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/30 dark:border-amber-700 dark:text-amber-200 flex gap-2"
+                role="alert"
+              >
+                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
+                <span>
+                  تنبيه: الدورة {roundNumber} تحتوي نوعاً مختلفاً (مثلاً مبروم
+                  مع قصائر أو خردة) — القبان الخارجي يعطي وزناً واحداً للدورة
+                  ولا يفصل بين الأنواع. إن أردت فصل كل نوع، استخدم «رجوع
+                  للتحميل» وافتح دورة جديدة.
+                </span>
+              </div>
+            )}
             <DialogFooter className="gap-2">
               <Button type="button" variant="outline" onClick={() => setConfirming(false)}>
                 تعديل القيم
@@ -1436,6 +1798,7 @@ function EditSessionButton({
                   </SelectContent>
                 </Select>
               </div>
+              {selectedSize?.isBundleType && (
               <div className="space-y-2">
                 <Label>عدد الربطات</Label>
                 <Input
@@ -1445,6 +1808,7 @@ function EditSessionButton({
                   onChange={(e) => setBundleCount(e.target.value)}
                 />
               </div>
+              )}
               <div className="space-y-2">
                 <Label>الوزن بالطن</Label>
                 <Input
@@ -1666,6 +2030,9 @@ function LoadingCompleteDialog({
   sessions,
   requestItems,
   photoCount,
+  roundNumber,
+  initialGrade,
+  showGradeSelect,
   onConfirm,
 }: {
   open: boolean;
@@ -1673,16 +2040,30 @@ function LoadingCompleteDialog({
   truckId: number;
   plateNumber: string;
   customerLabel: string | null;
+  /** Sessions of the CURRENT round only — earlier rounds are already weighed. */
   sessions: WeighSessionItem[];
   requestItems: TruckRequestItemData[];
   photoCount: number;
-  onConfirm: () => Promise<boolean>;
+  roundNumber: number;
+  initialGrade: SalesOrderGrade | null;
+  showGradeSelect: boolean;
+  onConfirm: (grade?: SalesOrderGrade | null) => Promise<boolean>;
 }) {
   const [saving, setSaving] = useState(false);
+  const [grade, setGrade] = useState<SalesOrderGrade | "">(initialGrade ?? "");
+
+  // Re-sync the default whenever the dialog opens for a (possibly new) round.
+  useEffect(() => {
+    if (open) setGrade(initialGrade ?? "");
+  }, [open, initialGrade]);
 
   const bySize = aggregateWeighSessionsBySize(sessions);
   const { rows: requestRows, warnings: requestWarnings } =
-    buildRequestVsLoadedComparison(requestItems, sessions);
+    buildRequestVsLoadedComparison(
+      requestItems,
+      sessions,
+      showGradeSelect ? (grade === "" ? null : grade) : undefined,
+    );
   const totalTons = sessions.reduce((sum, s) => sum + Number(s.weightTons), 0);
   const totalBundles =
     bySize.length > 0 && bySize.every((row) => row.totalBundles != null)
@@ -1696,14 +2077,18 @@ function LoadingCompleteDialog({
   if (photoCount === 0) {
     warnings.push("لم تُرفع أي صورة بعد — يُفضّل رفع صورة واحدة على الأقل قبل التأكيد");
   }
-  if (sessions.some((s) => s.bundleCount == null)) {
+  if (
+    sessions.some(
+      (s) => s.size?.isBundleType === true && s.bundleCount == null,
+    )
+  ) {
     warnings.push("بعض الوزنات لم يُسجَّل فيها عدد الربطات — راجع القائمة قبل التأكيد");
   }
 
   const handleConfirm = async () => {
     setSaving(true);
     try {
-      await onConfirm();
+      await onConfirm(showGradeSelect ? (grade === "" ? null : grade) : undefined);
     } finally {
       setSaving(false);
     }
@@ -1713,7 +2098,11 @@ function LoadingCompleteDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>تأكيد اكتمال التحميل</DialogTitle>
+          <DialogTitle>
+            {roundNumber > 1
+              ? `تأكيد اكتمال التحميل — دورة ${roundNumber}`
+              : "تأكيد اكتمال التحميل"}
+          </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 text-sm">
@@ -1725,6 +2114,34 @@ function LoadingCompleteDialog({
             </div>
             {customerLabel && <div>{customerLabel}</div>}
           </div>
+
+          {showGradeSelect && (
+            <div className="space-y-2">
+              <Label>نخب هذه الدورة</Label>
+              <Select
+                value={grade}
+                onValueChange={(v) => setGrade((v as SalesOrderGrade | "") ?? "")}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="اختر النخب" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">بلا نخب (سكراب / غير مبروم)</SelectItem>
+                  {(Object.entries(GRADE_LABELS) as [SalesOrderGrade, string][]).map(
+                    ([key, label]) => (
+                      <SelectItem key={key} value={key}>
+                        {label}
+                      </SelectItem>
+                    ),
+                  )}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                نخب واحد لكل دورة — إذا حمّلت الشاحنة نخبين، افصلهما بوزنة
+                «رجوع للتحميل» بين الدورتين.
+              </p>
+            </div>
+          )}
 
           {requestRows.length > 0 && (
             <div className="space-y-2">
@@ -1740,8 +2157,16 @@ function LoadingCompleteDialog({
                   </TableHeader>
                   <TableBody>
                     {requestRows.map((row) => (
-                      <TableRow key={row.sizeId}>
-                        <TableCell>{row.displayName}</TableCell>
+                      <TableRow key={`${row.sizeId}:${row.grade ?? ""}`}>
+                        <TableCell>
+                          {row.displayName}
+                          {row.grade && (
+                            <span className="text-xs text-muted-foreground">
+                              {" "}
+                              — {GRADE_LABELS[row.grade]}
+                            </span>
+                          )}
+                        </TableCell>
                         <TableCell className="font-mono text-muted-foreground">
                           {row.requestedLabel}
                         </TableCell>

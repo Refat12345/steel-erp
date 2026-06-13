@@ -280,6 +280,13 @@ async function buildOwnerStats(period: DashboardPeriod): Promise<OwnerStats> {
         tareWeightKg: true,
         closedAt: true,
         operationalGrade: true,
+        rounds: {
+          select: {
+            grade: true,
+            startWeightKg: true,
+            endWeightKg: true,
+          },
+        },
       },
     }),
     prisma.truckOperation.findMany({
@@ -379,15 +386,26 @@ async function buildOwnerStats(period: DashboardPeriod): Promise<OwnerStats> {
     }
   }
 
-  // For grade, fall back to the operationalGrade on the truck itself
-  // (set at registration time even when no SalesOrder is linked).
+  // Grade tonnage comes from bridge rounds: each round carries its own
+  // grade and its net (end − start) is the authoritative external weight
+  // of that batch. Single-round trucks behave exactly as before (round 1
+  // inherits the operation-level grade), while multi-round trucks split
+  // their tonnage correctly between grades. Trucks predating the rounds
+  // migration without rounds fall back to the operation-level grade.
   for (const t of completedInPeriod) {
-    if (!t.operationalGrade) continue;
-    const net = netTonnage(t.grossWeightKg, t.tareWeightKg);
-    gradeTons.set(
-      t.operationalGrade,
-      (gradeTons.get(t.operationalGrade) ?? 0) + net,
-    );
+    if (t.rounds.length > 0) {
+      for (const r of t.rounds) {
+        if (!r.grade || r.endWeightKg == null) continue;
+        const net = netTonnage(r.endWeightKg, r.startWeightKg);
+        gradeTons.set(r.grade, (gradeTons.get(r.grade) ?? 0) + net);
+      }
+    } else if (t.operationalGrade) {
+      const net = netTonnage(t.grossWeightKg, t.tareWeightKg);
+      gradeTons.set(
+        t.operationalGrade,
+        (gradeTons.get(t.operationalGrade) ?? 0) + net,
+      );
+    }
   }
 
   const topCustomerIds = Array.from(custTons.entries())
