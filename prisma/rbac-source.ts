@@ -81,6 +81,18 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
   { code: "user.manage", displayName: "إدارة المستخدمين", module: "admin" },
   { code: "user.set_permissions", displayName: "تعديل صلاحيات المستخدمين", module: "admin" },
   { code: "settings.edit", displayName: "تعديل الإعدادات العامة", module: "admin" },
+  // Purchasing — Billet Receiving (supplier contracts + inbound receipts)
+  { code: "billet.contract.view", displayName: "عرض عقود الموردين", module: "purchasing" },
+  { code: "billet.contract.create", displayName: "إنشاء عقد مورّد", module: "purchasing" },
+  { code: "billet.contract.edit", displayName: "تعديل عقد مورّد", module: "purchasing" },
+  { code: "billet.contract.change_status", displayName: "تغيير حالة عقد مورّد", module: "purchasing" },
+  { code: "billet.receipt.view", displayName: "عرض سجلات استلام البيلت", module: "purchasing" },
+  { code: "billet.receipt.register", displayName: "تسجيل شاحنة بيلت مسبقاً", module: "purchasing" },
+  { code: "billet.receipt.weigh", displayName: "إدخال وزن البيلت المحمّل", module: "purchasing" },
+  { code: "billet.receipt.unload", displayName: "تفريغ البيلت (صورة + عدّ + مرتجع)", module: "purchasing" },
+  { code: "billet.receipt.close", displayName: "إغلاق استلام البيلت (وزن فارغ)", module: "purchasing" },
+  { code: "billet.receipt.upload", displayName: "رفع مرفقات استلام البيلت", module: "purchasing" },
+  { code: "billet.receipt.cancel", displayName: "إلغاء استلام بيلت", module: "purchasing" },
   // Reports
   { code: "reports.view", displayName: "الوصول إلى قسم التقارير", module: "reports" },
   { code: "report.daily_trucks", displayName: "تقرير شاحنات يومي", module: "reports" },
@@ -152,6 +164,11 @@ export const RBAC_ROLE_PERMISSIONS: Readonly<Record<string, ReadonlyArray<string
     "truck.edit_queued",
     "truck.edit_approved",
     "truck.view_queue",
+    // Billet receiving: logistics pre-registers inbound trucks and sees
+    // supplier contracts to pick the right one.
+    "billet.contract.view",
+    "billet.receipt.view",
+    "billet.receipt.register",
   ],
   scale_operator: [
     "truck.view_approved",
@@ -160,6 +177,11 @@ export const RBAC_ROLE_PERMISSIONS: Readonly<Record<string, ReadonlyArray<string
     "scale.enter_gross",
     "scale.close",
     "scale.cancel",
+    // Billet receiving: external scale records loaded/empty weights and closes.
+    "billet.receipt.view",
+    "billet.receipt.weigh",
+    "billet.receipt.close",
+    "billet.receipt.cancel",
   ],
   internal_loader: [
     "truck.view_approved",
@@ -169,6 +191,10 @@ export const RBAC_ROLE_PERMISSIONS: Readonly<Record<string, ReadonlyArray<string
     "scale.upload_photo",
     "scale.loading_complete",
     "scale.reopen_before_gross",
+    // Billet receiving: internal loader handles unloading (photo + count + reject).
+    "billet.receipt.view",
+    "billet.receipt.unload",
+    "billet.receipt.upload",
   ],
   // Read-only "owner / general manager" role. Sees every operational
   // surface (dashboard, contracts, sales orders, trucks queue, finance,
@@ -188,5 +214,8 @@ export const RBAC_ROLE_PERMISSIONS: Readonly<Record<string, ReadonlyArray<string
     "report.customer_balance",
     "report.salesorder_status",
     "report.audit",
+    // Billet receiving: owner views supplier contracts and inbound receipts.
+    "billet.contract.view",
+    "billet.receipt.view",
   ],
 };

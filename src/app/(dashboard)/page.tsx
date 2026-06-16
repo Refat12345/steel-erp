@@ -33,22 +33,45 @@ export default async function DashboardPage() {
   }
 
   if (!canAccessDashboard({ roleCode: auth.roleCode, permissions: auth.permissions })) {
-    logger.warn(
-      {
-        userId: auth.userId,
-        username: auth.username,
-        roleCode: auth.roleCode,
-        reason: isAnalyticsRestrictedRole(auth.roleCode)
-          ? "role is on ANALYTICS_RESTRICTED_ROLES denylist"
-          : "missing dashboard.view permission",
-      },
-      "dashboard page access denied",
-    );
+    const reason = isAnalyticsRestrictedRole(auth.roleCode)
+      ? "role is on ANALYTICS_RESTRICTED_ROLES denylist"
+      : "missing dashboard.view permission";
     // Prefer the role's configured landing page (e.g. shop-floor
     // roles land on /trucks) so login never ends on a dead-end
     // /forbidden screen. Fall back to /forbidden only when there is
     // no mapped home for the role.
-    redirect(getRoleLandingPage(auth.roleCode) ?? "/forbidden");
+    const landingPage = getRoleLandingPage(auth.roleCode);
+
+    if (landingPage) {
+      // Expected, benign redirect: operational roles always land on `/`
+      // after sign-in and are routed to their working surface. This is
+      // routine flow, not a security event — log at INFO so it doesn't
+      // pollute warning channels.
+      logger.info(
+        {
+          userId: auth.userId,
+          username: auth.username,
+          roleCode: auth.roleCode,
+          reason,
+          landingPage,
+        },
+        "redirecting non-dashboard role to landing page",
+      );
+    } else {
+      // No mapped home: a role with no dashboard access AND no operational
+      // surface reaching `/` is genuinely unexpected — keep it at WARN.
+      logger.warn(
+        {
+          userId: auth.userId,
+          username: auth.username,
+          roleCode: auth.roleCode,
+          reason,
+        },
+        "dashboard page access denied",
+      );
+    }
+
+    redirect(landingPage ?? "/forbidden");
   }
 
   const dateStr = formatDate(new Date());

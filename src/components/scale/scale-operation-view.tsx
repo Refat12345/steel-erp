@@ -219,27 +219,22 @@ export function ScaleOperationView({
     }
   }, [truckId]);
 
+  // The size catalog is only consumed by the internal-session weighing
+  // features (add / edit / delete a session weight). The external scale
+  // operator has none of those permissions and would only get a 403 from
+  // `/api/sizes`, so fetch it solely when the user can actually use it.
+  const needsSizes = canSession || canEditSession || canDeleteSession;
+
   useEffect(() => {
     fetchTruck();
+    if (!needsSizes) return;
     fetch("/api/sizes")
       .then((r) => r.json())
       .then((j) => {
         if (j.success) setSizes(j.data);
       })
       .catch(() => {});
-  }, [fetchTruck]);
-
-  // useEffect(() => {
-  //   fetchTruck();
-  //   if (canSession ) {
-  //     fetch("/api/sizes")
-  //       .then((r) => r.json())
-  //       .then((j) => {
-  //         if (j.success) setSizes(j.data);
-  //       })
-  //       .catch(() => {});
-  //   }
-  // }, [fetchTruck, canSession]);
+  }, [fetchTruck, needsSizes]);
 
   const doAction = async (
     url: string,
