@@ -84,6 +84,23 @@ enum TruckStatus {
   Cancelled
 }
 
+// ─── Billet Receiving (Purchasing) ────────────────────────────────
+
+enum SupplierContractStatus {
+  Active
+  Completed
+  Cancelled
+}
+
+enum BilletReceiptStatus {
+  Registered
+  Loaded
+  Unloading
+  AwaitingExit
+  Completed
+  Cancelled
+}
+
 // ─── Authentication & Permissions ─────────────────────────────────
 
 model User {
@@ -97,26 +114,32 @@ model User {
   updatedAt    DateTime @updatedAt @map("updated_at")
   createdById  Int?     @map("created_by_id")
 
-  role                Role                      @relation(fields: [roleCode], references: [code])
-  creator             User?                     @relation("UserCreator", fields: [createdById], references: [id])
-  createdUsers        User[]                    @relation("UserCreator")
+  role                Role                     @relation(fields: [roleCode], references: [code])
+  creator             User?                    @relation("UserCreator", fields: [createdById], references: [id])
+  createdUsers        User[]                   @relation("UserCreator")
   permissionOverrides UserPermissionOverride[]
 
-  customersCreated     Customer[]                @relation("CustomerCreator")
-  customersUpdated     Customer[]                @relation("CustomerUpdater")
-  contractsCreated     MasterContract[]          @relation("ContractCreator")
-  contractsUpdated     MasterContract[]          @relation("ContractUpdater")
-  attachmentsUploaded  ContractAttachment[]      @relation("AttachmentUploader")
-  permOverridesGranted UserPermissionOverride[]  @relation("OverrideGranter")
-  auditLogs            AuditLog[]                @relation("AuditLogUser")
-  salesOrdersCreated   SalesOrder[]              @relation("SalesOrderCreator")
-  salesOrdersUpdated   SalesOrder[]              @relation("SalesOrderUpdater")
-  paymentsCreated      Payment[]                 @relation("PaymentCreator")
-  trucksCreated        TruckOperation[]          @relation("TruckCreator")
-  trucksClosed         TruckOperation[]          @relation("TruckCloser")
-  trucksLoaded         TruckOperation[]          @relation("TruckLoader")
-  bridgeRoundsLoaded   BridgeRound[]             @relation("BridgeRoundLoader")
+  customersCreated     Customer[]               @relation("CustomerCreator")
+  customersUpdated     Customer[]               @relation("CustomerUpdater")
+  contractsCreated     MasterContract[]         @relation("ContractCreator")
+  contractsUpdated     MasterContract[]         @relation("ContractUpdater")
+  attachmentsUploaded  ContractAttachment[]     @relation("AttachmentUploader")
+  permOverridesGranted UserPermissionOverride[] @relation("OverrideGranter")
+  auditLogs            AuditLog[]               @relation("AuditLogUser")
+  salesOrdersCreated   SalesOrder[]             @relation("SalesOrderCreator")
+  salesOrdersUpdated   SalesOrder[]             @relation("SalesOrderUpdater")
+  paymentsCreated      Payment[]                @relation("PaymentCreator")
+  trucksCreated        TruckOperation[]         @relation("TruckCreator")
+  trucksClosed         TruckOperation[]         @relation("TruckCloser")
+  trucksLoaded         TruckOperation[]         @relation("TruckLoader")
+  bridgeRoundsLoaded   BridgeRound[]            @relation("BridgeRoundLoader")
   idempotencyKeys      IdempotencyKey[]
+
+  billetContractsCreated    SupplierContract[]        @relation("BilletContractCreator")
+  billetContractsUpdated    SupplierContract[]        @relation("BilletContractUpdater")
+  billetReceiptsCreated     BilletReceipt[]           @relation("BilletReceiptCreator")
+  billetReceiptsClosed      BilletReceipt[]           @relation("BilletReceiptCloser")
+  billetAttachmentsUploaded BilletReceiptAttachment[] @relation("BilletAttachmentUploader")
 
   @@map("users")
 }
@@ -189,8 +212,8 @@ model Customer {
   createdById            Int      @map("created_by_id")
   updatedById            Int?     @map("updated_by_id")
 
-  creator   User  @relation("CustomerCreator", fields: [createdById], references: [id])
-  updater   User? @relation("CustomerUpdater", fields: [updatedById], references: [id])
+  creator         User             @relation("CustomerCreator", fields: [createdById], references: [id])
+  updater         User?            @relation("CustomerUpdater", fields: [updatedById], references: [id])
   contracts       MasterContract[]
   payments        Payment[]
   truckOperations TruckOperation[] @relation("TruckCustomer")
@@ -258,29 +281,29 @@ model ContractAttachment {
 // ─── Sales Orders ─────────────────────────────────────────────────
 
 model SalesOrder {
-  orderNumber        String           @id @map("order_number") // YY-CC-OOO
-  contractNumber     String           @map("contract_number")
-  kind               SalesOrderKind
-  grade              SalesOrderGrade?
-  settlementMode     SettlementMode   @map("settlement_mode")
-  paymentDeadlineDays Int?            @map("payment_deadline_days")
-  totalQtyTons       Decimal          @map("total_qty_tons") @db.Decimal(12, 3)
-  toleranceType      ToleranceType    @map("tolerance_type")
-  toleranceValue     Decimal          @map("tolerance_value") @db.Decimal(8, 3)
-  specialRatioPct    Decimal?         @map("special_ratio_pct") @db.Decimal(5, 2)
-  bufferPct          Decimal?         @map("buffer_pct") @db.Decimal(5, 2)
-  orderDate          DateTime         @map("order_date") @db.Date
-  deliveryDate       DateTime         @map("delivery_date") @db.Date
-  status             SalesOrderStatus @default(draft)
-  notes              String?
-  createdAt          DateTime         @default(now()) @map("created_at")
-  updatedAt          DateTime         @updatedAt @map("updated_at")
-  createdById        Int              @map("created_by_id")
-  updatedById        Int?             @map("updated_by_id")
+  orderNumber         String           @id @map("order_number") // YY-CC-OOO
+  contractNumber      String           @map("contract_number")
+  kind                SalesOrderKind
+  grade               SalesOrderGrade?
+  settlementMode      SettlementMode   @map("settlement_mode")
+  paymentDeadlineDays Int?             @map("payment_deadline_days")
+  totalQtyTons        Decimal          @map("total_qty_tons") @db.Decimal(12, 3)
+  toleranceType       ToleranceType    @map("tolerance_type")
+  toleranceValue      Decimal          @map("tolerance_value") @db.Decimal(8, 3)
+  specialRatioPct     Decimal?         @map("special_ratio_pct") @db.Decimal(5, 2)
+  bufferPct           Decimal?         @map("buffer_pct") @db.Decimal(5, 2)
+  orderDate           DateTime         @map("order_date") @db.Date
+  deliveryDate        DateTime         @map("delivery_date") @db.Date
+  status              SalesOrderStatus @default(draft)
+  notes               String?
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+  createdById         Int              @map("created_by_id")
+  updatedById         Int?             @map("updated_by_id")
 
-  contract      MasterContract  @relation(fields: [contractNumber], references: [contractNumber])
-  creator       User            @relation("SalesOrderCreator", fields: [createdById], references: [id])
-  updater       User?           @relation("SalesOrderUpdater", fields: [updatedById], references: [id])
+  contract           MasterContract      @relation(fields: [contractNumber], references: [contractNumber])
+  creator            User                @relation("SalesOrderCreator", fields: [createdById], references: [id])
+  updater            User?               @relation("SalesOrderUpdater", fields: [updatedById], references: [id])
   items              OrderItem[]
   paymentSlices      PaymentSlice[]
   paymentAllocations PaymentAllocation[]
@@ -294,10 +317,10 @@ model SalesOrder {
 }
 
 model OrderItem {
-  id             Int     @id @default(autoincrement())
-  orderNumber    String  @map("order_number")
-  sizeId         Int     @map("size_id")
-  pricePerTon    Decimal @map("price_per_ton") @db.Decimal(12, 2)
+  id          Int     @id @default(autoincrement())
+  orderNumber String  @map("order_number")
+  sizeId      Int     @map("size_id")
+  pricePerTon Decimal @map("price_per_ton") @db.Decimal(12, 2)
 
   salesOrder SalesOrder @relation(fields: [orderNumber], references: [orderNumber])
   size       SizeLookup @relation(fields: [sizeId], references: [id])
@@ -364,13 +387,13 @@ model PaymentAllocation {
 // ─── Audit ────────────────────────────────────────────────────────
 
 model AuditLog {
-  id         Int      @id @default(autoincrement())
-  userId     Int      @map("user_id")
+  id         Int         @id @default(autoincrement())
+  userId     Int         @map("user_id")
   action     AuditAction
-  entityType String   @map("entity_type")
-  entityId   String   @map("entity_id")
+  entityType String      @map("entity_type")
+  entityId   String      @map("entity_id")
   details    Json?
-  createdAt  DateTime @default(now()) @map("created_at")
+  createdAt  DateTime    @default(now()) @map("created_at")
 
   user User @relation("AuditLogUser", fields: [userId], references: [id])
 
@@ -402,53 +425,53 @@ model SizeLookup {
 // ─── Truck / Weighbridge ──────────────────────────────────────────
 
 model TruckOperation {
-  id               Int          @id @default(autoincrement())
-  customerId       Int?         @map("customer_id")
-  destinationId    Int?         @map("destination_id")
-  plateNumber      String       @map("plate_number")
-  driverName       String       @map("driver_name")
-  salesOrderNumber String?      @map("sales_order_number")
-  status           TruckStatus  @default(Queued)
-  tareWeightKg     Decimal?     @map("tare_weight_kg") @db.Decimal(10, 1)
-  grossWeightKg    Decimal?     @map("gross_weight_kg") @db.Decimal(10, 1)
-  tareTime         DateTime?    @map("tare_time")
-  grossTime        DateTime?    @map("gross_time")
-  notes            String?
-  cancelReason     String?      @map("cancel_reason")
-  closedAt         DateTime?    @map("closed_at")
-  closedById       Int?         @map("closed_by_id")
+  id                 Int              @id @default(autoincrement())
+  customerId         Int?             @map("customer_id")
+  destinationId      Int?             @map("destination_id")
+  plateNumber        String           @map("plate_number")
+  driverName         String           @map("driver_name")
+  salesOrderNumber   String?          @map("sales_order_number")
+  status             TruckStatus      @default(Queued)
+  tareWeightKg       Decimal?         @map("tare_weight_kg") @db.Decimal(10, 1)
+  grossWeightKg      Decimal?         @map("gross_weight_kg") @db.Decimal(10, 1)
+  tareTime           DateTime?        @map("tare_time")
+  grossTime          DateTime?        @map("gross_time")
+  notes              String?
+  cancelReason       String?          @map("cancel_reason")
+  closedAt           DateTime?        @map("closed_at")
+  closedById         Int?             @map("closed_by_id")
   /// Timestamp when the loader confirmed loading completion. Null means no
   /// loader has confirmed yet. `enterGross` refuses to run while this is null
   /// — the strictest representation of the "loader must confirm before gross"
   /// rule, independent of the state machine.
-  loadingConfirmedAt DateTime?  @map("loading_confirmed_at")
+  loadingConfirmedAt DateTime?        @map("loading_confirmed_at")
   /// User id of the loader who confirmed loading completion. Set atomically
   /// with `loadingConfirmedAt` inside `confirmLoadingComplete`. Required for
   /// audit / dispute traceability.
-  loaderId         Int?         @map("loader_id")
+  loaderId           Int?             @map("loader_id")
   /// Set when loading is reopened before gross. Internal loading duration
   /// counts from this timestamp (or first session if never reopened).
-  lastReopenedAt   DateTime?    @map("last_reopened_at")
+  lastReopenedAt     DateTime?        @map("last_reopened_at")
   /// Operational grade declared by logistics at registration time.
   /// Used as a temporary display source until a SalesOrder is linked.
   /// Priority rule: salesOrder.grade takes precedence when present.
   /// This field is intentionally named to distinguish it from the
   /// contract-authoritative grade on SalesOrder.
-  operationalGrade SalesOrderGrade? @map("operational_grade")
+  operationalGrade   SalesOrderGrade? @map("operational_grade")
   /// Optimistic-lock counter. Incremented on every correction of tare/gross
   /// so two operators editing the same record simultaneously are detected
   /// instead of silently overwriting each other.
-  version          Int          @default(0)
-  createdAt        DateTime     @default(now()) @map("created_at")
-  updatedAt        DateTime     @updatedAt @map("updated_at")
-  createdById      Int          @map("created_by_id")
+  version            Int              @default(0)
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+  createdById        Int              @map("created_by_id")
 
-  customer     Customer?   @relation("TruckCustomer", fields: [customerId], references: [id])
-  destination  Destination? @relation(fields: [destinationId], references: [id])
-  salesOrder   SalesOrder? @relation(fields: [salesOrderNumber], references: [orderNumber])
-  creator      User        @relation("TruckCreator", fields: [createdById], references: [id])
-  closer       User?       @relation("TruckCloser", fields: [closedById], references: [id])
-  loader       User?       @relation("TruckLoader", fields: [loaderId], references: [id])
+  customer     Customer?          @relation("TruckCustomer", fields: [customerId], references: [id])
+  destination  Destination?       @relation(fields: [destinationId], references: [id])
+  salesOrder   SalesOrder?        @relation(fields: [salesOrderNumber], references: [orderNumber])
+  creator      User               @relation("TruckCreator", fields: [createdById], references: [id])
+  closer       User?              @relation("TruckCloser", fields: [closedById], references: [id])
+  loader       User?              @relation("TruckLoader", fields: [loaderId], references: [id])
   sessions     WeighSession[]
   photos       TruckPhoto[]
   requestItems TruckRequestItem[]
@@ -466,17 +489,17 @@ model TruckOperation {
 }
 
 model TruckRequestItem {
-  id               Int     @id @default(autoincrement())
-  truckOperationId Int     @map("truck_operation_id")
-  sizeId           Int     @map("size_id")
+  id               Int              @id @default(autoincrement())
+  truckOperationId Int              @map("truck_operation_id")
+  sizeId           Int              @map("size_id")
   /// Grade requested for this line. Allows the same size to appear twice on
   /// one truck request (e.g. 12mm FIRST + 12mm SECOND). Null = non-rebar or
   /// unspecified. Postgres treats NULLs as distinct in the composite unique
   /// below, so a partial unique index (grade IS NULL) in the migration keeps
   /// "same size, no grade" from duplicating.
-  grade            SalesOrderGrade? 
-  bundleCount      Int?    @map("bundle_count")
-  requestedTons    Decimal? @map("requested_tons") @db.Decimal(10, 3)
+  grade            SalesOrderGrade?
+  bundleCount      Int?             @map("bundle_count")
+  requestedTons    Decimal?         @map("requested_tons") @db.Decimal(10, 3)
 
   truckOperation TruckOperation @relation(fields: [truckOperationId], references: [id])
   size           SizeLookup     @relation(fields: [sizeId], references: [id])
@@ -598,4 +621,140 @@ model IdempotencyKey {
   @@id([userId, key])
   @@index([expiresAt])
   @@map("idempotency_keys")
+}
+
+// ─── Billet Receiving (Supplier Contracts + Inbound Receipts) ─────
+//
+// A self-contained inbound module. SupplierContract tracks a single total
+// contracted weight plus a per-length piece counter. Remaining balances are
+// NEVER stored — they are computed in the service layer from completed
+// receipts to avoid drift. A receipt walks a 3-actor flow:
+//   Registered → Loaded (external scale, gross) → Unloading (internal loader
+//   photo) → AwaitingExit (counted pieces + rejects) → Completed (external
+//   scale empty weight, net computed, contract deducted).
+
+model SupplierContract {
+  contractNumber     String                 @id @map("contract_number") // P-YY-NNN
+  supplierName       String                 @map("supplier_name")
+  /// Total contracted weight for ALL lengths combined.
+  contractedWeightKg Decimal                @map("contracted_weight_kg") @db.Decimal(12, 3)
+  status             SupplierContractStatus @default(Active)
+  contractDate       DateTime               @map("contract_date") @db.Date
+  notes              String?
+  /// Optimistic-lock counter for status/edit races.
+  version            Int                    @default(0)
+  createdAt          DateTime               @default(now()) @map("created_at")
+  updatedAt          DateTime               @updatedAt @map("updated_at")
+  createdById        Int                    @map("created_by_id")
+  updatedById        Int?                   @map("updated_by_id")
+
+  creator    User                        @relation("BilletContractCreator", fields: [createdById], references: [id])
+  updater    User?                       @relation("BilletContractUpdater", fields: [updatedById], references: [id])
+  pieceLines SupplierContractPieceLine[]
+  receipts   BilletReceipt[]
+
+  @@index([status])
+  @@index([supplierName])
+  @@index([createdAt])
+  @@map("supplier_contracts")
+}
+
+model SupplierContractPieceLine {
+  id                     Int    @id @default(autoincrement())
+  supplierContractNumber String @map("supplier_contract_number")
+  /// Billet length in metres (e.g. 6 or 12).
+  billetLengthM          Int    @map("billet_length_m")
+  contractedPieces       Int    @map("contracted_pieces")
+
+  contract SupplierContract @relation(fields: [supplierContractNumber], references: [contractNumber])
+
+  @@unique([supplierContractNumber, billetLengthM])
+  @@index([supplierContractNumber])
+  @@map("supplier_contract_piece_lines")
+}
+
+model BilletReceipt {
+  id                     Int                 @id @default(autoincrement())
+  receiptNumber          String              @unique @map("receipt_number") // R-YY-NNNN
+  supplierContractNumber String              @map("supplier_contract_number")
+  driverName             String              @map("driver_name")
+  plateNumber            String              @map("plate_number")
+  driverNationalId       String?             @map("driver_national_id")
+  /// Declared weight from the supplier's shipping order. Informational diff
+  /// against our own net is reported at close time.
+  declaredWeightKg       Decimal             @map("declared_weight_kg") @db.Decimal(12, 3)
+  status                 BilletReceiptStatus @default(Registered)
+
+  /// External weighbridge — loaded (gross) on entry, empty (tare) on exit.
+  loadedWeightKg Decimal?  @map("loaded_weight_kg") @db.Decimal(10, 1)
+  entryTime      DateTime? @map("entry_time")
+  emptyWeightKg  Decimal?  @map("empty_weight_kg") @db.Decimal(10, 1)
+  exitTime       DateTime? @map("exit_time")
+
+  /// Internal unloading — photo starts the duration timer, count entry ends it.
+  unloadingPhotoPath  String?   @map("unloading_photo_path")
+  unloadingPhotoAt    DateTime? @map("unloading_photo_at")
+  countEnteredAt      DateTime? @map("count_entered_at")
+  /// Mandatory when counted pieces differ from the registered (declared) count.
+  countMismatchReason String?   @map("count_mismatch_reason")
+
+  /// Net = loaded − empty, computed and stored at close. Rejected pieces leave
+  /// with the truck, so the net naturally represents the accepted quantity.
+  netWeightKg  Decimal? @map("net_weight_kg") @db.Decimal(10, 1)
+  bundleCount  Int?     @map("bundle_count")
+  notes        String?
+  cancelReason String?  @map("cancel_reason")
+
+  version     Int       @default(0)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  createdById Int       @map("created_by_id")
+  closedById  Int?      @map("closed_by_id")
+  closedAt    DateTime? @map("closed_at")
+
+  contract    SupplierContract          @relation(fields: [supplierContractNumber], references: [contractNumber])
+  creator     User                      @relation("BilletReceiptCreator", fields: [createdById], references: [id])
+  closer      User?                     @relation("BilletReceiptCloser", fields: [closedById], references: [id])
+  pieceLines  BilletReceiptPieceLine[]
+  attachments BilletReceiptAttachment[]
+
+  @@index([supplierContractNumber])
+  @@index([plateNumber])
+  @@index([status])
+  @@index([createdAt])
+  @@map("billet_receipts")
+}
+
+model BilletReceiptPieceLine {
+  id              Int  @id @default(autoincrement())
+  billetReceiptId Int  @map("billet_receipt_id")
+  billetLengthM   Int  @map("billet_length_m")
+  /// Declared at registration (the order's piece count for this length).
+  expectedPieces  Int  @map("expected_pieces")
+  /// Entered by the internal loader at unloading; null until counted.
+  countedPieces   Int? @map("counted_pieces")
+  /// Confirmed rejects that leave with the truck.
+  rejectedPieces  Int  @default(0) @map("rejected_pieces")
+
+  receipt BilletReceipt @relation(fields: [billetReceiptId], references: [id], onDelete: Cascade)
+
+  @@unique([billetReceiptId, billetLengthM])
+  @@index([billetReceiptId])
+  @@map("billet_receipt_piece_lines")
+}
+
+model BilletReceiptAttachment {
+  id              Int      @id @default(autoincrement())
+  billetReceiptId Int      @map("billet_receipt_id")
+  filePath        String   @map("file_path")
+  fileName        String   @map("file_name")
+  fileSize        Int      @map("file_size") // bytes
+  uploadedAt      DateTime @default(now()) @map("uploaded_at")
+  uploadedById    Int      @map("uploaded_by_id")
+
+  receipt  BilletReceipt @relation(fields: [billetReceiptId], references: [id], onDelete: Cascade)
+  uploader User          @relation("BilletAttachmentUploader", fields: [uploadedById], references: [id])
+
+  @@index([billetReceiptId])
+  @@map("billet_receipt_attachments")
 }

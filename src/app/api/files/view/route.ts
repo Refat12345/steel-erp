@@ -78,7 +78,9 @@ export async function GET(req: NextRequest) {
     if (
       !hasPermission(session, "contract.view") &&
       !hasPermission(session, "truck.view_approved") &&
-      !hasPermission(session, "scale.upload_photo")
+      !hasPermission(session, "scale.upload_photo") &&
+      !hasPermission(session, "billet.contract.view") &&
+      !hasPermission(session, "billet.receipt.view")
     ) {
       return NextResponse.json(
         { success: false, error: "لا تملك صلاحية لهذه العملية" },

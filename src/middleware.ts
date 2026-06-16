@@ -32,6 +32,11 @@ const ROUTE_PERMISSIONS: RouteRule[] = [
   { pattern: /^\/sales-orders\/new$/, permissions: ["salesorder.create"] },
   { pattern: /^\/sales-orders(\/.*)?$/, permissions: ["salesorder.view"] },
 
+  // Billet receiving (purchasing). Specific (/new) before the wildcard parent.
+  { pattern: /^\/billet-contracts\/new$/, permissions: ["billet.contract.create"] },
+  { pattern: /^\/billet-contracts(\/.*)?$/, permissions: ["billet.contract.view"] },
+  { pattern: /^\/billet-receipts(\/.*)?$/, permissions: ["billet.receipt.view"] },
+
   { pattern: /^\/finance(\/.*)?$/, permissions: ["payment.view"] },
 
   { pattern: /^\/admin(\/.*)?$/, permissions: ["user.manage"] },

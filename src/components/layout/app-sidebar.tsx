@@ -15,6 +15,8 @@ import {
   LogOut,
   Factory,
   LayoutDashboard,
+  Boxes,
+  PackageCheck,
 } from "lucide-react";
 import {
   Sidebar,
@@ -76,6 +78,18 @@ const navItems: {
     url: "/trucks",
     icon: Truck,
     permission: ["truck.view_queue", "truck.view_approved"],
+  },
+  {
+    title: "عقود الموردين",
+    url: "/billet-contracts",
+    icon: Boxes,
+    permission: "billet.contract.view",
+  },
+  {
+    title: "استلام البيلت",
+    url: "/billet-receipts",
+    icon: PackageCheck,
+    permission: "billet.receipt.view",
   },
   {
     title: "حركة الشاحنات",
