@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback, use } from "react";
+import { useRef, useState, useEffect, useCallback, use } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { toast } from "sonner";
 import { sessionHasPermission } from "@/lib/client-permissions";
+import { compressImage } from "@/lib/compress-image";
+import { fetchUploadedFile } from "@/lib/uploaded-file-url";
 import { formatDate } from "@/lib/date-format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -39,7 +41,16 @@ import {
   Scale,
   Plus,
   Trash2,
+  Paperclip,
+  Upload,
+  FileText,
 } from "lucide-react";
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 interface PieceBalance {
   billetLengthM: number;
@@ -73,6 +84,16 @@ interface ContractData {
   remainingWeightKg: string;
   pieceBalances: PieceBalance[];
   receipts: ReceiptRow[];
+  attachments: AttachmentRow[];
+}
+
+interface AttachmentRow {
+  id: number;
+  fileName: string;
+  filePath: string;
+  fileSize: number;
+  uploadedAt: string;
+  uploadedBy: string | null;
 }
 
 interface EditablePieceRow {
@@ -118,6 +139,8 @@ export default function BilletContractDetailPage({
   const { data: session } = useSession();
   const canEdit = sessionHasPermission(session, "billet.contract.edit");
   const canChangeStatus = sessionHasPermission(session, "billet.contract.change_status");
+  const canUpload =
+    sessionHasPermission(session, "billet.contract.upload") || canEdit;
   const router = useRouter();
 
   const [data, setData] = useState<ContractData | null>(null);
@@ -132,6 +155,10 @@ export default function BilletContractDetailPage({
   const [newStatus, setNewStatus] = useState("");
   const [statusReason, setStatusReason] = useState("");
   const [statusSaving, setStatusSaving] = useState(false);
+
+  const [uploading, setUploading] = useState(false);
+  const [openingAttachmentId, setOpeningAttachmentId] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchContract = useCallback(async () => {
     setLoading(true);
@@ -284,6 +311,56 @@ export default function BilletContractDetailPage({
       toast.error("خطأ في تغيير الحالة");
     } finally {
       setStatusSaving(false);
+    }
+  };
+
+  const uploadAttachment = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.files?.[0];
+    if (!raw) return;
+    setUploading(true);
+    try {
+      const file = raw.type.startsWith("image/")
+        ? await compressImage(raw, "truck")
+        : raw;
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(
+        `/api/billet-contracts/${encodeURIComponent(contractNumber)}/attachment`,
+        { method: "POST", body: fd },
+      );
+      const json = await res.json();
+      if (!json.success) {
+        toast.error(json.error);
+        return;
+      }
+      toast.success("تم رفع المرفق");
+      fetchContract();
+    } catch {
+      toast.error("خطأ في رفع المرفق");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const openAttachment = async (filePath: string, id: number) => {
+    setOpeningAttachmentId(id);
+    try {
+      const res = await fetchUploadedFile(filePath);
+      if (!res.ok) {
+        toast.error("تعذر تحميل الملف");
+        return;
+      }
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const win = window.open(objUrl, "_blank");
+      if (win) win.opener = null;
+      else toast.error("اسمح بالنوافذ المنبثقة لمعاينة الملف");
+      window.setTimeout(() => URL.revokeObjectURL(objUrl), 120_000);
+    } catch {
+      toast.error("تعذر الاتصال بالخادم");
+    } finally {
+      setOpeningAttachmentId(null);
     }
   };
 
@@ -596,6 +673,75 @@ export default function BilletContractDetailPage({
                 </TableBody>
               </Table>
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Attachments */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Paperclip className="h-4 w-4" />
+              المرفقات ({data.attachments.length})
+            </CardTitle>
+            {canUpload && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="application/pdf,image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={uploadAttachment}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={uploading}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  {uploading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Upload className="h-3.5 w-3.5" />
+                  )}
+                  رفع مرفق
+                </Button>
+              </>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {data.attachments.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              لا توجد مرفقات
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {data.attachments.map((a) => (
+                <li
+                  key={a.id}
+                  className="flex items-center gap-2 rounded-md border p-2 text-sm"
+                >
+                  <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <button
+                    type="button"
+                    className="flex-1 truncate text-start text-primary hover:underline disabled:opacity-60"
+                    onClick={() => openAttachment(a.filePath, a.id)}
+                    disabled={openingAttachmentId === a.id}
+                  >
+                    {a.fileName}
+                  </button>
+                  {openingAttachmentId === a.id && (
+                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                  )}
+                  <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                    {formatFileSize(a.fileSize)}
+                  </span>
+                </li>
+              ))}
+            </ul>
           )}
         </CardContent>
       </Card>

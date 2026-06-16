@@ -86,6 +86,7 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
   { code: "billet.contract.create", displayName: "إنشاء عقد مورّد", module: "purchasing" },
   { code: "billet.contract.edit", displayName: "تعديل عقد مورّد", module: "purchasing" },
   { code: "billet.contract.change_status", displayName: "تغيير حالة عقد مورّد", module: "purchasing" },
+  { code: "billet.contract.upload", displayName: "رفع مرفقات عقد مورّد", module: "purchasing" },
   { code: "billet.receipt.view", displayName: "عرض سجلات استلام البيلت", module: "purchasing" },
   { code: "billet.receipt.register", displayName: "تسجيل شاحنة بيلت مسبقاً", module: "purchasing" },
   { code: "billet.receipt.weigh", displayName: "إدخال وزن البيلت المحمّل", module: "purchasing" },

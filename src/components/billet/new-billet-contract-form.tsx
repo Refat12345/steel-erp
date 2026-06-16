@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowRight, Loader2, Plus, Trash2 } from "lucide-react";
+import { compressImage } from "@/lib/compress-image";
+import { ArrowRight, FileText, Loader2, Plus, Trash2, Upload, X } from "lucide-react";
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 interface PieceRow {
   key: number;
@@ -32,7 +39,17 @@ export function NewBilletContractForm() {
     { key: ++rowKey, lengthM: "6", pieces: "" },
     { key: ++rowKey, lengthM: "12", pieces: "" },
   ]);
+  const [files, setFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const onSelectFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(e.target.files ?? []);
+    if (selected.length) setFiles((prev) => [...prev, ...selected]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+  const removeFile = (index: number) =>
+    setFiles((prev) => prev.filter((_, i) => i !== index));
 
   const addRow = () =>
     setPieceRows((prev) => [...prev, { key: ++rowKey, lengthM: "", pieces: "" }]);
@@ -101,8 +118,38 @@ export function NewBilletContractForm() {
         toast.error(json.error);
         return;
       }
-      toast.success(`تم إنشاء العقد ${json.data.contractNumber} بنجاح`);
-      router.push("/billet-contracts");
+      const contractNumber: string = json.data.contractNumber;
+      toast.success(`تم إنشاء العقد ${contractNumber} بنجاح`);
+
+      if (files.length > 0) {
+        let failed = 0;
+        for (const raw of files) {
+          try {
+            const file = raw.type.startsWith("image/")
+              ? await compressImage(raw, "truck")
+              : raw;
+            const fd = new FormData();
+            fd.append("file", file);
+            const upRes = await fetch(
+              `/api/billet-contracts/${encodeURIComponent(contractNumber)}/attachment`,
+              { method: "POST", body: fd },
+            );
+            const upJson = await upRes.json();
+            if (!upJson.success) failed++;
+          } catch {
+            failed++;
+          }
+        }
+        if (failed > 0) {
+          toast.warning(
+            `تم إنشاء العقد لكن تعذّر رفع ${failed} من ${files.length} مرفق`,
+          );
+        } else {
+          toast.success("تم رفع المرفقات");
+        }
+      }
+
+      router.push(`/billet-contracts/${encodeURIComponent(contractNumber)}`);
     } catch {
       toast.error("حدث خطأ في الاتصال");
     } finally {
@@ -214,6 +261,59 @@ export function NewBilletContractForm() {
             ))}
             <p className="text-xs text-muted-foreground">
               اترك الطول الذي لا يشمله العقد فارغاً.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">المرفقات</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/pdf,image/jpeg,image/png,image/webp"
+              multiple
+              className="hidden"
+              onChange={onSelectFiles}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload className="h-4 w-4 ml-1" />
+              إضافة مرفق (PDF أو صورة)
+            </Button>
+            {files.length > 0 && (
+              <ul className="space-y-2">
+                {files.map((f, i) => (
+                  <li
+                    key={`${f.name}-${i}`}
+                    className="flex items-center gap-2 rounded-md border p-2 text-sm"
+                  >
+                    <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <span className="flex-1 truncate">{f.name}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {formatFileSize(f.size)}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="shrink-0 text-destructive"
+                      onClick={() => removeFile(i)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="text-xs text-muted-foreground">
+              مثال: إرسالية الميناء أو نسخة العقد. تُرفع المرفقات بعد حفظ العقد.
             </p>
           </CardContent>
         </Card>

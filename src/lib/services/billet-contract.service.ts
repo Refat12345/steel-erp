@@ -154,6 +154,14 @@ export interface ContractWithBalance {
     netWeightKg: string | null;
     createdAt: Date;
   }[];
+  attachments: {
+    id: number;
+    fileName: string;
+    filePath: string;
+    fileSize: number;
+    uploadedAt: Date;
+    uploadedBy: string | null;
+  }[];
 }
 
 async function getCompletedUsage(db: ContractUsageClient, contractNumber: string) {
@@ -226,6 +234,12 @@ export async function getContractWithBalance(
     },
   });
 
+  const attachments = await prisma.supplierContractAttachment.findMany({
+    where: { supplierContractNumber: contractNumber },
+    orderBy: { uploadedAt: "desc" },
+    include: { uploader: { select: { fullName: true, username: true } } },
+  });
+
   return {
     contract,
     contractedWeightKg: contractedWeight.toFixed(3),
@@ -235,6 +249,14 @@ export async function getContractWithBalance(
     receipts: recentReceipts.map((r) => ({
       ...r,
       netWeightKg: r.netWeightKg != null ? r.netWeightKg.toString() : null,
+    })),
+    attachments: attachments.map((a) => ({
+      id: a.id,
+      fileName: a.fileName,
+      filePath: a.filePath,
+      fileSize: a.fileSize,
+      uploadedAt: a.uploadedAt,
+      uploadedBy: a.uploader.fullName || a.uploader.username,
     })),
   };
 }
@@ -366,4 +388,43 @@ export async function updateContract(
     "billet contract updated",
   );
   return updated;
+}
+
+export async function addContractAttachment(
+  contractNumber: string,
+  fileInfo: { filePath: string; fileName: string; fileSize: number },
+  userId: number,
+) {
+  return withRetry(() =>
+    prisma.$transaction(
+      async (tx) => {
+        const contract = await tx.supplierContract.findUnique({
+          where: { contractNumber },
+          select: { contractNumber: true },
+        });
+        if (!contract) throw new ServiceError("العقد غير موجود", "NOT_FOUND");
+
+        const att = await tx.supplierContractAttachment.create({
+          data: {
+            supplierContractNumber: contractNumber,
+            filePath: fileInfo.filePath,
+            fileName: fileInfo.fileName,
+            fileSize: fileInfo.fileSize || 0,
+            uploadedById: userId,
+          },
+        });
+
+        await logAudit(tx, {
+          userId,
+          action: "upload",
+          entityType: "SupplierContractAttachment",
+          entityId: contractNumber,
+          details: { fileName: fileInfo.fileName, fileSize: fileInfo.fileSize },
+        });
+
+        return att;
+      },
+      { isolationLevel: "ReadCommitted" },
+    ),
+  );
 }
