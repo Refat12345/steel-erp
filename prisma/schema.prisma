@@ -140,6 +140,7 @@ model User {
   billetReceiptsCreated     BilletReceipt[]           @relation("BilletReceiptCreator")
   billetReceiptsClosed      BilletReceipt[]           @relation("BilletReceiptCloser")
   billetAttachmentsUploaded BilletReceiptAttachment[] @relation("BilletAttachmentUploader")
+  billetContractAttachments SupplierContractAttachment[] @relation("BilletContractAttachmentUploader")
 
   @@map("users")
 }
@@ -648,15 +649,32 @@ model SupplierContract {
   createdById        Int                    @map("created_by_id")
   updatedById        Int?                   @map("updated_by_id")
 
-  creator    User                        @relation("BilletContractCreator", fields: [createdById], references: [id])
-  updater    User?                       @relation("BilletContractUpdater", fields: [updatedById], references: [id])
-  pieceLines SupplierContractPieceLine[]
-  receipts   BilletReceipt[]
+  creator     User                         @relation("BilletContractCreator", fields: [createdById], references: [id])
+  updater     User?                        @relation("BilletContractUpdater", fields: [updatedById], references: [id])
+  pieceLines  SupplierContractPieceLine[]
+  receipts    BilletReceipt[]
+  attachments SupplierContractAttachment[]
 
   @@index([status])
   @@index([supplierName])
   @@index([createdAt])
   @@map("supplier_contracts")
+}
+
+model SupplierContractAttachment {
+  id                     Int      @id @default(autoincrement())
+  supplierContractNumber String   @map("supplier_contract_number")
+  filePath               String   @map("file_path")
+  fileName               String   @map("file_name")
+  fileSize               Int      @map("file_size") // bytes
+  uploadedAt             DateTime @default(now()) @map("uploaded_at")
+  uploadedById           Int      @map("uploaded_by_id")
+
+  contract SupplierContract @relation(fields: [supplierContractNumber], references: [contractNumber], onDelete: Cascade)
+  uploader User             @relation("BilletContractAttachmentUploader", fields: [uploadedById], references: [id])
+
+  @@index([supplierContractNumber])
+  @@map("supplier_contract_attachments")
 }
 
 model SupplierContractPieceLine {
