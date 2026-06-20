@@ -119,6 +119,7 @@ const KIND_COLORS: Record<string, string> = {
   SHORTBAR_1_4M: "#8b5cf6",
   SHORTBAR_4_12M: "#a855f7",
   SCRAP: "#f97316",
+  BILLET_WIRE: "#14b8a6",
 };
 
 const METHOD_COLORS: Record<string, string> = {

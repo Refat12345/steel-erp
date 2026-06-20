@@ -16,8 +16,27 @@ import {
   aggregateWeighSessionsBySize,
   type WeighSessionSizeAggregate,
 } from "@/lib/weigh-session-aggregate";
+import { requestSizeCodesExemptFromInternalWeighing } from "@/lib/material-kind";
 
 type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+/**
+ * Whether a truck whose request items reference these sizes should skip
+ * internal weighing (scrap / billet tying wire — single distinct size).
+ * Resolves the size codes from the catalog inside the same transaction.
+ */
+async function deriveSkipInternalWeighing(
+  tx: TxClient,
+  requestItems?: { sizeId: number }[],
+): Promise<boolean> {
+  if (!requestItems?.length) return false;
+  const sizeIds = [...new Set(requestItems.map((i) => i.sizeId))];
+  const sizes = await tx.sizeLookup.findMany({
+    where: { id: { in: sizeIds } },
+    select: { code: true },
+  });
+  return requestSizeCodesExemptFromInternalWeighing(sizes.map((s) => s.code));
+}
 
 /** Internal tons for one bridge round (sum of its weigh sessions). */
 async function loadRoundInternalTons(tx: TxClient, roundId: number): Promise<number> {
@@ -45,7 +64,11 @@ async function getOpenRound(tx: TxClient, truckId: number) {
 const VALID_TRANSITIONS: Record<TruckStatus, TruckStatus[]> = {
   Queued: ["FirstWeigh", "Cancelled"],
   Approved: ["FirstWeigh", "Cancelled"],
-  FirstWeigh: ["OnScale", "Cancelled"],
+  // FirstWeigh → LoadingComplete is the exempt path (scrap / billet wire): no
+  // internal sessions are recorded, so the loader confirms directly from
+  // FirstWeigh. confirmLoadingComplete still requires sessions for non-exempt
+  // trucks, so the extra transition is safe for the normal flow.
+  FirstWeigh: ["OnScale", "LoadingComplete", "Cancelled"],
   Loading: ["OnScale", "Cancelled"],
   OnScale: ["LoadingComplete", "Cancelled"],
   LoadingComplete: ["OnScale", "FirstWeigh", "SecondWeigh", "Cancelled"],
@@ -173,6 +196,10 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
         async (tx: TxClient) => {
           await validateTruckReferences(tx, data);
           await validateTruckRequestItems(tx, data.requestItems);
+          const skipInternalWeighing = await deriveSkipInternalWeighing(
+            tx,
+            data.requestItems,
+          );
 
           const existingOpen = await tx.truckOperation.findFirst({
             where: {
@@ -199,6 +226,7 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
               salesOrderNumber: data.salesOrderNumber || null,
               notes: data.notes?.trim() || null,
               operationalGrade: data.operationalGrade ?? null,
+              skipInternalWeighing,
               status: "Queued",
               createdById: userId,
             },
@@ -385,8 +413,16 @@ export async function updateTruckBeforeWeigh(
           await validateTruckReferences(tx, { destinationId: nextDestinationId });
         }
 
+        // Request items drive the internal-weighing exemption (scrap / billet
+        // wire). Recompute it whenever they change so the flag never drifts
+        // from the actual load. Stays undefined when items aren't being edited.
+        let nextSkipInternalWeighing: boolean | undefined;
         if (data.requestItems !== undefined) {
           await validateTruckRequestItems(tx, data.requestItems);
+          nextSkipInternalWeighing = await deriveSkipInternalWeighing(
+            tx,
+            data.requestItems,
+          );
           // Slice 4 pre-validation filters should be invoked here once the
           // shared validation service exists; until then Approved edits are
           // still gated by status, permission, and catalog constraints.
@@ -412,6 +448,10 @@ export async function updateTruckBeforeWeigh(
         const updateData: Prisma.TruckOperationUpdateInput = {
           version: { increment: 1 },
         };
+
+        if (nextSkipInternalWeighing !== undefined) {
+          updateData.skipInternalWeighing = nextSkipInternalWeighing;
+        }
 
         if (truck.status === "Queued") {
           updateData.customer = nextCustomerId
@@ -730,6 +770,22 @@ export async function correctGross(
         const grossError = validateGrossWeight(newWeightKg, startKg);
         if (grossError) throw new ServiceError(grossError);
 
+        // Exempt trucks (scrap / billet wire) mirror the round net as one
+        // system-generated weigh session (see enterGross). When the external
+        // weight is corrected the mirror must follow, otherwise by-size reports
+        // and the discrepancy drift. Updated BEFORE the discrepancy is computed
+        // so it stays zero.
+        if (truck.skipInternalWeighing) {
+          const correctedNetTons = new Decimal(newWeightKg)
+            .minus(startKg)
+            .dividedBy(1000)
+            .toFixed(3);
+          await tx.weighSession.updateMany({
+            where: { bridgeRoundId: round.id },
+            data: { weightTons: correctedNetTons, version: { increment: 1 } },
+          });
+        }
+
         const internalTotalTons = await loadRoundInternalTons(tx, round.id);
         const discrepancyFields = buildWeighbridgeDiscrepancyAuditFields({
           tareKg: startKg,
@@ -843,6 +899,12 @@ export async function enterWeighSession(
 
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
         if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+
+        if (truck.skipInternalWeighing) {
+          throw new ServiceError(
+            "هذه الشاحنة (خردة/أسلاك تربيط) لا تأخذ وزنات داخلية — يُسجَّل وزن الفارغ والمحمّل من القبان فقط",
+          );
+        }
 
         if (truck.status !== "FirstWeigh" && truck.status !== "OnScale") {
           throw new ServiceError("لا يمكن إضافة وزنة في الحالة الحالية");
@@ -1179,7 +1241,9 @@ export async function confirmLoadingComplete(
           tx.truckPhoto.count({ where: { bridgeRoundId: openRound.id } }),
         ]);
 
-        if (sessions.length === 0) {
+        // Exempt trucks (scrap / billet wire) carry no internal weigh sessions;
+        // the round net is recorded once at gross. They still require a photo.
+        if (!truck.skipInternalWeighing && sessions.length === 0) {
           throw new ServiceError("يجب إدخال وزنة واحدة على الأقل قبل تأكيد اكتمال التحميل");
         }
         if (photoCount === 0) {
@@ -1414,6 +1478,43 @@ export async function enterGross(
         }
         const grossError = validateGrossWeight(weightKg, roundStartKg);
         if (grossError) throw new ServiceError(grossError);
+
+        // Exempt trucks (scrap / billet wire) record no internal sessions. When
+        // the round is closed we mirror its external net as ONE
+        // system-generated weigh session attributed to the request item's size.
+        // Created BEFORE the discrepancy is computed so internal == external
+        // (zero discrepancy), and so every by-size report, the scale card, and
+        // the dashboard kind breakdown keep working without special-casing.
+        if (truck.skipInternalWeighing) {
+          const roundSessionCount = await tx.weighSession.count({
+            where: { bridgeRoundId: openRound.id },
+          });
+          if (roundSessionCount === 0) {
+            const requestItem = await tx.truckRequestItem.findFirst({
+              where: { truckOperationId: truckId },
+              select: { sizeId: true },
+            });
+            const lastSession = await tx.weighSession.findFirst({
+              where: { truckOperationId: truckId },
+              orderBy: { sessionNumber: "desc" },
+              select: { sessionNumber: true },
+            });
+            const netTons = new Decimal(weightKg)
+              .minus(roundStartKg)
+              .dividedBy(1000)
+              .toFixed(3);
+            await tx.weighSession.create({
+              data: {
+                truckOperationId: truckId,
+                bridgeRoundId: openRound.id,
+                sessionNumber: (lastSession?.sessionNumber ?? 0) + 1,
+                sizeId: requestItem?.sizeId ?? null,
+                bundleCount: null,
+                weightTons: netTons,
+              },
+            });
+          }
+        }
 
         // Per-round discrepancy: this round's external net vs the sum of
         // ITS internal weigh sessions.

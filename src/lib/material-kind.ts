@@ -1,15 +1,28 @@
 import type { SalesOrderGrade } from "@prisma/client";
 
-export type MaterialKind = "REBAR" | "SHORTBAR_1_4M" | "SHORTBAR_4_12M" | "SCRAP";
+export type MaterialKind =
+  | "REBAR"
+  | "SHORTBAR_1_4M"
+  | "SHORTBAR_4_12M"
+  | "SCRAP"
+  | "BILLET_WIRE";
+
+/** Stable SizeLookup.code for the imported billet tying wire (6mm). */
+export const BILLET_WIRE_SIZE_CODE = "billet_wire_6mm";
 
 /** Report filter values — extends rebar grades with non-rebar product groups. */
-export type ReportProductFilter = SalesOrderGrade | "SHORTBAR" | "SCRAP";
+export type ReportProductFilter =
+  | SalesOrderGrade
+  | "SHORTBAR"
+  | "SCRAP"
+  | "BILLET_WIRE";
 
 export const PRODUCT_FILTER_LABELS_AR: Record<ReportProductFilter, string> = {
   FIRST: "نخب أول",
   SECOND: "نخب ثاني",
   SHORTBAR: "قصائر",
   SCRAP: "خردة",
+  BILLET_WIRE: "أسلاك تربيط",
 };
 
 /** Map a SizeLookup.code to the high-level material kind. */
@@ -17,6 +30,7 @@ export function sizeCodeToKind(code: string): MaterialKind {
   if (code === "shortbar_1_4m") return "SHORTBAR_1_4M";
   if (code === "shortbar_4_12m") return "SHORTBAR_4_12M";
   if (code === "scrap") return "SCRAP";
+  if (code === BILLET_WIRE_SIZE_CODE) return "BILLET_WIRE";
   return "REBAR";
 }
 
@@ -24,12 +38,36 @@ export function isShortbarKind(kind: MaterialKind): boolean {
   return kind === "SHORTBAR_1_4M" || kind === "SHORTBAR_4_12M";
 }
 
+/**
+ * Bulk material kinds that are NOT weighed on the internal scale — only the
+ * external weighbridge (tare + gross) is used. Scrap and billet tying wire
+ * (6mm) ship as loose bulk, so operators record no internal weigh sessions.
+ */
+export function isInternalWeighingExemptKind(kind: MaterialKind): boolean {
+  return kind === "SCRAP" || kind === "BILLET_WIRE";
+}
+
+/**
+ * A truck is exempt from internal weighing when its request items reference a
+ * single distinct size and that size is scrap or billet wire. Requiring one
+ * distinct size keeps the auto-generated internal line (= bridge net)
+ * unambiguously attributable to that size in reports.
+ */
+export function requestSizeCodesExemptFromInternalWeighing(
+  sizeCodes: ReadonlyArray<string>,
+): boolean {
+  const distinct = [...new Set(sizeCodes.filter(Boolean))];
+  if (distinct.length !== 1) return false;
+  return isInternalWeighingExemptKind(sizeCodeToKind(distinct[0]));
+}
+
 /** Product family for one bridge round — multiple sizes within the same group are OK. */
-export type RoundMaterialGroup = "REBAR" | "SHORTBAR" | "SCRAP";
+export type RoundMaterialGroup = "REBAR" | "SHORTBAR" | "SCRAP" | "BILLET_WIRE";
 
 export function materialKindToRoundGroup(kind: MaterialKind): RoundMaterialGroup {
   if (kind === "REBAR") return "REBAR";
   if (isShortbarKind(kind)) return "SHORTBAR";
+  if (kind === "BILLET_WIRE") return "BILLET_WIRE";
   return "SCRAP";
 }
 
@@ -70,6 +108,7 @@ export function materialKindMatchesProductFilter(
   if (isGradeProductFilter(filter)) return false;
   if (filter === "SHORTBAR") return kind != null && isShortbarKind(kind);
   if (filter === "SCRAP") return kind === "SCRAP";
+  if (filter === "BILLET_WIRE") return kind === "BILLET_WIRE";
   return false;
 }
 

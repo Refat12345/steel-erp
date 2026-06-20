@@ -848,7 +848,7 @@ export async function completeReceipt(
   );
 }
 
-// ─── Attachments (generic, optional) ───────────────────────────────
+// ─── Attachments (generic, optional — allowed until cancelled) ─────
 
 export async function addAttachment(
   receiptId: number,
@@ -879,7 +879,12 @@ export async function addAttachment(
           action: "upload",
           entityType: "BilletReceiptAttachment",
           entityId: String(receiptId),
-          details: { fileName: fileInfo.fileName, fileSize: fileInfo.fileSize },
+          details: {
+            fileName: fileInfo.fileName,
+            fileSize: fileInfo.fileSize,
+            receiptStatus: receipt.status,
+            postCompletion: receipt.status === "Completed",
+          },
         });
 
         return att;

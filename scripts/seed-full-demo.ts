@@ -251,6 +251,7 @@ async function ensureRbacAndSizes(): Promise<void> {
     { code: "shortbar_1_4m", displayName: "قصائر 1–4 م", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 10 },
     { code: "shortbar_4_12m", displayName: "قصائر 4–12 م", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 11 },
     { code: "scrap", displayName: "خردة (Scrap)", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 12 },
+    { code: "billet_wire_6mm", displayName: "أسلاك تربيط بيلت مستورد 6 mm", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 13 },
     { code: "6mm", displayName: "6 مم", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: false, sortOrder: 0 },
   ];
   await prisma.sizeLookup.deleteMany({ where: { code: "shortbar" } });

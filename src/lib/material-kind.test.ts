@@ -16,6 +16,10 @@ describe("sizeCodeToKind", () => {
     expect(sizeCodeToKind("scrap")).toBe("SCRAP");
     expect(sizeCodeToKind("8")).toBe("REBAR");
   });
+
+  it("maps the billet tying wire size code", () => {
+    expect(sizeCodeToKind("billet_wire_6mm")).toBe("BILLET_WIRE");
+  });
 });
 
 describe("inferRoundMaterialKind", () => {
@@ -47,6 +51,13 @@ describe("materialKindMatchesProductFilter", () => {
     expect(materialKindMatchesProductFilter("SCRAP", "SCRAP")).toBe(true);
     expect(materialKindMatchesProductFilter("SHORTBAR_1_4M", "SCRAP")).toBe(false);
   });
+
+  it("matches billet wire only for BILLET_WIRE filter", () => {
+    expect(materialKindMatchesProductFilter("BILLET_WIRE", "BILLET_WIRE")).toBe(true);
+    expect(materialKindMatchesProductFilter("SCRAP", "BILLET_WIRE")).toBe(false);
+    expect(materialKindMatchesProductFilter("BILLET_WIRE", "SCRAP")).toBe(false);
+    expect(materialKindMatchesProductFilter("BILLET_WIRE", "SHORTBAR")).toBe(false);
+  });
 });
 
 describe("sizeCodeSupportsGrade", () => {
@@ -55,6 +66,7 @@ describe("sizeCodeSupportsGrade", () => {
     expect(sizeCodeSupportsGrade("shortbar_1_4m")).toBe(false);
     expect(sizeCodeSupportsGrade("shortbar_4_12m")).toBe(false);
     expect(sizeCodeSupportsGrade("scrap")).toBe(false);
+    expect(sizeCodeSupportsGrade("billet_wire_6mm")).toBe(false);
     expect(sizeCodeSupportsGrade("")).toBe(true);
   });
 });
@@ -77,6 +89,12 @@ describe("shouldWarnBridgeRoundProductMix", () => {
 
   it("warns when mixing rebar with scrap in the same round", () => {
     expect(shouldWarnBridgeRoundProductMix(["scrap"], "12")).toBe(true);
+  });
+
+  it("treats billet wire as its own product family", () => {
+    expect(shouldWarnBridgeRoundProductMix(["12"], "billet_wire_6mm")).toBe(true);
+    expect(shouldWarnBridgeRoundProductMix(["scrap"], "billet_wire_6mm")).toBe(true);
+    expect(shouldWarnBridgeRoundProductMix(["billet_wire_6mm"], "billet_wire_6mm")).toBe(false);
   });
 });
 

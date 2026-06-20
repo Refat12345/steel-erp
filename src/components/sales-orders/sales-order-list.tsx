@@ -58,6 +58,7 @@ const kindLabels: Record<string, string> = {
   SHORTBAR_1_4M: "قصائر 1–4 م",
   SHORTBAR_4_12M: "قصائر 4–12 م",
   SCRAP: "خردة",
+  BILLET_WIRE: "أسلاك تربيط",
 };
 
 const gradeLabels: Record<string, string> = {
@@ -187,6 +188,7 @@ export function SalesOrderList() {
             <SelectItem value="SHORTBAR_1_4M">قصائر 1–4 م</SelectItem>
             <SelectItem value="SHORTBAR_4_12M">قصائر 4–12 م</SelectItem>
             <SelectItem value="SCRAP">خردة</SelectItem>
+            <SelectItem value="BILLET_WIRE">أسلاك تربيط</SelectItem>
           </SelectContent>
         </Select>
         {canCreateSalesOrder && (

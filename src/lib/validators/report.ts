@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const productFilterValues = ["FIRST", "SECOND", "SHORTBAR", "SCRAP"] as const;
+const productFilterValues = ["FIRST", "SECOND", "SHORTBAR", "SCRAP", "BILLET_WIRE"] as const;
 
 const baseReportQuerySchema = z.object({
   date: z

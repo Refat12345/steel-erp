@@ -102,6 +102,7 @@ export async function getDashboardStatsCached() {
         SHORTBAR_1_4M: "قصائر 1–4 م",
         SHORTBAR_4_12M: "قصائر 4–12 م",
         SCRAP: "خردة",
+        BILLET_WIRE: "أسلاك تربيط",
       };
       const METHOD_LABELS: Record<string, string> = {
         CASH: "نقدي",

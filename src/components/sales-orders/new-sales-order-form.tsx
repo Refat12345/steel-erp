@@ -291,6 +291,7 @@ export function NewSalesOrderForm() {
                   <SelectItem value="SHORTBAR_1_4M">قصائر 1–4 م</SelectItem>
                   <SelectItem value="SHORTBAR_4_12M">قصائر 4–12 م</SelectItem>
                   <SelectItem value="SCRAP">خردة</SelectItem>
+                  <SelectItem value="BILLET_WIRE">أسلاك تربيط</SelectItem>
                 </SelectContent>
               </Select>
               {errors.kind && (
