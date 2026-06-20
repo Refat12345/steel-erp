@@ -181,11 +181,6 @@ const PRINT_STYLE = `
 
 function BilletBalancePrintable({ report }: { report: BilletBalanceReport }) {
   const showContracts = !report.filters.contractNumber && report.contracts.length > 1;
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   const content = (
     <div id="billet-balance-print" dir="ltr">
@@ -265,8 +260,9 @@ function BilletBalancePrintable({ report }: { report: BilletBalanceReport }) {
     </div>
   );
 
-  if (!mounted) return null;
-  return createPortal(content, document.body);
+  return typeof document !== "undefined"
+    ? createPortal(content, document.body)
+    : null;
 }
 
 export function BilletBalanceReportView() {
