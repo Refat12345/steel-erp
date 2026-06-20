@@ -82,6 +82,7 @@ const PRODUCT_FILTER_OPTIONS = [
   { value: "SECOND", label: "Second grade" },
   { value: "SHORTBAR", label: "Short bars" },
   { value: "SCRAP", label: "Scrap" },
+  { value: "BILLET_WIRE", label: "Billet tying wire" },
 ] as const;
 
 function formatTons(value: number | null): string {

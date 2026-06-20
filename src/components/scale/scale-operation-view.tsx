@@ -148,6 +148,7 @@ interface TruckDetail {
   requestItems: TruckRequestItemData[];
   rounds: BridgeRoundItem[];
   operationalGrade: SalesOrderGrade | null;
+  skipInternalWeighing: boolean;
   salesOrder: {
     orderNumber: string;
     kind: string;
@@ -539,7 +540,9 @@ export function ScaleOperationView({
                 تصحيح وزن الفارغ
               </Button>
             )}
-            {(truck.status === "FirstWeigh" || truck.status === "OnScale") && canSession && (
+            {(truck.status === "FirstWeigh" || truck.status === "OnScale") &&
+              canSession &&
+              !truck.skipInternalWeighing && (
               <Button onClick={() => setShowSessionDialog(true)} disabled={actionLoading}>
                 <Weight className="h-4 w-4 me-1" />
                 إضافة وزنة
@@ -548,7 +551,9 @@ export function ScaleOperationView({
             {(truck.status === "FirstWeigh" || truck.status === "OnScale") && canPhoto && (
               <PhotoUploadButton truckId={truck.id} onUploaded={fetchTruck} disabled={actionLoading} />
             )}
-            {truck.status === "OnScale" && canLoadingComplete && (
+            {(truck.status === "OnScale" ||
+              (truck.status === "FirstWeigh" && truck.skipInternalWeighing)) &&
+              canLoadingComplete && (
               <Button
                 variant="default"
                 onClick={() => setShowLoadingCompleteDialog(true)}
@@ -641,7 +646,9 @@ export function ScaleOperationView({
         <CardContent>
           {truck.sessions.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">
-              لا توجد وزنات بعد
+              {truck.skipInternalWeighing
+                ? "شاحنة خردة/أسلاك تربيط — بدون وزنات داخلية. يُحتسب الصافي تلقائياً من القبان (فارغ ومحمّل) عند إدخال وزن المحمّل."
+                : "لا توجد وزنات بعد"}
             </p>
           ) : (
             <div className="overflow-x-auto">
@@ -906,6 +913,7 @@ export function ScaleOperationView({
         sessions={currentRoundSessions}
         requestItems={truck.requestItems}
         photoCount={currentRoundPhotoCount}
+        skipInternalWeighing={truck.skipInternalWeighing}
         roundNumber={openRound?.roundNumber ?? 1}
         initialGrade={openRound?.grade ?? null}
         showGradeSelect={
@@ -2025,6 +2033,7 @@ function LoadingCompleteDialog({
   sessions,
   requestItems,
   photoCount,
+  skipInternalWeighing,
   roundNumber,
   initialGrade,
   showGradeSelect,
@@ -2039,6 +2048,8 @@ function LoadingCompleteDialog({
   sessions: WeighSessionItem[];
   requestItems: TruckRequestItemData[];
   photoCount: number;
+  /** Exempt trucks (scrap / billet wire) skip internal sessions entirely. */
+  skipInternalWeighing: boolean;
   roundNumber: number;
   initialGrade: SalesOrderGrade | null;
   showGradeSelect: boolean;
@@ -2066,7 +2077,7 @@ function LoadingCompleteDialog({
       : null;
 
   const warnings: string[] = [...requestWarnings];
-  if (sessions.length === 0) {
+  if (!skipInternalWeighing && sessions.length === 0) {
     warnings.push("لا توجد وزنات داخلية — يُفضّل إضافة وزنة واحدة على الأقل قبل التأكيد");
   }
   if (photoCount === 0) {

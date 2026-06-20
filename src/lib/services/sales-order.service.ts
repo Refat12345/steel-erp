@@ -5,6 +5,7 @@ import type { PaginationParams, PaginatedResult } from "@/lib/api-utils";
 import { ServiceError } from "./errors";
 import { logAudit } from "./audit.service";
 import { logger } from "@/lib/logger";
+import { sizeCodeToKind } from "@/lib/material-kind";
 
 type SalesOrderListItem = Prisma.SalesOrderGetPayload<{
   include: {
@@ -277,6 +278,24 @@ export async function setOrderItems(
     throw new ServiceError("لا يمكن تعديل الأسعار بعد بدء التنفيذ");
   }
 
+  // Defense-in-depth: prices may only be set for sizes whose material kind
+  // matches the sales-order kind (the UI already filters, this guards the API).
+  const sizeIds = [...new Set(items.map((i) => i.sizeId))];
+  const sizes = await prisma.sizeLookup.findMany({
+    where: { id: { in: sizeIds } },
+    select: { id: true, code: true, isActive: true },
+  });
+  const sizeById = new Map(sizes.map((s) => [s.id, s]));
+  for (const item of items) {
+    const size = sizeById.get(item.sizeId);
+    if (!size || !size.isActive) {
+      throw new ServiceError("أحد القياسات غير صالح أو غير نشط");
+    }
+    if (sizeCodeToKind(size.code) !== so.kind) {
+      throw new ServiceError("القياس لا يتوافق مع نوع أمر البيع");
+    }
+  }
+
   const result = await prisma.$transaction(async (tx) => {
     await tx.orderItem.deleteMany({ where: { orderNumber } });
     const created = await Promise.all(
@@ -327,6 +346,7 @@ const KIND_LABELS: Record<string, string> = {
   SHORTBAR_1_4M: "قصائر 1–4 م",
   SHORTBAR_4_12M: "قصائر 4–12 م",
   SCRAP: "خردة",
+  BILLET_WIRE: "أسلاك تربيط",
 };
 
 const GRADE_LABELS: Record<string, string> = {

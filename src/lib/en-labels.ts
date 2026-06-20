@@ -44,6 +44,7 @@ const SIZE_EN_BY_CODE: Record<string, string> = {
   shortbar_1_4m: "Short bars 1–4 m",
   shortbar_4_12m: "Short bars 4–12 m",
   scrap: "Scrap",
+  billet_wire_6mm: "Imported billet tying wire 6mm",
 };
 
 const ARABIC_DIGITS = "٠١٢٣٤٥٦٧٨٩";
@@ -106,6 +107,7 @@ export function productFilterLabelEn(
   if (filter === "SECOND") return "Second grade";
   if (filter === "SHORTBAR") return "Short bars";
   if (filter === "SCRAP") return "Scrap";
+  if (filter === "BILLET_WIRE") return "Billet tying wire";
   return "—";
 }
 

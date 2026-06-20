@@ -35,6 +35,7 @@ enum SalesOrderKind {
   SHORTBAR_1_4M
   SHORTBAR_4_12M
   SCRAP
+  BILLET_WIRE
 }
 
 enum SalesOrderGrade {
@@ -135,11 +136,11 @@ model User {
   bridgeRoundsLoaded   BridgeRound[]            @relation("BridgeRoundLoader")
   idempotencyKeys      IdempotencyKey[]
 
-  billetContractsCreated    SupplierContract[]        @relation("BilletContractCreator")
-  billetContractsUpdated    SupplierContract[]        @relation("BilletContractUpdater")
-  billetReceiptsCreated     BilletReceipt[]           @relation("BilletReceiptCreator")
-  billetReceiptsClosed      BilletReceipt[]           @relation("BilletReceiptCloser")
-  billetAttachmentsUploaded BilletReceiptAttachment[] @relation("BilletAttachmentUploader")
+  billetContractsCreated    SupplierContract[]           @relation("BilletContractCreator")
+  billetContractsUpdated    SupplierContract[]           @relation("BilletContractUpdater")
+  billetReceiptsCreated     BilletReceipt[]              @relation("BilletReceiptCreator")
+  billetReceiptsClosed      BilletReceipt[]              @relation("BilletReceiptCloser")
+  billetAttachmentsUploaded BilletReceiptAttachment[]    @relation("BilletAttachmentUploader")
   billetContractAttachments SupplierContractAttachment[] @relation("BilletContractAttachmentUploader")
 
   @@map("users")
@@ -459,6 +460,13 @@ model TruckOperation {
   /// This field is intentionally named to distinguish it from the
   /// contract-authoritative grade on SalesOrder.
   operationalGrade   SalesOrderGrade? @map("operational_grade")
+  /// True when this visit carries only bulk material that is NOT weighed on
+  /// the internal scale (scrap / billet tying wire). Derived from the request
+  /// items at registration (single scrap/billet-wire size). Such trucks skip
+  /// internal weigh sessions entirely: only the external bridge tare + gross
+  /// are recorded, and `enterGross` mirrors the round net as one
+  /// system-generated `WeighSession` so by-size reports keep working.
+  skipInternalWeighing Boolean        @default(false) @map("skip_internal_weighing")
   /// Optimistic-lock counter. Incremented on every correction of tare/gross
   /// so two operators editing the same record simultaneously are detected
   /// instead of silently overwriting each other.

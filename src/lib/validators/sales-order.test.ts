@@ -51,6 +51,44 @@ describe("salesOrderCreateSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts a valid BILLET_WIRE order (no grade, no special ratio)", () => {
+    const result = salesOrderCreateSchema.safeParse(
+      validBase({
+        kind: "BILLET_WIRE",
+        grade: null,
+        settlementMode: "CREDIT",
+        paymentDeadlineDays: 30,
+        specialRatioPct: null,
+      })
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects BILLET_WIRE with grade set", () => {
+    const result = salesOrderCreateSchema.safeParse(
+      validBase({ kind: "BILLET_WIRE", grade: "FIRST", specialRatioPct: null })
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const gradeIssue = result.error.issues.find((i) => i.path.includes("grade"));
+      expect(gradeIssue).toBeDefined();
+      expect(gradeIssue!.message).toContain("النخب يُحدد فقط");
+    }
+  });
+
+  it("rejects BILLET_WIRE with a special ratio", () => {
+    const result = salesOrderCreateSchema.safeParse(
+      validBase({ kind: "BILLET_WIRE", grade: null, specialRatioPct: 10 })
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const ratioIssue = result.error.issues.find((i) =>
+        i.path.includes("specialRatioPct"),
+      );
+      expect(ratioIssue).toBeDefined();
+    }
+  });
+
   // ─── kind + grade rules ─────────────────────────────────────────
 
   it("rejects REBAR without grade", () => {

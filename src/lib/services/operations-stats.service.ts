@@ -120,13 +120,19 @@ const STATUS_COLORS: Record<TruckStatus, string> = {
   Cancelled: "#ef4444",
 };
 
-type MaterialKind = "REBAR" | "SHORTBAR_1_4M" | "SHORTBAR_4_12M" | "SCRAP";
+type MaterialKind =
+  | "REBAR"
+  | "SHORTBAR_1_4M"
+  | "SHORTBAR_4_12M"
+  | "SCRAP"
+  | "BILLET_WIRE";
 
 const KIND_LABELS: Record<MaterialKind, string> = {
   REBAR: "مبروم",
   SHORTBAR_1_4M: "قصائر 1–4 م",
   SHORTBAR_4_12M: "قصائر 4–12 م",
   SCRAP: "خردة",
+  BILLET_WIRE: "أسلاك تربيط",
 };
 
 const GRADE_LABELS: Record<SalesOrderGrade, string> = {
@@ -141,6 +147,7 @@ function sizeCodeToKind(code: string): MaterialKind {
   if (code === "shortbar_1_4m") return "SHORTBAR_1_4M";
   if (code === "shortbar_4_12m") return "SHORTBAR_4_12M";
   if (code === "scrap") return "SCRAP";
+  if (code === "billet_wire_6mm") return "BILLET_WIRE";
   return "REBAR";
 }
 

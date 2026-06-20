@@ -625,6 +625,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
 
   const st = statusMap[receipt.status] || statusMap.Registered;
   const isTerminal = receipt.status === "Completed" || receipt.status === "Cancelled";
+  const canAddAttachment = canUpload && receipt.status !== "Cancelled";
 
   // Net preview for the close step.
   const loadedNum = receipt.loadedWeightKg != null ? Number(receipt.loadedWeightKg) : null;
@@ -1133,7 +1134,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
               <Paperclip className="h-4 w-4" />
               المرفقات ({receipt.attachments.length})
             </CardTitle>
-            {canUpload && !isTerminal && (
+            {canAddAttachment && (
               <>
                 <Button
                   variant="outline"
@@ -1147,7 +1148,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                   ) : (
                     <Upload className="h-3.5 w-3.5" />
                   )}
-                  إضافة مرفق
+                  {receipt.status === "Completed" ? "إضافة مرفق متأخر" : "إضافة مرفق"}
                 </Button>
                 <input
                   ref={attachInputRef}
@@ -1190,7 +1191,9 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
           )}
           {receipt.attachments.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">
-              لا توجد مرفقات
+              {receipt.status === "Completed" && canAddAttachment
+                ? "لا توجد مرفقات — يمكنك إرفاق أوراق متأخرة (إرسالية، كرت قبّان، …) بعد الإغلاق"
+                : "لا توجد مرفقات"}
             </p>
           ) : (
             <div className="space-y-2">

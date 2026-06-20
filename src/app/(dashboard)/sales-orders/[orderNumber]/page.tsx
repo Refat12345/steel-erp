@@ -106,6 +106,9 @@ function sizesForKind(kind: string, sizes: CatalogSize[]): CatalogSize[] {
   if (kind === "SCRAP") {
     return sizes.filter((s) => s.code === "scrap");
   }
+  if (kind === "BILLET_WIRE") {
+    return sizes.filter((s) => s.code === "billet_wire_6mm");
+  }
   return [];
 }
 
@@ -114,6 +117,7 @@ const kindLabels: Record<string, string> = {
   SHORTBAR_1_4M: "قصائر 1–4 م",
   SHORTBAR_4_12M: "قصائر 4–12 م",
   SCRAP: "خردة",
+  BILLET_WIRE: "أسلاك تربيط",
 };
 
 const gradeLabels: Record<string, string> = {
