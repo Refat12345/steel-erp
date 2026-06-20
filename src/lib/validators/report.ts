@@ -50,3 +50,14 @@ export const loadingSummaryQuerySchema = baseReportQuerySchema
   }));
 
 export type LoadingSummaryQuery = z.infer<typeof loadingSummaryQuerySchema>;
+
+export const billetBalanceQuerySchema = z.object({
+  supplierName: z.string().trim().min(1, "Supplier is required"),
+  contractNumber: z
+    .preprocess(
+      (v) => (v === "" || v === null || v === undefined ? undefined : v),
+      z.string().trim().min(1).optional(),
+    ),
+});
+
+export type BilletBalanceQuery = z.infer<typeof billetBalanceQuerySchema>;

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import {
   ArrowLeft,
   BarChart3,
+  Boxes,
   CalendarDays,
   Download,
   FileSpreadsheet,
@@ -803,6 +804,7 @@ function DailyTrucksPrintable({
 export function ReportsIndexView() {
   const { data: session } = useSession();
   const canDailyTrucks = sessionHasPermission(session, "report.daily_trucks");
+  const canReports = sessionHasPermission(session, "reports.view");
 
   return (
     <div dir="ltr" className="flex-1 p-4 sm:p-6 space-y-6 min-w-0 max-w-full text-left">
@@ -851,6 +853,23 @@ export function ReportsIndexView() {
                   <h2 className="font-semibold">Daily Loading Summary</h2>
                   <p className="text-sm text-muted-foreground mt-1">
                     Grouped by customer, city, and size — with shares
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+        ) : null}
+        {canReports ? (
+          <Link href="/reports/billet-balance" className="block min-w-0">
+            <Card className="h-full shadow-sm transition-colors hover:bg-muted/40">
+              <CardContent className="flex items-start gap-4 p-5">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                  <Boxes className="h-5 w-5 text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="font-semibold">Billet Receiving Balance</h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Cumulative supplier balance for received and remaining billet
                   </p>
                 </div>
               </CardContent>
