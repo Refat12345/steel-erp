@@ -428,3 +428,242 @@ export async function addContractAttachment(
     ),
   );
 }
+
+// ── Billet balance report (cumulative, completed receipts only) ─────────────
+
+export interface BilletBalancePieceRow {
+  billetLengthM: number;
+  contractedPieces: number;
+  acceptedPieces: number;
+  remainingPieces: number;
+}
+
+export interface BilletBalanceContractRow {
+  contractNumber: string;
+  status: SupplierContractStatus;
+  contractedWeightKg: number;
+  receivedWeightKg: number;
+  remainingWeightKg: number;
+  pieceBalances: BilletBalancePieceRow[];
+  completedReceiptCount: number;
+}
+
+export interface BilletBalanceReceiptRow {
+  id: number;
+  receiptNumber: string;
+  contractNumber: string;
+  completedAt: string | null;
+  plateNumber: string;
+  driverName: string;
+  netWeightKg: number | null;
+  acceptedByLength: Record<string, number>;
+}
+
+export interface BilletBalanceReport {
+  generatedAt: string;
+  filters: {
+    supplierName: string;
+    contractNumber: string | null;
+  };
+  lengthColumns: number[];
+  totals: {
+    contractedWeightKg: number;
+    receivedWeightKg: number;
+    remainingWeightKg: number;
+    completedReceiptCount: number;
+  };
+  pieceTotals: BilletBalancePieceRow[];
+  contracts: BilletBalanceContractRow[];
+  receipts: BilletBalanceReceiptRow[];
+}
+
+export interface BilletSupplierOption {
+  supplierName: string;
+  contractCount: number;
+  contracts: {
+    contractNumber: string;
+    status: SupplierContractStatus;
+  }[];
+}
+
+function buildPieceBalances(
+  pieceLines: { billetLengthM: number; contractedPieces: number }[],
+  acceptedByLength: Map<number, number>,
+): BilletBalancePieceRow[] {
+  return pieceLines.map((line) => {
+    const accepted = acceptedByLength.get(line.billetLengthM) ?? 0;
+    return {
+      billetLengthM: line.billetLengthM,
+      contractedPieces: line.contractedPieces,
+      acceptedPieces: accepted,
+      remainingPieces: line.contractedPieces - accepted,
+    };
+  });
+}
+
+function mergePieceTotals(rows: BilletBalancePieceRow[]): BilletBalancePieceRow[] {
+  const byLength = new Map<number, BilletBalancePieceRow>();
+  for (const row of rows) {
+    const existing = byLength.get(row.billetLengthM);
+    if (!existing) {
+      byLength.set(row.billetLengthM, { ...row });
+      continue;
+    }
+    existing.contractedPieces += row.contractedPieces;
+    existing.acceptedPieces += row.acceptedPieces;
+    existing.remainingPieces += row.remainingPieces;
+  }
+  return [...byLength.values()].sort((a, b) => a.billetLengthM - b.billetLengthM);
+}
+
+export async function listBilletSuppliers(): Promise<BilletSupplierOption[]> {
+  const contracts = await prisma.supplierContract.findMany({
+    select: {
+      supplierName: true,
+      contractNumber: true,
+      status: true,
+    },
+    orderBy: [{ supplierName: "asc" }, { contractNumber: "asc" }],
+  });
+
+  const bySupplier = new Map<string, BilletSupplierOption>();
+  for (const row of contracts) {
+    const existing = bySupplier.get(row.supplierName);
+    if (existing) {
+      existing.contractCount += 1;
+      existing.contracts.push({
+        contractNumber: row.contractNumber,
+        status: row.status,
+      });
+      continue;
+    }
+    bySupplier.set(row.supplierName, {
+      supplierName: row.supplierName,
+      contractCount: 1,
+      contracts: [
+        {
+          contractNumber: row.contractNumber,
+          status: row.status,
+        },
+      ],
+    });
+  }
+
+  return [...bySupplier.values()];
+}
+
+export async function getBilletBalanceReport(params: {
+  supplierName: string;
+  contractNumber?: string;
+}): Promise<BilletBalanceReport> {
+  const supplierName = params.supplierName.trim();
+  if (!supplierName) {
+    throw new ServiceError("Supplier is required");
+  }
+
+  const where: Prisma.SupplierContractWhereInput = {
+    supplierName: { equals: supplierName, mode: "insensitive" },
+  };
+  if (params.contractNumber) {
+    where.contractNumber = params.contractNumber;
+  }
+
+  const contracts = await prisma.supplierContract.findMany({
+    where,
+    include: { pieceLines: { orderBy: { billetLengthM: "asc" } } },
+    orderBy: { contractNumber: "asc" },
+  });
+
+  if (contracts.length === 0) {
+    throw new ServiceError("No contracts found for this supplier", "NOT_FOUND");
+  }
+
+  const contractRows: BilletBalanceContractRow[] = [];
+  let totalContracted = new Decimal(0);
+  let totalReceived = new Decimal(0);
+  let completedReceiptCount = 0;
+  const allPieceRows: BilletBalancePieceRow[] = [];
+  const lengthSet = new Set<number>();
+
+  for (const contract of contracts) {
+    const { receivedWeight, acceptedByLength } = await getCompletedUsage(
+      prisma,
+      contract.contractNumber,
+    );
+
+    const completedCount = await prisma.billetReceipt.count({
+      where: {
+        supplierContractNumber: contract.contractNumber,
+        status: "Completed",
+      },
+    });
+
+    const contractedWeight = new Decimal(contract.contractedWeightKg);
+    const pieceBalances = buildPieceBalances(contract.pieceLines, acceptedByLength);
+
+    for (const line of pieceBalances) {
+      lengthSet.add(line.billetLengthM);
+      allPieceRows.push(line);
+    }
+
+    totalContracted = totalContracted.plus(contractedWeight);
+    totalReceived = totalReceived.plus(receivedWeight);
+    completedReceiptCount += completedCount;
+
+    contractRows.push({
+      contractNumber: contract.contractNumber,
+      status: contract.status,
+      contractedWeightKg: contractedWeight.toNumber(),
+      receivedWeightKg: receivedWeight.toNumber(),
+      remainingWeightKg: contractedWeight.minus(receivedWeight).toNumber(),
+      pieceBalances,
+      completedReceiptCount: completedCount,
+    });
+  }
+
+  const contractNumbers = contracts.map((c) => c.contractNumber);
+  const receipts = await prisma.billetReceipt.findMany({
+    where: {
+      supplierContractNumber: { in: contractNumbers },
+      status: "Completed",
+    },
+    orderBy: [{ closedAt: "desc" }, { createdAt: "desc" }],
+    include: { pieceLines: true },
+  });
+
+  return {
+    generatedAt: new Date().toISOString(),
+    filters: {
+      supplierName: contracts[0]!.supplierName,
+      contractNumber: params.contractNumber ?? null,
+    },
+    lengthColumns: [...lengthSet].sort((a, b) => a - b),
+    totals: {
+      contractedWeightKg: totalContracted.toNumber(),
+      receivedWeightKg: totalReceived.toNumber(),
+      remainingWeightKg: totalContracted.minus(totalReceived).toNumber(),
+      completedReceiptCount,
+    },
+    pieceTotals: mergePieceTotals(allPieceRows),
+    contracts: contractRows,
+    receipts: receipts.map((r) => {
+      const acceptedByLength: Record<string, number> = {};
+      for (const line of r.pieceLines) {
+        const accepted = Math.max(0, (line.countedPieces ?? 0) - line.rejectedPieces);
+        if (accepted > 0) {
+          acceptedByLength[String(line.billetLengthM)] = accepted;
+        }
+      }
+      return {
+        id: r.id,
+        receiptNumber: r.receiptNumber,
+        contractNumber: r.supplierContractNumber,
+        completedAt: (r.closedAt ?? r.exitTime)?.toISOString() ?? null,
+        plateNumber: r.plateNumber,
+        driverName: r.driverName,
+        netWeightKg: r.netWeightKg != null ? Number(r.netWeightKg) : null,
+        acceptedByLength,
+      };
+    }),
+  };
+}
