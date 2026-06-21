@@ -4,6 +4,7 @@ import Decimal from "decimal.js";
 import type {
   BilletContractCreateInput,
   BilletContractUpdateInput,
+  PriorWithdrawalInput,
 } from "@/lib/validators/billet-contract";
 import type { PaginationParams, PaginatedResult } from "@/lib/api-utils";
 import { ServiceError } from "./errors";
@@ -65,6 +66,21 @@ async function generateContractNumber(tx: TxClient): Promise<string> {
     if (Number.isFinite(seq) && seq > maxSeq) maxSeq = seq;
   }
   return `${prefix}${String(maxSeq + 1).padStart(3, "0")}`;
+}
+
+async function generatePriorWithdrawalNumber(tx: TxClient): Promise<string> {
+  const yy = String(new Date().getFullYear()).slice(-2);
+  const prefix = `PW-${yy}-`;
+  const existing = await tx.billetReceipt.findMany({
+    where: { receiptNumber: { startsWith: prefix } },
+    select: { receiptNumber: true },
+  });
+  let maxSeq = 0;
+  for (const receipt of existing) {
+    const seq = parseInt(receipt.receiptNumber.slice(prefix.length), 10);
+    if (Number.isFinite(seq) && seq > maxSeq) maxSeq = seq;
+  }
+  return `${prefix}${String(maxSeq + 1).padStart(4, "0")}`;
 }
 
 export async function createContract(
@@ -152,6 +168,8 @@ export interface ContractWithBalance {
     plateNumber: string;
     driverName: string;
     netWeightKg: string | null;
+    isPriorWithdrawal: boolean;
+    priorWithdrawalDate: Date | null;
     createdAt: Date;
   }[];
   attachments: {
@@ -230,6 +248,8 @@ export async function getContractWithBalance(
       plateNumber: true,
       driverName: true,
       netWeightKg: true,
+      isPriorWithdrawal: true,
+      priorWithdrawalDate: true,
       createdAt: true,
     },
   });
@@ -390,6 +410,138 @@ export async function updateContract(
   return updated;
 }
 
+export async function recordPriorWithdrawal(
+  contractNumber: string,
+  data: PriorWithdrawalInput,
+  userId: number,
+) {
+  const lengths = data.pieceLines.map((line) => line.billetLengthM);
+  if (new Set(lengths).size !== lengths.length) {
+    throw new ServiceError("لا يمكن تكرار نفس الطول");
+  }
+
+  const withdrawalDate = data.withdrawalDate
+    ? new Date(data.withdrawalDate)
+    : null;
+  if (data.withdrawalDate && withdrawalDate && isNaN(withdrawalDate.getTime())) {
+    throw new ServiceError("تاريخ السحب السابق غير صالح");
+  }
+
+  const receipt = await withRetry(() =>
+    prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`
+          SELECT contract_number FROM supplier_contracts
+          WHERE contract_number = ${contractNumber} FOR UPDATE
+        `;
+
+        const contract = await tx.supplierContract.findUnique({
+          where: { contractNumber },
+          include: { pieceLines: true },
+        });
+        if (!contract) throw new ServiceError("العقد غير موجود", "NOT_FOUND");
+        if (contract.status !== "Active") {
+          throw new ServiceError("لا يمكن تسجيل سحب سابق على عقد غير فعّال");
+        }
+
+        const contractLines = new Map(
+          contract.pieceLines.map((line) => [line.billetLengthM, line]),
+        );
+        for (const line of data.pieceLines) {
+          if (!contractLines.has(line.billetLengthM)) {
+            throw new ServiceError(
+              `الطول ${line.billetLengthM}م غير موجود في عقد المورّد`,
+            );
+          }
+        }
+
+        const { receivedWeight, acceptedByLength } = await getCompletedUsage(
+          tx,
+          contractNumber,
+        );
+        const netWeight = new Decimal(data.netWeightKg);
+        const remainingWeight = new Decimal(contract.contractedWeightKg).minus(
+          receivedWeight,
+        );
+        if (netWeight.greaterThan(remainingWeight)) {
+          throw new ServiceError(
+            `وزن السحب السابق (${netWeight.toFixed(3)} كغ) يتجاوز رصيد العقد المتبقي (${remainingWeight.toFixed(3)} كغ)`,
+          );
+        }
+
+        for (const line of data.pieceLines) {
+          const contractLine = contractLines.get(line.billetLengthM);
+          const accepted = acceptedByLength.get(line.billetLengthM) ?? 0;
+          const remainingPieces = (contractLine?.contractedPieces ?? 0) - accepted;
+          if (line.acceptedPieces > remainingPieces) {
+            throw new ServiceError(
+              `قطع السحب السابق للطول ${line.billetLengthM}م (${line.acceptedPieces}) تتجاوز رصيد العقد المتبقي (${remainingPieces})`,
+            );
+          }
+        }
+
+        const receiptNumber = await generatePriorWithdrawalNumber(tx);
+        const now = new Date();
+        const created = await tx.billetReceipt.create({
+          data: {
+            receiptNumber,
+            supplierContractNumber: contractNumber,
+            driverName: "سحب سابق قبل النظام",
+            plateNumber: "سحب سابق",
+            declaredWeightKg: netWeight.toFixed(3),
+            status: "Completed",
+            netWeightKg: netWeight.toFixed(1),
+            notes: data.notes.trim(),
+            isPriorWithdrawal: true,
+            priorWithdrawalDate: withdrawalDate,
+            createdById: userId,
+            closedById: userId,
+            closedAt: now,
+            pieceLines: {
+              create: data.pieceLines.map((line) => ({
+                billetLengthM: line.billetLengthM,
+                expectedPieces: line.acceptedPieces,
+                countedPieces: line.acceptedPieces,
+                rejectedPieces: 0,
+              })),
+            },
+          },
+          include: { pieceLines: { orderBy: { billetLengthM: "asc" } } },
+        });
+
+        await logAudit(tx, {
+          userId,
+          action: "create",
+          entityType: "BilletReceipt",
+          entityId: String(created.id),
+          details: {
+            event: "prior_withdrawal_recorded",
+            receiptNumber,
+            supplierContractNumber: contractNumber,
+            netWeightKg: netWeight.toNumber(),
+            withdrawalDate: withdrawalDate?.toISOString() ?? null,
+            pieceLines: data.pieceLines,
+            notes: data.notes.trim(),
+          },
+        });
+
+        return created;
+      },
+      { isolationLevel: "Serializable" },
+    ),
+  );
+
+  logger.info(
+    {
+      contractNumber,
+      receiptId: receipt.id,
+      receiptNumber: receipt.receiptNumber,
+    },
+    "billet prior withdrawal recorded",
+  );
+  return receipt;
+}
+
 export async function addContractAttachment(
   contractNumber: string,
   fileInfo: { filePath: string; fileName: string; fileSize: number },
@@ -456,6 +608,8 @@ export interface BilletBalanceReceiptRow {
   plateNumber: string;
   driverName: string;
   netWeightKg: number | null;
+  isPriorWithdrawal: boolean;
+  priorWithdrawalDate: string | null;
   acceptedByLength: Record<string, number>;
 }
 
@@ -662,6 +816,8 @@ export async function getBilletBalanceReport(params: {
         plateNumber: r.plateNumber,
         driverName: r.driverName,
         netWeightKg: r.netWeightKg != null ? Number(r.netWeightKg) : null,
+        isPriorWithdrawal: r.isPriorWithdrawal,
+        priorWithdrawalDate: r.priorWithdrawalDate?.toISOString() ?? null,
         acceptedByLength,
       };
     }),

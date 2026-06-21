@@ -1154,6 +1154,593 @@ export async function deleteWeighSession(
   );
 }
 
+// ─── Admin Post-Close Corrections ─────────────────────────────────
+//
+// A narrow administrative escape hatch (permission `scale.correct_completed`,
+// admin only) to fix data-entry mistakes discovered AFTER a truck is closed
+// (`Completed`). Unlike the operational correction paths above, these functions
+// NEVER change `status` — the truck stays `Completed` — and operate on an
+// explicit `roundId` rather than "the open round" (a completed truck has none).
+// Every function requires a written `reason` and writes a full before/after
+// audit entry. Scrap / billet-wire trucks (`skipInternalWeighing`) carry a
+// single system-generated mirror session, so manual session edits are refused
+// for them; weight corrections keep the mirror in sync instead.
+
+function assertCompletedForCorrection(status: TruckStatus) {
+  if (status !== "Completed") {
+    throw new ServiceError(
+      "التصحيح الإداري متاح فقط للشاحنات المكتملة",
+    );
+  }
+}
+
+export async function correctCompletedRoundGrade(
+  truckId: number,
+  roundId: number,
+  grade: SalesOrderGrade | null,
+  reason: string,
+  expectedVersion: number,
+  userId: number,
+) {
+  return withRetry(() =>
+    prisma.$transaction(
+      async (tx: TxClient) => {
+        const truck = await tx.truckOperation.findUnique({
+          where: { id: truckId },
+          select: {
+            id: true,
+            status: true,
+            operationalGrade: true,
+            salesOrder: { select: { grade: true } },
+          },
+        });
+        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        assertCompletedForCorrection(truck.status);
+
+        const round = await tx.bridgeRound.findUnique({ where: { id: roundId } });
+        if (!round || round.truckOperationId !== truckId) {
+          throw new ServiceError("دورة القبان غير موجودة", "NOT_FOUND");
+        }
+
+        const oldGrade = round.grade;
+        const result = await tx.bridgeRound.updateMany({
+          where: { id: roundId, version: expectedVersion },
+          data: { grade, version: { increment: 1 } },
+        });
+        if (result.count === 0) {
+          throw new ServiceError(
+            "تم تعديل السجل من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
+            "CONFLICT",
+          );
+        }
+
+        // Keep the operation-level DISPLAY grade (`operationalGrade`) in sync
+        // so the header "النخب" card matches the corrected round. This is
+        // display-only: reports key off per-round grade for completed trucks.
+        // Skipped when a linked sales order drives the grade (contract-
+        // authoritative). Applied only when every round shares one grade —
+        // a mixed multi-round visit has no single representative grade, so the
+        // per-round table stays the source of truth and operationalGrade is
+        // left untouched.
+        let operationalGradeAfter = truck.operationalGrade;
+        if (truck.salesOrder?.grade == null) {
+          const rounds = await tx.bridgeRound.findMany({
+            where: { truckOperationId: truckId },
+            select: { grade: true },
+          });
+          const distinct = [...new Set(rounds.map((r) => r.grade))];
+          if (distinct.length === 1 && distinct[0] !== truck.operationalGrade) {
+            operationalGradeAfter = distinct[0];
+            await tx.truckOperation.update({
+              where: { id: truckId },
+              data: { operationalGrade: distinct[0] },
+            });
+          }
+        }
+
+        await logAudit(tx, {
+          userId,
+          action: "update",
+          entityType: "BridgeRound",
+          entityId: String(roundId),
+          details: {
+            event: "completed_grade_corrected",
+            truckId,
+            roundNumber: round.roundNumber,
+            oldGrade,
+            newGrade: grade,
+            operationalGradeAfter,
+            reason,
+            expectedVersion,
+          },
+        });
+
+        logger.info(
+          { truckId, roundId, oldGrade, newGrade: grade },
+          "completed round grade corrected",
+        );
+        return tx.truckOperation.findUnique({
+          where: { id: truckId },
+          include: DETAIL_INCLUDE,
+        });
+      },
+      { isolationLevel: "Serializable" },
+    ),
+  );
+}
+
+export async function correctCompletedTare(
+  truckId: number,
+  newWeightKg: number,
+  reason: string,
+  expectedVersion: number,
+  userId: number,
+) {
+  const tareError = validateTareWeight(newWeightKg);
+  if (tareError) throw new ServiceError(tareError);
+
+  return withRetry(() =>
+    prisma.$transaction(
+      async (tx: TxClient) => {
+        const locked = await tx.$queryRaw<{ id: number }[]>`
+          SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
+        `;
+        if (locked.length === 0) {
+          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        }
+
+        const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
+        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        assertCompletedForCorrection(truck.status);
+
+        // Tare is round 1's START weight. Changing it only shifts round 1's
+        // net (end − start); later rounds chain off round 1's END (a fixed
+        // bridge reading) and are unaffected — so no cascade is needed.
+        const round1 = await tx.bridgeRound.findFirst({
+          where: { truckOperationId: truckId, roundNumber: 1 },
+        });
+        if (!round1) {
+          throw new ServiceError("لا توجد دورة قبان أولى لهذه العملية", "NOT_FOUND");
+        }
+        if (round1.endWeightKg != null && new Decimal(newWeightKg).gte(round1.endWeightKg)) {
+          throw new ServiceError(
+            "وزن الفارغ يجب أن يكون أصغر من وزن نهاية الدورة الأولى",
+          );
+        }
+
+        const oldWeight = truck.tareWeightKg ? Number(truck.tareWeightKg) : null;
+        const correctedAt = new Date();
+        const result = await tx.truckOperation.updateMany({
+          where: { id: truckId, version: expectedVersion },
+          data: {
+            tareWeightKg: newWeightKg,
+            tareTime: correctedAt,
+            version: { increment: 1 },
+          },
+        });
+        if (result.count === 0) {
+          throw new ServiceError(
+            "تم تعديل السجل من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
+            "CONFLICT",
+          );
+        }
+
+        await tx.bridgeRound.update({
+          where: { id: round1.id },
+          data: { startWeightKg: newWeightKg, version: { increment: 1 } },
+        });
+
+        // Scrap / billet-wire: the single mirror session equals the round net.
+        if (truck.skipInternalWeighing && round1.endWeightKg != null) {
+          const correctedNetTons = new Decimal(round1.endWeightKg)
+            .minus(newWeightKg)
+            .dividedBy(1000)
+            .toFixed(3);
+          await tx.weighSession.updateMany({
+            where: { bridgeRoundId: round1.id },
+            data: { weightTons: correctedNetTons, version: { increment: 1 } },
+          });
+        }
+
+        await logAudit(tx, {
+          userId,
+          action: "update",
+          entityType: "TruckOperation",
+          entityId: String(truckId),
+          details: {
+            event: "completed_tare_corrected",
+            roundNumber: 1,
+            oldTareWeightKg: oldWeight,
+            newTareWeightKg: newWeightKg,
+            reason,
+            expectedVersion,
+          },
+        });
+
+        logger.info({ truckId, oldWeight, newWeightKg }, "completed tare corrected");
+        return tx.truckOperation.findUnique({
+          where: { id: truckId },
+          include: DETAIL_INCLUDE,
+        });
+      },
+      { isolationLevel: "Serializable" },
+    ),
+  );
+}
+
+export async function correctCompletedRoundExternal(
+  truckId: number,
+  roundId: number,
+  newWeightKg: number,
+  reason: string,
+  expectedVersion: number,
+  userId: number,
+) {
+  if (newWeightKg <= 0) throw new ServiceError("الوزن يجب أن يكون أكبر من صفر");
+
+  return withRetry(() =>
+    prisma.$transaction(
+      async (tx: TxClient) => {
+        const locked = await tx.$queryRaw<{ id: number }[]>`
+          SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
+        `;
+        if (locked.length === 0) {
+          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        }
+
+        const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
+        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        assertCompletedForCorrection(truck.status);
+
+        const round = await tx.bridgeRound.findUnique({ where: { id: roundId } });
+        if (!round || round.truckOperationId !== truckId) {
+          throw new ServiceError("دورة القبان غير موجودة", "NOT_FOUND");
+        }
+        if (round.endWeightKg == null) {
+          throw new ServiceError("لا توجد وزنة خارجية لهذه الدورة لتصحيحها");
+        }
+
+        const startKg = Number(round.startWeightKg);
+        if (new Decimal(newWeightKg).lte(round.startWeightKg)) {
+          throw new ServiceError("وزن المحمّل يجب أن يكون أكبر من وزن بداية الدورة");
+        }
+        const grossError = validateGrossWeight(newWeightKg, startKg);
+        if (grossError) throw new ServiceError(grossError);
+
+        // Keep the scrap / billet-wire mirror session in sync BEFORE computing
+        // the discrepancy so it stays zero for exempt trucks.
+        if (truck.skipInternalWeighing) {
+          const correctedNetTons = new Decimal(newWeightKg)
+            .minus(startKg)
+            .dividedBy(1000)
+            .toFixed(3);
+          await tx.weighSession.updateMany({
+            where: { bridgeRoundId: round.id },
+            data: { weightTons: correctedNetTons, version: { increment: 1 } },
+          });
+        }
+
+        const internalTotalTons = await loadRoundInternalTons(tx, round.id);
+        const discrepancyFields = buildWeighbridgeDiscrepancyAuditFields({
+          tareKg: startKg,
+          grossKg: newWeightKg,
+          internalTotalTons,
+        });
+
+        const oldWeight = Number(round.endWeightKg);
+        const correctedAt = new Date();
+        const result = await tx.truckOperation.updateMany({
+          where: { id: truckId, version: expectedVersion },
+          data: round.isFinal
+            ? {
+                grossWeightKg: newWeightKg,
+                grossTime: correctedAt,
+                version: { increment: 1 },
+              }
+            : { version: { increment: 1 } },
+        });
+        if (result.count === 0) {
+          throw new ServiceError(
+            "تم تعديل السجل من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
+            "CONFLICT",
+          );
+        }
+
+        await tx.bridgeRound.update({
+          where: { id: round.id },
+          data: {
+            endWeightKg: newWeightKg,
+            endTime: correctedAt,
+            version: { increment: 1 },
+          },
+        });
+
+        // Cascade: this round's end weight is the next round's start weight.
+        const cascaded = await tx.bridgeRound.updateMany({
+          where: { truckOperationId: truckId, roundNumber: round.roundNumber + 1 },
+          data: { startWeightKg: newWeightKg },
+        });
+
+        await logAudit(tx, {
+          userId,
+          action: "update",
+          entityType: "TruckOperation",
+          entityId: String(truckId),
+          details: {
+            event: "completed_external_corrected",
+            roundNumber: round.roundNumber,
+            isFinalRound: round.isFinal,
+            cascadedToNextRound: cascaded.count > 0,
+            oldEndWeightKg: oldWeight,
+            newEndWeightKg: newWeightKg,
+            reason,
+            expectedVersion,
+            ...discrepancyFields,
+          },
+        });
+
+        logger.info(
+          { truckId, roundId, oldWeight, newWeightKg, isFinal: round.isFinal },
+          "completed external weighing corrected",
+        );
+        return tx.truckOperation.findUnique({
+          where: { id: truckId },
+          include: DETAIL_INCLUDE,
+        });
+      },
+      { isolationLevel: "Serializable" },
+    ),
+  );
+}
+
+export async function addCompletedSession(
+  truckId: number,
+  roundId: number,
+  data: WeighSessionInput,
+  reason: string,
+  userId: number,
+) {
+  if (data.weightTons <= 0) throw new ServiceError("الوزن يجب أن يكون أكبر من صفر");
+
+  return withRetry(() =>
+    prisma.$transaction(
+      async (tx: TxClient) => {
+        const locked = await tx.$queryRaw<{ id: number }[]>`
+          SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
+        `;
+        if (locked.length === 0) {
+          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        }
+
+        const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
+        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        assertCompletedForCorrection(truck.status);
+        if (truck.skipInternalWeighing) {
+          throw new ServiceError(
+            "هذه الشاحنة (خردة/أسلاك تربيط) لا تأخذ وزنات داخلية",
+          );
+        }
+
+        const round = await tx.bridgeRound.findUnique({ where: { id: roundId } });
+        if (!round || round.truckOperationId !== truckId) {
+          throw new ServiceError("دورة القبان غير موجودة", "NOT_FOUND");
+        }
+
+        if (data.sizeId) {
+          const size = await tx.sizeLookup.findUnique({ where: { id: data.sizeId } });
+          if (!size || !size.isActive) throw new ServiceError("القياس غير صالح");
+        }
+
+        const lastSession = await tx.weighSession.findFirst({
+          where: { truckOperationId: truckId },
+          orderBy: { sessionNumber: "desc" },
+        });
+        const nextNumber = (lastSession?.sessionNumber ?? 0) + 1;
+
+        const session = await tx.weighSession.create({
+          data: {
+            truckOperationId: truckId,
+            bridgeRoundId: round.id,
+            sessionNumber: nextNumber,
+            sizeId: data.sizeId || null,
+            bundleCount: data.bundleCount || null,
+            weightTons: data.weightTons,
+          },
+        });
+
+        await logAudit(tx, {
+          userId,
+          action: "create",
+          entityType: "WeighSession",
+          entityId: String(session.id),
+          details: {
+            event: "completed_session_added",
+            truckId,
+            roundNumber: round.roundNumber,
+            sessionNumber: nextNumber,
+            weightTons: data.weightTons,
+            sizeId: data.sizeId ?? null,
+            bundleCount: data.bundleCount ?? null,
+            reason,
+          },
+        });
+
+        logger.info(
+          { truckId, roundId, sessionId: session.id, sessionNumber: nextNumber },
+          "completed session added",
+        );
+        return session;
+      },
+      { isolationLevel: "ReadCommitted" },
+    ),
+  );
+}
+
+export async function editCompletedSession(
+  truckId: number,
+  sessionId: number,
+  data: Partial<WeighSessionInput>,
+  reason: string,
+  expectedVersion: number,
+  userId: number,
+) {
+  return withRetry(() =>
+    prisma.$transaction(
+      async (tx: TxClient) => {
+        const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
+        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        assertCompletedForCorrection(truck.status);
+        if (truck.skipInternalWeighing) {
+          throw new ServiceError(
+            "هذه الشاحنة (خردة/أسلاك تربيط) لا تأخذ وزنات داخلية",
+          );
+        }
+
+        const session = await tx.weighSession.findUnique({ where: { id: sessionId } });
+        if (!session || session.truckOperationId !== truckId) {
+          throw new ServiceError("الوزنة غير موجودة", "NOT_FOUND");
+        }
+
+        if (data.weightTons !== undefined && data.weightTons <= 0) {
+          throw new ServiceError("الوزن يجب أن يكون أكبر من صفر");
+        }
+        if (data.sizeId) {
+          const size = await tx.sizeLookup.findUnique({ where: { id: data.sizeId } });
+          if (!size || !size.isActive) throw new ServiceError("القياس غير صالح");
+        }
+
+        const updateData: Prisma.WeighSessionUncheckedUpdateManyInput = {
+          version: { increment: 1 },
+        };
+        if (data.weightTons !== undefined) updateData.weightTons = data.weightTons;
+        if (data.sizeId !== undefined) updateData.sizeId = data.sizeId ?? null;
+        if (data.bundleCount !== undefined) updateData.bundleCount = data.bundleCount;
+
+        const result = await tx.weighSession.updateMany({
+          where: { id: sessionId, version: expectedVersion },
+          data: updateData,
+        });
+        if (result.count === 0) {
+          throw new ServiceError(
+            "تم تعديل الوزنة من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
+            "CONFLICT",
+          );
+        }
+
+        const updated = await tx.weighSession.findUnique({ where: { id: sessionId } });
+
+        await logAudit(tx, {
+          userId,
+          action: "update",
+          entityType: "WeighSession",
+          entityId: String(sessionId),
+          details: {
+            event: "completed_session_edited",
+            truckId,
+            changes: data,
+            reason,
+            expectedVersion,
+          },
+        });
+
+        logger.info({ truckId, sessionId }, "completed session edited");
+        return updated!;
+      },
+      { isolationLevel: "Serializable" },
+    ),
+  );
+}
+
+export async function deleteCompletedSession(
+  truckId: number,
+  sessionId: number,
+  reason: string,
+  expectedVersion: number,
+  userId: number,
+) {
+  return withRetry(() =>
+    prisma.$transaction(
+      async (tx: TxClient) => {
+        const locked = await tx.$queryRaw<{ id: number }[]>`
+          SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
+        `;
+        if (locked.length === 0) {
+          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        }
+
+        const truck = await tx.truckOperation.findUnique({
+          where: { id: truckId },
+          select: { id: true, status: true, skipInternalWeighing: true },
+        });
+        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        assertCompletedForCorrection(truck.status);
+        if (truck.skipInternalWeighing) {
+          throw new ServiceError(
+            "هذه الشاحنة (خردة/أسلاك تربيط) لا تأخذ وزنات داخلية",
+          );
+        }
+
+        const session = await tx.weighSession.findUnique({
+          where: { id: sessionId },
+          select: {
+            id: true,
+            truckOperationId: true,
+            bridgeRoundId: true,
+            sessionNumber: true,
+            sizeId: true,
+            bundleCount: true,
+            weightTons: true,
+            version: true,
+          },
+        });
+        if (!session || session.truckOperationId !== truckId) {
+          throw new ServiceError("الوزنة غير موجودة", "NOT_FOUND");
+        }
+
+        const deletedSnapshot = {
+          sessionNumber: session.sessionNumber,
+          sizeId: session.sizeId,
+          bundleCount: session.bundleCount,
+          weightTons: Number(session.weightTons),
+          version: session.version,
+        };
+
+        const result = await tx.weighSession.deleteMany({
+          where: { id: sessionId, version: expectedVersion },
+        });
+        if (result.count === 0) {
+          throw new ServiceError(
+            "تم تعديل الوزنة من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
+            "CONFLICT",
+          );
+        }
+
+        // Deliberately NO status change here — the truck stays `Completed`.
+        await logAudit(tx, {
+          userId,
+          action: "delete",
+          entityType: "WeighSession",
+          entityId: String(sessionId),
+          details: {
+            event: "completed_session_deleted",
+            truckId,
+            deleted: deletedSnapshot,
+            reason,
+            expectedVersion,
+          },
+        });
+
+        logger.info(
+          { truckId, sessionId, sessionNumber: session.sessionNumber },
+          "completed session deleted",
+        );
+        return { deleted: true };
+      },
+      { isolationLevel: "ReadCommitted" },
+    ),
+  );
+}
+
 // ─── Upload Photo ─────────────────────────────────────────────────
 
 export async function uploadPhoto(truckId: number, filePath: string, userId: number) {

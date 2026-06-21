@@ -6,6 +6,7 @@ import {
 } from "@/lib/truck-grade";
 import {
   PRODUCT_FILTER_LABELS_AR,
+  isGradeProductFilter,
   type ReportProductFilter,
 } from "@/lib/material-kind";
 import { sliceReportByProductFilter } from "@/lib/report-product-filter";
@@ -43,6 +44,40 @@ const TONNAGE_NOTE: Record<ReportTonnageStatus, string | null> = {
   excluded_cancelled: null,
   excluded_open: "لم تكتمل بعد",
 };
+
+/**
+ * The grade shown for a truck row in the daily report.
+ *
+ * `BridgeRound.grade` is authoritative for what was physically loaded (and is
+ * what admin grade corrections edit), so it MUST drive the reported grade —
+ * not the operation-level `operationalGrade`/`salesOrder.grade` display source.
+ * This keeps the report consistent with grade corrections on completed trucks.
+ *
+ *  - A grade product filter already constrains the slice to one grade → use it.
+ *  - One distinct graded round → that grade.
+ *  - Mixed graded rounds → null (the per-round breakdown carries the detail).
+ *  - No graded rounds (legacy / non-rebar visit) → fall back to the
+ *    operation-level display grade.
+ */
+function deriveReportGrade(
+  truck: {
+    operationalGrade: SalesOrderGrade | null;
+    salesOrder: { grade: SalesOrderGrade | null } | null;
+    rounds: ReadonlyArray<{ grade: SalesOrderGrade | null; endWeightKg: unknown }>;
+  },
+  productFilter: ReportProductFilter | null,
+): SalesOrderGrade | null {
+  if (productFilter != null && isGradeProductFilter(productFilter)) {
+    return productFilter;
+  }
+  const gradedClosed = truck.rounds
+    .filter((r) => r.endWeightKg != null && r.grade != null)
+    .map((r) => r.grade as SalesOrderGrade);
+  const distinct = [...new Set(gradedClosed)];
+  if (distinct.length === 1) return distinct[0];
+  if (distinct.length > 1) return null;
+  return getDisplayGrade(truck);
+}
 
 export interface DailyTrucksReportParams {
   operationalDate: string;
@@ -288,7 +323,7 @@ export async function getDailyTrucksReport(
       gradeSlice.matchingRoundIds,
     );
     const discrepancyTons = computeDiscrepancyTons(bridgeTons, internalTons);
-    const grade = getDisplayGrade(truck);
+    const grade = deriveReportGrade(truck, params.productFilter ?? null);
     const isPartialVisit = gradeSlice.isPartialVisit;
     const discrepancyWarning =
       discrepancyTons != null &&

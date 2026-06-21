@@ -90,3 +90,37 @@ describe("sliceReportByProductFilter — SHORTBAR / SCRAP", () => {
     expect(slice.isPartialVisit).toBe(false);
   });
 });
+
+describe("admin grade correction moves tonnage between grade filters", () => {
+  // A two-round visit: round 1 FIRST, round 2 SECOND.
+  const sessions = [
+    { bridgeRoundId: 1, weightTons: 16.5, sizeId: 8, size: { code: "8" } },
+    { bridgeRoundId: 2, weightTons: 15.0, sizeId: 10, size: { code: "10" } },
+  ];
+  const buildTruck = (round1Grade: "FIRST" | "SECOND") => ({
+    operationalGrade: round1Grade,
+    rounds: [
+      { id: 1, grade: round1Grade, startWeightKg: 13_200, endWeightKg: 30_000 },
+      { id: 2, grade: "SECOND" as const, startWeightKg: 30_000, endWeightKg: 45_000 },
+    ],
+  });
+
+  it("counts round 1 net under FIRST before correction", () => {
+    const slice = sliceReportByProductFilter(buildTruck("FIRST"), "FIRST", 31.8, sessions);
+    expect(slice.included).toBe(true);
+    expect(slice.bridgeTons).toBe(16.8); // 30000 - 13200
+    expect(slice.matchingRoundIds).toEqual([1]);
+  });
+
+  it("moves round 1 net to SECOND after correcting its grade to SECOND", () => {
+    const corrected = buildTruck("SECOND");
+    const first = sliceReportByProductFilter(corrected, "FIRST", 31.8, sessions);
+    expect(first.included).toBe(false);
+
+    const second = sliceReportByProductFilter(corrected, "SECOND", 31.8, sessions);
+    expect(second.included).toBe(true);
+    // both rounds now SECOND: 16.8 + 15.0 = 31.8
+    expect(second.bridgeTons).toBe(31.8);
+    expect(second.matchingRoundIds).toEqual([1, 2]);
+  });
+});

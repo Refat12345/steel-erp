@@ -161,6 +161,54 @@ describe("getDailyTrucksReport", () => {
     ]);
   });
 
+  it("reports the round grade for completed trucks, overriding sales-order/operational grade", async () => {
+    // Round physically loaded SECOND, but the sales order says FIRST and the
+    // operation-level grade is stale FIRST. After an admin grade correction the
+    // authoritative source is the round, so the report must show SECOND.
+    mockPrisma.truckOperation.findMany.mockResolvedValue([
+      {
+        id: 70,
+        plateNumber: "R-1",
+        driverName: "سائق",
+        salesOrderNumber: "SO-FIRST",
+        status: "Completed",
+        tareWeightKg: 13_200,
+        grossWeightKg: 30_000,
+        createdAt: new Date(2026, 4, 23, 10, 0, 0, 0),
+        closedAt: new Date(2026, 4, 23, 12, 0, 0, 0),
+        loadingConfirmedAt: new Date(2026, 4, 23, 11, 0, 0, 0),
+        lastReopenedAt: null,
+        cancelReason: null,
+        operationalGrade: "FIRST",
+        salesOrder: { grade: "FIRST" },
+        customer: null,
+        destination: null,
+        rounds: [
+          { id: 1, roundNumber: 1, grade: "SECOND", startWeightKg: 13_200, endWeightKg: 30_000 },
+        ],
+        sessions: [
+          {
+            bridgeRoundId: 1,
+            sizeId: 8,
+            bundleCount: 10,
+            weightTons: 16.8,
+            createdAt: new Date(2026, 4, 23, 11, 0, 0, 0),
+            size: { displayName: "8 مم", sortOrder: 8, code: "8" },
+          },
+        ],
+      },
+    ]);
+
+    const report = await getDailyTrucksReport({
+      operationalDate: "2026-05-23",
+      canViewSensitiveTonnage: true,
+    });
+
+    expect(report.rows).toHaveLength(1);
+    expect(report.rows[0].grade).toBe("SECOND");
+    expect(report.rows[0].gradeLabelAr).toBe("نخب ثاني");
+  });
+
   it("filters by effective grade from sales order or operational grade", async () => {
     mockPrisma.truckOperation.findMany.mockResolvedValue([
       {

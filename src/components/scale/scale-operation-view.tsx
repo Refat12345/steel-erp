@@ -65,6 +65,7 @@ import {
 } from "@/lib/format-duration";
 import { formatDateTime } from "@/lib/date-format";
 import type { TruckTimings } from "@/lib/truck-timing";
+import { AdminCorrectionPanel } from "@/components/scale/admin-correction-panel";
 
 interface SizeOption {
   id: number;
@@ -206,6 +207,7 @@ export function ScaleOperationView({
   const canReopen = sessionHasPermission(session, "scale.reopen_before_gross");
   const canClose = sessionHasPermission(session, "scale.close");
   const canCancel = sessionHasPermission(session, "scale.cancel");
+  const canCorrectCompleted = sessionHasPermission(session, "scale.correct_completed");
 
   const fetchTruck = useCallback(async () => {
     try {
@@ -224,7 +226,8 @@ export function ScaleOperationView({
   // features (add / edit / delete a session weight). The external scale
   // operator has none of those permissions and would only get a 403 from
   // `/api/sizes`, so fetch it solely when the user can actually use it.
-  const needsSizes = canSession || canEditSession || canDeleteSession;
+  const needsSizes =
+    canSession || canEditSession || canDeleteSession || canCorrectCompleted;
 
   useEffect(() => {
     fetchTruck();
@@ -634,6 +637,10 @@ export function ScaleOperationView({
             </Button>
           </Link>
         </div>
+      )}
+
+      {truck.status === "Completed" && canCorrectCompleted && (
+        <AdminCorrectionPanel truck={truck} sizes={sizes} onChanged={fetchTruck} />
       )}
 
       {/* Sessions Table */}
