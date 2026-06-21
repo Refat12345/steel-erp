@@ -65,6 +65,7 @@ function buildReceiptsSheet(report: BilletBalanceReport): XLSX.WorkSheet {
   const lengthCols = report.lengthColumns;
   const header = [
     "Receipt",
+    "Type",
     "Contract",
     "Completed at",
     "Plate",
@@ -75,8 +76,13 @@ function buildReceiptsSheet(report: BilletBalanceReport): XLSX.WorkSheet {
 
   const body = report.receipts.map((row) => [
     row.receiptNumber,
+    row.isPriorWithdrawal ? "Prior withdrawal" : "Receipt",
     row.contractNumber,
-    row.completedAt ? formatDateTime(row.completedAt) : "-",
+    row.priorWithdrawalDate
+      ? formatDateTime(row.priorWithdrawalDate)
+      : row.completedAt
+        ? formatDateTime(row.completedAt)
+        : "-",
     row.plateNumber,
     row.driverName,
     row.netWeightKg != null ? kg(row.netWeightKg) : "-",

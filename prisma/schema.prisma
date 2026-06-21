@@ -731,6 +731,11 @@ model BilletReceipt {
   notes        String?
   cancelReason String?  @map("cancel_reason")
 
+  /// A completed historical withdrawal recorded after the contract already
+  /// existed in reality, before this ERP tracked the physical receiving flow.
+  isPriorWithdrawal   Boolean   @default(false) @map("is_prior_withdrawal")
+  priorWithdrawalDate DateTime? @map("prior_withdrawal_date") @db.Date
+
   version     Int       @default(0)
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
@@ -747,6 +752,7 @@ model BilletReceipt {
   @@index([supplierContractNumber])
   @@index([plateNumber])
   @@index([status])
+  @@index([isPriorWithdrawal])
   @@index([createdAt])
   @@map("billet_receipts")
 }

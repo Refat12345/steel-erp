@@ -53,6 +53,7 @@ import {
   Timer,
   XCircle,
   CheckCircle2,
+  History,
 } from "lucide-react";
 
 interface PieceLine {
@@ -90,6 +91,8 @@ interface ReceiptDetail {
   countEnteredAt: string | null;
   countMismatchReason: string | null;
   netWeightKg: string | null;
+  isPriorWithdrawal: boolean;
+  priorWithdrawalDate: string | null;
   bundleCount: number | null;
   notes: string | null;
   cancelReason: string | null;
@@ -666,6 +669,9 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                 {receipt.receiptNumber}
               </h1>
               <Badge variant={st.variant}>{st.label}</Badge>
+              {receipt.isPriorWithdrawal && (
+                <Badge variant="secondary">سحب سابق</Badge>
+              )}
             </div>
             <p className="text-xs text-muted-foreground mt-0.5 truncate">
               {receipt.plateNumber} — {receipt.driverName}
@@ -718,13 +724,21 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
               </button>
             </div>
             <div>
-              <span className="text-muted-foreground">رقم اللوحة:</span>{" "}
-              <span className="font-medium">{receipt.plateNumber}</span>
+              <span className="text-muted-foreground">
+                {receipt.isPriorWithdrawal ? "النوع:" : "رقم اللوحة:"}
+              </span>{" "}
+              <span className="font-medium">
+                {receipt.isPriorWithdrawal ? "سحب سابق قبل النظام" : receipt.plateNumber}
+              </span>
             </div>
             <div>
-              <span className="text-muted-foreground">السائق:</span>{" "}
+              <span className="text-muted-foreground">
+                {receipt.isPriorWithdrawal ? "المرجع:" : "السائق:"}
+              </span>{" "}
               {receipt.driverName}
-              {receipt.driverNationalId ? ` — ${receipt.driverNationalId}` : ""}
+              {!receipt.isPriorWithdrawal && receipt.driverNationalId
+                ? ` — ${receipt.driverNationalId}`
+                : ""}
             </div>
             <div>
               <span className="text-muted-foreground">وزن الطلبية المعلن:</span>{" "}
@@ -737,8 +751,12 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
               </div>
             )}
             <div>
-              <span className="text-muted-foreground">أُنشئ:</span>{" "}
-              <span dir="ltr">{formatDate(receipt.createdAt)}</span>
+              <span className="text-muted-foreground">
+                {receipt.isPriorWithdrawal ? "تاريخ السحب:" : "أُنشئ:"}
+              </span>{" "}
+              <span dir="ltr">
+                {formatDate(receipt.priorWithdrawalDate || receipt.createdAt)}
+              </span>
             </div>
           </div>
         </CardContent>
@@ -1019,38 +1037,63 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2 text-emerald-600">
-              <CheckCircle2 className="h-4 w-4" />
-              اكتمل الاستلام
+              {receipt.isPriorWithdrawal ? (
+                <History className="h-4 w-4" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" />
+              )}
+              {receipt.isPriorWithdrawal ? "سحب سابق مسجّل" : "اكتمل الاستلام"}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-center">
-              <div className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">المحمّل</p>
-                <p className="font-bold tabular-nums">{formatKg(receipt.loadedWeightKg)}</p>
-              </div>
-              <div className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">الفارغ</p>
-                <p className="font-bold tabular-nums">{formatKg(receipt.emptyWeightKg)}</p>
-              </div>
+              {!receipt.isPriorWithdrawal && (
+                <>
+                  <div className="rounded-lg border p-3">
+                    <p className="text-xs text-muted-foreground">المحمّل</p>
+                    <p className="font-bold tabular-nums">
+                      {formatKg(receipt.loadedWeightKg)}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border p-3">
+                    <p className="text-xs text-muted-foreground">الفارغ</p>
+                    <p className="font-bold tabular-nums">
+                      {formatKg(receipt.emptyWeightKg)}
+                    </p>
+                  </div>
+                </>
+              )}
               <div className="rounded-lg border p-3 bg-muted/30">
                 <p className="text-xs text-muted-foreground">الصافي</p>
                 <p className="font-bold tabular-nums">{formatKg(receipt.netWeightKg)}</p>
               </div>
-              <div className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">الفرق عن المعلن</p>
-                <p className="font-bold tabular-nums">
-                  {completedDiff != null
-                    ? `${completedDiff > 0 ? "+" : ""}${formatKg(completedDiff)}`
-                    : "—"}
-                </p>
-              </div>
-              <div className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">مدة التفريغ</p>
-                <p className="font-bold">
-                  {unloadingDurationMs != null ? formatDuration(unloadingDurationMs) : "—"}
-                </p>
-              </div>
+              {receipt.isPriorWithdrawal ? (
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground">تاريخ السحب</p>
+                  <p className="font-bold" dir="ltr">
+                    {formatDate(receipt.priorWithdrawalDate || receipt.createdAt)}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="rounded-lg border p-3">
+                    <p className="text-xs text-muted-foreground">الفرق عن المعلن</p>
+                    <p className="font-bold tabular-nums">
+                      {completedDiff != null
+                        ? `${completedDiff > 0 ? "+" : ""}${formatKg(completedDiff)}`
+                        : "—"}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border p-3">
+                    <p className="text-xs text-muted-foreground">مدة التفريغ</p>
+                    <p className="font-bold">
+                      {unloadingDurationMs != null
+                        ? formatDuration(unloadingDurationMs)
+                        : "—"}
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
             {receipt.countMismatchReason && (
               <p className="mt-3 flex items-start gap-1 text-xs text-amber-600">

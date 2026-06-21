@@ -76,6 +76,11 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
   { code: "scale.reopen_before_gross", displayName: "إعادة فتح التحميل قبل الجروس", module: "scale" },
   { code: "scale.close", displayName: "إغلاق نهائي وطباعة كرت", module: "scale" },
   { code: "scale.cancel", displayName: "إلغاء عملية مع سبب", module: "scale" },
+  {
+    code: "scale.correct_completed",
+    displayName: "تصحيح إداري لشاحنة مكتملة",
+    module: "scale",
+  },
   // Admin
   { code: "forcepass.execute", displayName: "تمرير إجباري", module: "admin" },
   { code: "user.manage", displayName: "إدارة المستخدمين", module: "admin" },
@@ -85,6 +90,11 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
   { code: "billet.contract.view", displayName: "عرض عقود الموردين", module: "purchasing" },
   { code: "billet.contract.create", displayName: "إنشاء عقد مورّد", module: "purchasing" },
   { code: "billet.contract.edit", displayName: "تعديل عقد مورّد", module: "purchasing" },
+  {
+    code: "billet.contract.prior_withdrawal",
+    displayName: "تسجيل سحب سابق على عقد مورّد",
+    module: "purchasing",
+  },
   { code: "billet.contract.change_status", displayName: "تغيير حالة عقد مورّد", module: "purchasing" },
   { code: "billet.contract.upload", displayName: "رفع مرفقات عقد مورّد", module: "purchasing" },
   { code: "billet.receipt.view", displayName: "عرض سجلات استلام البيلت", module: "purchasing" },
@@ -143,6 +153,8 @@ export const RBAC_ROLE_PERMISSIONS: Readonly<Record<string, ReadonlyArray<string
     "payment.view",
     "buffer.grant",
     "specialratio.override",
+    "billet.contract.view",
+    "billet.contract.prior_withdrawal",
     "reports.view",
     "report.customer_balance",
     "report.salesorder_status",

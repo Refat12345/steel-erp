@@ -153,6 +153,7 @@ async function ensureRbacAndSizes(): Promise<void> {
     { code: "scale.reopen_before_gross", displayName: "إعادة فتح التحميل قبل الجروس", module: "scale" },
     { code: "scale.close", displayName: "إغلاق نهائي وطباعة كرت", module: "scale" },
     { code: "scale.cancel", displayName: "إلغاء عملية مع سبب", module: "scale" },
+    { code: "scale.correct_completed", displayName: "تصحيح إداري لشاحنة مكتملة", module: "scale" },
     { code: "forcepass.execute", displayName: "تمرير إجباري", module: "admin" },
     { code: "user.manage", displayName: "إدارة المستخدمين", module: "admin" },
     { code: "user.set_permissions", displayName: "تعديل صلاحيات المستخدمين", module: "admin" },

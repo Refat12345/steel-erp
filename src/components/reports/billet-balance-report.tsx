@@ -663,11 +663,12 @@ export function BilletBalanceReportView() {
                   </p>
                 ) : (
                   <div className="overflow-x-auto">
-                    <Table dir="ltr" className="min-w-[900px]">
+                    <Table dir="ltr" className="min-w-[980px]">
                       <TableHeader>
                         <TableRow>
                           <TableHead className="w-10 text-center">#</TableHead>
                           <TableHead>Receipt</TableHead>
+                          <TableHead>Type</TableHead>
                           <TableHead>Contract</TableHead>
                           <TableHead>Date</TableHead>
                           <TableHead>Plate</TableHead>
@@ -694,11 +695,24 @@ export function BilletBalanceReportView() {
                                 {row.receiptNumber}
                               </Link>
                             </TableCell>
+                            <TableCell>
+                              {row.isPriorWithdrawal ? (
+                                <Badge variant="secondary">Prior</Badge>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">
+                                  Receipt
+                                </span>
+                              )}
+                            </TableCell>
                             <TableCell className="font-mono text-xs">
                               {row.contractNumber}
                             </TableCell>
                             <TableCell className="whitespace-nowrap">
-                              {row.completedAt ? formatDate(row.completedAt) : "-"}
+                              {row.priorWithdrawalDate
+                                ? formatDate(row.priorWithdrawalDate)
+                                : row.completedAt
+                                  ? formatDate(row.completedAt)
+                                  : "-"}
                             </TableCell>
                             <TableCell className="font-mono font-medium">
                               {row.plateNumber}

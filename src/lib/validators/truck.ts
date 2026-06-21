@@ -106,3 +106,52 @@ export const weighSessionDeleteSchema = z.object({
 export const cancelSchema = z.object({
   reason: z.string().min(1, "سبب الإلغاء مطلوب").max(2000, "السبب طويل جداً"),
 });
+
+// ─── Admin post-close corrections ─────────────────────────────────
+// Every administrative correction of a Completed truck requires a written
+// reason (audited) and an expectedVersion for optimistic locking.
+const correctionReasonSchema = z
+  .string()
+  .min(1, "سبب التصحيح مطلوب")
+  .max(2000, "السبب طويل جداً");
+
+export const completedGradeCorrectionSchema = z.object({
+  roundId: z.number().int().positive("الدورة غير صالحة"),
+  grade: z.enum(["FIRST", "SECOND"]).nullable(),
+  reason: correctionReasonSchema,
+  expectedVersion: z.number().int().nonnegative("الإصدار المتوقّع غير صالح"),
+});
+
+export const completedTareCorrectionSchema = z.object({
+  weightKg: weightKgSchema,
+  reason: correctionReasonSchema,
+  expectedVersion: z.number().int().nonnegative("الإصدار المتوقّع غير صالح"),
+});
+
+export const completedExternalCorrectionSchema = z.object({
+  roundId: z.number().int().positive("الدورة غير صالحة"),
+  weightKg: weightKgSchema,
+  reason: correctionReasonSchema,
+  expectedVersion: z.number().int().nonnegative("الإصدار المتوقّع غير صالح"),
+});
+
+export const completedSessionAddSchema = z.object({
+  roundId: z.number().int().positive("الدورة غير صالحة"),
+  sizeId: z.number().int().positive().optional().nullable(),
+  bundleCount: z.number().int().min(1).optional().nullable(),
+  weightTons: weightTonsSchema,
+  reason: correctionReasonSchema,
+});
+
+export const completedSessionEditSchema = z.object({
+  sizeId: z.number().int().positive().optional().nullable(),
+  bundleCount: z.number().int().min(1).optional().nullable(),
+  weightTons: weightTonsSchema.optional(),
+  reason: correctionReasonSchema,
+  expectedVersion: z.number().int().nonnegative("الإصدار المتوقّع غير صالح"),
+});
+
+export const completedSessionDeleteSchema = z.object({
+  reason: correctionReasonSchema,
+  expectedVersion: z.number().int().nonnegative("الإصدار المتوقّع غير صالح"),
+});

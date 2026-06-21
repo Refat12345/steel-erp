@@ -77,6 +77,44 @@ export const billetContractUpdateSchema = z
     }
   });
 
+export const priorWithdrawalLineSchema = z.object({
+  billetLengthM: z
+    .number({ message: "طول البيلت مطلوب" })
+    .int("طول البيلت يجب أن يكون عدداً صحيحاً")
+    .positive("طول البيلت يجب أن يكون أكبر من صفر"),
+  acceptedPieces: z
+    .number({ message: "عدد القطع مطلوب" })
+    .int("عدد القطع يجب أن يكون عدداً صحيحاً")
+    .positive("عدد القطع يجب أن يكون أكبر من صفر"),
+});
+
+export const priorWithdrawalSchema = z
+  .object({
+    netWeightKg: z
+      .number({ message: "الوزن الصافي مطلوب" })
+      .positive("الوزن الصافي يجب أن يكون أكبر من صفر"),
+    withdrawalDate: z.string().optional().or(z.literal("")),
+    notes: z
+      .string()
+      .trim()
+      .min(1, "ملاحظة السحب السابق مطلوبة")
+      .max(2000, "الملاحظة طويلة جداً"),
+    pieceLines: z
+      .array(priorWithdrawalLineSchema)
+      .min(1, "أضف عدد القطع لطول واحد على الأقل"),
+  })
+  .superRefine((data, ctx) => {
+    const lengths = data.pieceLines.map((l) => l.billetLengthM);
+    if (new Set(lengths).size !== lengths.length) {
+      ctx.addIssue({
+        code: "custom",
+        message: "لا يمكن تكرار نفس الطول",
+        path: ["pieceLines"],
+      });
+    }
+  });
+
 export type BilletContractCreateInput = z.infer<typeof billetContractCreateSchema>;
 export type BilletContractUpdateInput = z.infer<typeof billetContractUpdateSchema>;
 export type ContractPieceLineInput = z.infer<typeof contractPieceLineSchema>;
+export type PriorWithdrawalInput = z.infer<typeof priorWithdrawalSchema>;

@@ -34,6 +34,8 @@ interface ReceiptItem {
   driverName: string;
   status: string;
   netWeightKg: string | null;
+  isPriorWithdrawal: boolean;
+  priorWithdrawalDate: string | null;
   createdAt: string;
   contract: { contractNumber: string; supplierName: string };
 }
@@ -136,12 +138,13 @@ export function BilletReceiptList() {
         )}
       </div>
 
-      <div className="rounded-lg border">
+      <div className="rounded-lg border overflow-x-auto">
         <Table className="w-full min-w-[820px]">
           <TableHeader>
             <TableRow>
               <TableHead className="w-28 text-start">رقم الاستلام</TableHead>
               <TableHead className="w-40 max-w-40 text-start">المورّد</TableHead>
+              <TableHead className="w-28 text-start">النوع</TableHead>
               <TableHead className="w-32 text-start">اللوحة</TableHead>
               <TableHead className="w-32 text-start">السائق</TableHead>
               <TableHead className="w-28 text-start">الصافي (كغ)</TableHead>
@@ -152,7 +155,7 @@ export function BilletReceiptList() {
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 6 }).map((_, j) => (
+                  {Array.from({ length: 7 }).map((_, j) => (
                     <TableCell key={j}>
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
@@ -161,7 +164,7 @@ export function BilletReceiptList() {
               ))
             ) : receipts.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
+                <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
                   <div className="flex flex-col items-center gap-2">
                     <Truck className="h-8 w-8 opacity-40" />
                     {plateNumber || status ? "لا توجد نتائج" : "لا توجد سجلات استلام بعد"}
@@ -184,6 +187,13 @@ export function BilletReceiptList() {
                       <span className="block truncate" title={r.contract.supplierName}>
                         {r.contract.supplierName}
                       </span>
+                    </TableCell>
+                    <TableCell className="text-start">
+                      {r.isPriorWithdrawal ? (
+                        <Badge variant="secondary">سحب سابق</Badge>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">استلام</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-start">{r.plateNumber}</TableCell>
                     <TableCell className="text-start truncate">{r.driverName}</TableCell>
