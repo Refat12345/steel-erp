@@ -133,31 +133,6 @@ export async function registerReceipt(data: RegisterReceiptInput, userId: number
             }
           }
 
-          const { receivedWeight, acceptedByLength } =
-            await getCompletedContractUsage(tx, contract.contractNumber);
-          const declaredWeight = new Decimal(data.declaredWeightKg);
-          const remainingWeight = new Decimal(contract.contractedWeightKg).minus(
-            receivedWeight,
-          );
-          if (declaredWeight.greaterThan(remainingWeight)) {
-            throw new ServiceError(
-              `وزن الطلبية المعلن (${declaredWeight.toFixed(3)} كغ) يتجاوز رصيد العقد المتبقي (${remainingWeight.toFixed(3)} كغ)`,
-            );
-          }
-
-          for (const line of data.pieceLines) {
-            const contractLine = contract.pieceLines.find(
-              (l) => l.billetLengthM === line.billetLengthM,
-            );
-            const accepted = acceptedByLength.get(line.billetLengthM) ?? 0;
-            const remainingPieces = (contractLine?.contractedPieces ?? 0) - accepted;
-            if (line.expectedPieces > remainingPieces) {
-              throw new ServiceError(
-                `عدد القطع المعلن للطول ${line.billetLengthM}م (${line.expectedPieces}) يتجاوز رصيد العقد المتبقي (${remainingPieces})`,
-              );
-            }
-          }
-
           const existingOpen = await tx.billetReceipt.findFirst({
             where: {
               plateNumber: normalizedPlate,
@@ -280,33 +255,6 @@ export async function updateReceiptRegistration(
           if (!contractLengths.has(line.billetLengthM)) {
             throw new ServiceError(
               `الطول ${line.billetLengthM}م غير موجود في عقد المورّد`,
-            );
-          }
-        }
-
-        const { receivedWeight, acceptedByLength } = await getCompletedContractUsage(
-          tx,
-          contract.contractNumber,
-        );
-        const declaredWeight = new Decimal(data.declaredWeightKg);
-        const remainingWeight = new Decimal(contract.contractedWeightKg).minus(
-          receivedWeight,
-        );
-        if (declaredWeight.greaterThan(remainingWeight)) {
-          throw new ServiceError(
-            `وزن الطلبية المعلن (${declaredWeight.toFixed(3)} كغ) يتجاوز رصيد العقد المتبقي (${remainingWeight.toFixed(3)} كغ)`,
-          );
-        }
-
-        for (const line of data.pieceLines) {
-          const contractLine = contract.pieceLines.find(
-            (l) => l.billetLengthM === line.billetLengthM,
-          );
-          const accepted = acceptedByLength.get(line.billetLengthM) ?? 0;
-          const remainingPieces = (contractLine?.contractedPieces ?? 0) - accepted;
-          if (line.expectedPieces > remainingPieces) {
-            throw new ServiceError(
-              `عدد القطع المعلن للطول ${line.billetLengthM}م (${line.expectedPieces}) يتجاوز رصيد العقد المتبقي (${remainingPieces})`,
             );
           }
         }
@@ -553,11 +501,6 @@ export async function enterUnloadResult(
         });
         if (!contract) throw new ServiceError("عقد المورّد غير موجود", "NOT_FOUND");
 
-        const { acceptedByLength } = await getCompletedContractUsage(
-          tx,
-          receipt.supplierContractNumber,
-          receiptId,
-        );
         let totalAcceptedPieces = 0;
         for (const line of data.lines) {
           const accepted = line.countedPieces - line.rejectedPieces;
@@ -567,14 +510,6 @@ export async function enterUnloadResult(
           );
           if (!contractLine) {
             throw new ServiceError(`الطول ${line.billetLengthM}م غير موجود في عقد المورّد`);
-          }
-
-          const priorAccepted = acceptedByLength.get(line.billetLengthM) ?? 0;
-          const remainingPieces = contractLine.contractedPieces - priorAccepted;
-          if (accepted > remainingPieces) {
-            throw new ServiceError(
-              `القطع المقبولة للطول ${line.billetLengthM}م (${accepted}) تتجاوز رصيد العقد المتبقي (${remainingPieces})`,
-            );
           }
         }
         if (totalAcceptedPieces <= 0) {
@@ -731,8 +666,7 @@ export async function completeReceipt(
         const netKg = new Decimal(loadedKg).minus(emptyWeightKg);
         const now = new Date();
 
-        // Contract balance guard. This is blocking and runs while the contract
-        // row is locked, so concurrent completions cannot overshoot silently.
+        // Balance is allowed to go negative, but overshoot is recorded for audit.
         const { receivedWeight: priorWeight, acceptedByLength } =
           await getCompletedContractUsage(
             tx,
@@ -768,27 +702,6 @@ export async function completeReceipt(
         if (totalAcceptedPieces <= 0) {
           throw new ServiceError(
             "لا يمكن إغلاق الاستلام لأن عدد القطع المقبولة صفر. إذا كل القطع مرفوضة، ألغِ الاستلام مع ذكر السبب.",
-          );
-        }
-
-        if (weightOvershoot) {
-          const remainingWeight = new Decimal(contract.contractedWeightKg).minus(
-            priorWeight,
-          );
-          throw new ServiceError(
-            `لا يمكن إغلاق الاستلام: الصافي (${netKg.toFixed(1)} كغ) يتجاوز رصيد وزن العقد المتبقي (${remainingWeight.toFixed(3)} كغ)`,
-          );
-        }
-
-        if (pieceOvershoots.length > 0) {
-          const first = pieceOvershoots[0];
-          const contractLine = contract.pieceLines.find(
-            (line) => line.billetLengthM === first.billetLengthM,
-          );
-          const priorAccepted = acceptedByLength.get(first.billetLengthM) ?? 0;
-          const remainingPieces = (contractLine?.contractedPieces ?? 0) - priorAccepted;
-          throw new ServiceError(
-            `لا يمكن إغلاق الاستلام: القطع المقبولة للطول ${first.billetLengthM}م تتجاوز رصيد العقد المتبقي (${remainingPieces}) بمقدار ${first.over} قطعة`,
           );
         }
 

@@ -66,6 +66,24 @@ function formatTonsFromKg(value: number | null | undefined): string {
   });
 }
 
+function formatRemainingKg(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "-";
+  if (value < 0) return `Over by ${formatKg(Math.abs(value))}`;
+  return formatKg(value);
+}
+
+function formatRemainingTons(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "-";
+  if (value < 0) return `Over by ${formatTonsFromKg(Math.abs(value))}`;
+  return formatTonsFromKg(value);
+}
+
+function formatRemainingPieces(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "-";
+  if (value < 0) return `Over by ${Math.abs(value)}`;
+  return String(value);
+}
+
 function acceptedForLength(
   row: { acceptedByLength: Record<string, number> },
   lengthM: number,
@@ -90,16 +108,26 @@ function SummaryCard({
   label,
   value,
   sub,
+  danger = false,
 }: {
   label: string;
   value: string | number;
   sub?: string;
+  danger?: boolean;
 }) {
   return (
-    <Card className="overflow-hidden border shadow-sm">
+    <Card
+      className={`overflow-hidden border shadow-sm ${
+        danger ? "border-destructive/50 bg-destructive/10" : ""
+      }`}
+    >
       <CardContent className="p-4">
         <p className="text-xs font-medium text-muted-foreground">{label}</p>
-        <p className="mt-1 text-2xl font-bold tracking-tight tabular-nums">
+        <p
+          className={`mt-1 text-2xl font-bold tracking-tight tabular-nums ${
+            danger ? "text-destructive" : ""
+          }`}
+        >
           {value}
         </p>
         {sub ? <p className="mt-1 text-xs text-muted-foreground">{sub}</p> : null}
@@ -167,6 +195,10 @@ const PRINT_STYLE = `
 #billet-balance-print thead { display: table-header-group; }
 #billet-balance-print tr { break-inside: avoid; }
 #billet-balance-print .num { font-variant-numeric: tabular-nums; }
+#billet-balance-print .negative {
+  color: #b91c1c;
+  font-weight: 700;
+}
 
 @media screen {
   #billet-balance-print { display: none; }
@@ -201,7 +233,9 @@ function BilletBalancePrintable({ report }: { report: BilletBalanceReport }) {
             <th>Received (t)</th>
             <td className="num">{formatTonsFromKg(report.totals.receivedWeightKg)}</td>
             <th>Remaining (t)</th>
-            <td className="num">{formatTonsFromKg(report.totals.remainingWeightKg)}</td>
+            <td className={`num ${report.totals.remainingWeightKg < 0 ? "negative" : ""}`}>
+              {formatRemainingTons(report.totals.remainingWeightKg)}
+            </td>
             <th>Completed receipts</th>
             <td className="num">{report.totals.completedReceiptCount}</td>
           </tr>
@@ -224,7 +258,9 @@ function BilletBalancePrintable({ report }: { report: BilletBalanceReport }) {
               <td>{row.billetLengthM}m</td>
               <td className="num">{row.contractedPieces}</td>
               <td className="num">{row.acceptedPieces}</td>
-              <td className="num">{row.remainingPieces}</td>
+              <td className={`num ${row.remainingPieces < 0 ? "negative" : ""}`}>
+                {formatRemainingPieces(row.remainingPieces)}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -249,7 +285,9 @@ function BilletBalancePrintable({ report }: { report: BilletBalanceReport }) {
                   <td>{row.contractNumber}</td>
                   <td className="num">{formatKg(row.contractedWeightKg)}</td>
                   <td className="num">{formatKg(row.receivedWeightKg)}</td>
-                  <td className="num">{formatKg(row.remainingWeightKg)}</td>
+                  <td className={`num ${row.remainingWeightKg < 0 ? "negative" : ""}`}>
+                    {formatRemainingKg(row.remainingWeightKg)}
+                  </td>
                   <td className="num">{row.completedReceiptCount}</td>
                 </tr>
               ))}
@@ -516,8 +554,9 @@ export function BilletBalanceReportView() {
             />
             <SummaryCard
               label="Remaining weight"
-              value={`${formatTonsFromKg(report.totals.remainingWeightKg)} t`}
-              sub={`${formatKg(report.totals.remainingWeightKg)} kg`}
+              value={`${formatRemainingTons(report.totals.remainingWeightKg)} t`}
+              sub={`${formatRemainingKg(report.totals.remainingWeightKg)} kg`}
+              danger={report.totals.remainingWeightKg < 0}
             />
             <SummaryCard label="Completed receipts" value={report.totals.completedReceiptCount} />
           </div>
@@ -547,8 +586,12 @@ export function BilletBalanceReportView() {
                         <TableCell className="font-mono tabular-nums text-right">
                           {row.acceptedPieces}
                         </TableCell>
-                        <TableCell className="font-mono tabular-nums text-right">
-                          {row.remainingPieces}
+                        <TableCell
+                          className={`font-mono tabular-nums text-right ${
+                            row.remainingPieces < 0 ? "text-destructive font-semibold" : ""
+                          }`}
+                        >
+                          {formatRemainingPieces(row.remainingPieces)}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -603,8 +646,14 @@ export function BilletBalanceReportView() {
                             <TableCell className="font-mono tabular-nums text-right">
                               {formatKg(row.receivedWeightKg)}
                             </TableCell>
-                            <TableCell className="font-mono tabular-nums text-right">
-                              {formatKg(row.remainingWeightKg)}
+                            <TableCell
+                              className={`font-mono tabular-nums text-right ${
+                                row.remainingWeightKg < 0
+                                  ? "text-destructive font-semibold"
+                                  : ""
+                              }`}
+                            >
+                              {formatRemainingKg(row.remainingWeightKg)}
                             </TableCell>
                             <TableCell className="font-mono tabular-nums text-right">
                               {row.completedReceiptCount}
@@ -616,7 +665,7 @@ export function BilletBalanceReportView() {
                                   key={lengthM}
                                   className="font-mono tabular-nums text-right"
                                 >
-                                  {piece?.remainingPieces ?? "-"}
+                                  {formatRemainingPieces(piece?.remainingPieces)}
                                 </TableCell>
                               );
                             })}
