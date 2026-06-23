@@ -200,9 +200,10 @@ const PRINT_STYLE = `
   font-weight: 700;
 }
 #billet-balance-print .note {
-  border: 1px solid #f59e0b;
-  background: #fffbeb;
-  color: #92400e;
+  border: 1px solid #b91c1c;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-weight: 700;
   padding: 6px 8px;
   margin: 7px 0 10px;
   -webkit-print-color-adjust: exact;
@@ -242,9 +243,8 @@ function BilletBalancePrintable({ report }: { report: BilletBalanceReport }) {
       </p>
       {hasOvershoot ? (
         <p className="note">
-          Note: Any weight difference shown here is a normal difference between the
-          weight declared on the supplier bill of lading/manifest and the actual
-          weight measured and received on the company scale.
+          The difference between the waybill weight and the actual received
+          weight on the company scale.
         </p>
       ) : null}
 
@@ -575,11 +575,10 @@ export function BilletBalanceReportView() {
       ) : report ? (
         <>
           {reportHasOvershoot ? (
-            <Card className="border-amber-500/40 bg-amber-500/10 shadow-sm">
-              <CardContent className="p-4 text-sm text-amber-900 dark:text-amber-200">
-                Note: any weight difference shown here is a normal difference between the
-                weight declared on the supplier bill of lading/manifest and the actual
-                weight measured and received on the company scale.
+            <Card className="border-destructive/50 bg-destructive/10 shadow-sm">
+              <CardContent className="p-4 text-sm font-semibold text-destructive">
+                The difference between the waybill weight and the actual received
+                weight on the company scale.
               </CardContent>
             </Card>
           ) : null}

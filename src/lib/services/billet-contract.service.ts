@@ -53,6 +53,24 @@ export async function listContracts(
   return { data, total, page: pagination.page, pageSize: pagination.pageSize };
 }
 
+export async function listActiveContractOptions() {
+  return prisma.supplierContract.findMany({
+    where: { status: "Active" },
+    orderBy: { createdAt: "desc" },
+    select: {
+      contractNumber: true,
+      supplierName: true,
+      pieceLines: {
+        orderBy: { billetLengthM: "asc" },
+        select: {
+          billetLengthM: true,
+          contractedPieces: true,
+        },
+      },
+    },
+  });
+}
+
 async function generateContractNumber(tx: TxClient): Promise<string> {
   const yy = String(new Date().getFullYear()).slice(-2);
   const prefix = `P-${yy}-`;

@@ -50,7 +50,7 @@ export function RegisterBilletReceiptDialog({ open, onOpenChange, onSuccess }: P
   const fetchContracts = useCallback(async () => {
     setLoadingRef(true);
     try {
-      const res = await fetch("/api/billet-contracts?status=Active&pageSize=100");
+      const res = await fetch("/api/billet-receipts/contract-options");
       const json = await res.json();
       if (json.success) setContracts(json.data || []);
     } catch {
