@@ -177,9 +177,8 @@ export const RBAC_ROLE_PERMISSIONS: Readonly<Record<string, ReadonlyArray<string
     "truck.edit_queued",
     "truck.edit_approved",
     "truck.view_queue",
-    // Billet receiving: logistics pre-registers inbound trucks and sees
-    // supplier contracts to pick the right one.
-    "billet.contract.view",
+    // Billet receiving: logistics pre-registers inbound trucks. Contract
+    // choices are loaded through a receipt-registration-only endpoint.
     "billet.receipt.view",
     "billet.receipt.register",
   ],

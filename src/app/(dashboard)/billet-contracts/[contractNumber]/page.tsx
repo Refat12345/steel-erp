@@ -642,9 +642,8 @@ export default function BilletContractDetailPage({
               <div className="flex items-start gap-2">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <p>
-                  ملاحظة: أي فرق وزن ظاهر هنا هو فرق طبيعي بين الوزن المصرّح في
-                  البوليصة/المنفست المرسل من المورد وبين الوزن الفعلي المقاس
-                  والمستلم على ميزان الشركة.
+                  الفرق بين وزن بوليصة الشحن والوزن الفعلي المستلم على
+                  ميزان الشركة.
                 </p>
               </div>
             </div>
