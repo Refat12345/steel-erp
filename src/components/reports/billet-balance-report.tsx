@@ -199,6 +199,15 @@ const PRINT_STYLE = `
   color: #b91c1c;
   font-weight: 700;
 }
+#billet-balance-print .note {
+  border: 1px solid #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+  padding: 6px 8px;
+  margin: 7px 0 10px;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
 
 @media screen {
   #billet-balance-print { display: none; }
@@ -213,6 +222,14 @@ const PRINT_STYLE = `
 
 function BilletBalancePrintable({ report }: { report: BilletBalanceReport }) {
   const showContracts = !report.filters.contractNumber && report.contracts.length > 1;
+  const hasOvershoot =
+    report.totals.remainingWeightKg < 0 ||
+    report.pieceTotals.some((row) => row.remainingPieces < 0) ||
+    report.contracts.some(
+      (row) =>
+        row.remainingWeightKg < 0 ||
+        row.pieceBalances.some((piece) => piece.remainingPieces < 0),
+    );
 
   const content = (
     <div id="billet-balance-print" dir="ltr">
@@ -223,6 +240,13 @@ function BilletBalancePrintable({ report }: { report: BilletBalanceReport }) {
         Contract: {report.filters.contractNumber ?? "All contracts"} | Generated:{" "}
         {formatDateTime(report.generatedAt)}
       </p>
+      {hasOvershoot ? (
+        <p className="note">
+          Note: Any weight difference shown here is a normal difference between the
+          weight declared on the supplier bill of lading/manifest and the actual
+          weight measured and received on the company scale.
+        </p>
+      ) : null}
 
       <h2 className="section-title">1. Weight Summary</h2>
       <table>
@@ -400,6 +424,15 @@ export function BilletBalanceReportView() {
 
   const showContractsTable =
     report != null && !report.filters.contractNumber && report.contracts.length > 1;
+  const reportHasOvershoot =
+    report != null &&
+    (report.totals.remainingWeightKg < 0 ||
+      report.pieceTotals.some((row) => row.remainingPieces < 0) ||
+      report.contracts.some(
+        (row) =>
+          row.remainingWeightKg < 0 ||
+          row.pieceBalances.some((piece) => piece.remainingPieces < 0),
+      ));
 
   if (status === "loading") {
     return (
@@ -541,6 +574,16 @@ export function BilletBalanceReportView() {
         </div>
       ) : report ? (
         <>
+          {reportHasOvershoot ? (
+            <Card className="border-amber-500/40 bg-amber-500/10 shadow-sm">
+              <CardContent className="p-4 text-sm text-amber-900 dark:text-amber-200">
+                Note: any weight difference shown here is a normal difference between the
+                weight declared on the supplier bill of lading/manifest and the actual
+                weight measured and received on the company scale.
+              </CardContent>
+            </Card>
+          ) : null}
+
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 min-w-0">
             <SummaryCard
               label="Contracted weight"

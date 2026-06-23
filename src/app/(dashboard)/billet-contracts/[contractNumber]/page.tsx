@@ -491,6 +491,9 @@ export default function BilletContractDetailPage({
   }
 
   const st = statusMap[data.contract.status] || statusMap.Active;
+  const hasOvershoot =
+    Number(data.remainingWeightKg) < 0 ||
+    data.pieceBalances.some((balance) => balance.remainingPieces < 0);
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -589,7 +592,7 @@ export default function BilletContractDetailPage({
               className={!canEdit ? "bg-muted/50" : undefined}
             />
             <p className="text-xs text-muted-foreground">
-              لا يمكن تخفيض الوزن تحت الوزن المستلَم فعلياً.
+              يمكن أن يكون الوزن المتعاقد عليه أقل من المستلَم، وسيظهر الفرق كتجاوز في الرصيد.
             </p>
           </div>
         </CardContent>
@@ -634,6 +637,18 @@ export default function BilletContractDetailPage({
               </p>
             </div>
           </div>
+          {hasOvershoot ? (
+            <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <p>
+                  ملاحظة: أي فرق وزن ظاهر هنا هو فرق طبيعي بين الوزن المصرّح في
+                  البوليصة/المنفست المرسل من المورد وبين الوزن الفعلي المقاس
+                  والمستلم على ميزان الشركة.
+                </p>
+              </div>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
