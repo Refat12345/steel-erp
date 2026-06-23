@@ -305,19 +305,10 @@ export async function updateContract(
           throw new ServiceError("سبب تغيير الحالة مطلوب");
         }
 
-        const { receivedWeight, acceptedByLength } = await getCompletedUsage(
+        const { acceptedByLength } = await getCompletedUsage(
           tx,
           contractNumber,
         );
-
-        if (
-          data.contractedWeightKg !== undefined &&
-          new Decimal(data.contractedWeightKg).lt(receivedWeight)
-        ) {
-          throw new ServiceError(
-            `لا يمكن جعل الوزن الإجمالي أقل من الوزن المستلَم (${receivedWeight.toFixed(3)} كغ)`,
-          );
-        }
 
         if (data.pieceLines) {
           const requestedLengths = new Set(
@@ -455,30 +446,7 @@ export async function recordPriorWithdrawal(
           }
         }
 
-        const { receivedWeight, acceptedByLength } = await getCompletedUsage(
-          tx,
-          contractNumber,
-        );
         const netWeight = new Decimal(data.netWeightKg);
-        const remainingWeight = new Decimal(contract.contractedWeightKg).minus(
-          receivedWeight,
-        );
-        if (netWeight.greaterThan(remainingWeight)) {
-          throw new ServiceError(
-            `وزن السحب السابق (${netWeight.toFixed(3)} كغ) يتجاوز رصيد العقد المتبقي (${remainingWeight.toFixed(3)} كغ)`,
-          );
-        }
-
-        for (const line of data.pieceLines) {
-          const contractLine = contractLines.get(line.billetLengthM);
-          const accepted = acceptedByLength.get(line.billetLengthM) ?? 0;
-          const remainingPieces = (contractLine?.contractedPieces ?? 0) - accepted;
-          if (line.acceptedPieces > remainingPieces) {
-            throw new ServiceError(
-              `قطع السحب السابق للطول ${line.billetLengthM}م (${line.acceptedPieces}) تتجاوز رصيد العقد المتبقي (${remainingPieces})`,
-            );
-          }
-        }
 
         const receiptNumber = await generatePriorWithdrawalNumber(tx);
         const now = new Date();

@@ -133,6 +133,20 @@ function formatKg(value: string | number | null): string {
   return n.toLocaleString("en-US", { maximumFractionDigits: 3 });
 }
 
+function formatRemainingKg(value: string | number | null): string {
+  if (value == null) return "—";
+  const n = typeof value === "string" ? Number(value) : value;
+  if (!Number.isFinite(n)) return "—";
+  if (n < 0) return `تجاوز ${formatKg(Math.abs(n))}`;
+  return formatKg(n);
+}
+
+function formatRemainingPieces(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  if (value < 0) return `تجاوز ${Math.abs(value)}`;
+  return String(value);
+}
+
 export default function BilletContractDetailPage({
   params,
 }: {
@@ -357,7 +371,6 @@ export default function BilletContractDetailPage({
       .map((balance) => ({
         billetLengthM: balance.billetLengthM,
         acceptedPieces: Number(priorPieces[balance.billetLengthM] || 0),
-        remainingPieces: balance.remainingPieces,
       }))
       .filter((line) => line.acceptedPieces > 0);
 
@@ -368,12 +381,6 @@ export default function BilletContractDetailPage({
     for (const line of lines) {
       if (!Number.isInteger(line.acceptedPieces)) {
         toast.error(`عدد قطع طول ${line.billetLengthM}م يجب أن يكون عدداً صحيحاً`);
-        return;
-      }
-      if (line.acceptedPieces > line.remainingPieces) {
-        toast.error(
-          `عدد قطع طول ${line.billetLengthM}م يتجاوز المتبقي (${line.remainingPieces})`,
-        );
         return;
       }
     }
@@ -610,10 +617,20 @@ export default function BilletContractDetailPage({
                 {formatKg(data.receivedWeightKg)}
               </p>
             </div>
-            <div className="rounded-lg border p-3 bg-muted/30">
+            <div
+              className={`rounded-lg border p-3 ${
+                Number(data.remainingWeightKg) < 0
+                  ? "border-destructive/50 bg-destructive/10"
+                  : "bg-muted/30"
+              }`}
+            >
               <p className="text-xs text-muted-foreground">المتبقّي</p>
-              <p className="text-lg font-bold tabular-nums">
-                {formatKg(data.remainingWeightKg)}
+              <p
+                className={`text-lg font-bold tabular-nums ${
+                  Number(data.remainingWeightKg) < 0 ? "text-destructive" : ""
+                }`}
+              >
+                {formatRemainingKg(data.remainingWeightKg)}
               </p>
             </div>
           </div>
@@ -685,8 +702,14 @@ export default function BilletContractDetailPage({
                           <TableCell className="text-center tabular-nums">
                             {row.acceptedPieces}
                           </TableCell>
-                          <TableCell className="text-center tabular-nums font-semibold">
-                            {remainingPieces == null ? "—" : remainingPieces}
+                          <TableCell
+                            className={`text-center tabular-nums font-semibold ${
+                              remainingPieces != null && remainingPieces < 0
+                                ? "text-destructive"
+                                : ""
+                            }`}
+                          >
+                            {formatRemainingPieces(remainingPieces)}
                           </TableCell>
                           <TableCell>
                             <Button
@@ -719,8 +742,12 @@ export default function BilletContractDetailPage({
                         <TableCell className="text-center tabular-nums">
                           {b.acceptedPieces}
                         </TableCell>
-                        <TableCell className="text-center tabular-nums font-semibold">
-                          {b.remainingPieces}
+                        <TableCell
+                          className={`text-center tabular-nums font-semibold ${
+                            b.remainingPieces < 0 ? "text-destructive" : ""
+                          }`}
+                        >
+                          {formatRemainingPieces(b.remainingPieces)}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -953,14 +980,17 @@ export default function BilletContractDetailPage({
                         <TableCell className="text-start font-medium">
                           {balance.billetLengthM}م
                         </TableCell>
-                        <TableCell className="text-center tabular-nums">
-                          {balance.remainingPieces}
+                        <TableCell
+                          className={`text-center tabular-nums ${
+                            balance.remainingPieces < 0 ? "text-destructive font-semibold" : ""
+                          }`}
+                        >
+                          {formatRemainingPieces(balance.remainingPieces)}
                         </TableCell>
                         <TableCell className="text-center">
                           <Input
                             type="number"
                             min={0}
-                            max={balance.remainingPieces}
                             value={priorPieces[balance.billetLengthM] ?? ""}
                             onChange={(e) =>
                               setPriorPieces((prev) => ({
