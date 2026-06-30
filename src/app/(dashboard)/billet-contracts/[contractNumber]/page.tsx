@@ -498,7 +498,7 @@ export default function BilletContractDetailPage({
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between gap-3">
+      <div className="space-y-3">
         <div className="flex items-center gap-3 min-w-0">
           <Button
             variant="ghost"
@@ -508,7 +508,7 @@ export default function BilletContractDetailPage({
             <ArrowRight className="h-4 w-4" />
           </Button>
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl font-bold tracking-tight font-mono">
                 {data.contract.contractNumber}
               </h1>
@@ -523,7 +523,7 @@ export default function BilletContractDetailPage({
 
         {(canRecordPriorWithdrawal || canChangeStatus) &&
           data.contract.status === "Active" && (
-          <div className="flex shrink-0 gap-2">
+          <div className="flex flex-wrap gap-2 pr-10">
             {canRecordPriorWithdrawal && (
               <Button
                 size="sm"
