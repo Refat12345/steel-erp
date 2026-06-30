@@ -813,6 +813,12 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
+            <div className="rounded-lg border p-3 text-center">
+              <p className="text-xs text-muted-foreground mb-0.5">وزن المحمّل المسجّل</p>
+              <p className="text-xl font-bold tabular-nums">
+                {formatKg(receipt.loadedWeightKg)} كغ
+              </p>
+            </div>
             <p className="text-sm text-muted-foreground">
               التقاط صورة للشاحنة قبل التفريغ يبدأ عدّاد زمن التفريغ.
             </p>
@@ -966,6 +972,30 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
+            {/* Weight summary — always visible */}
+            <div className="grid grid-cols-3 gap-2 text-sm">
+              <div className="rounded-lg border p-2.5 text-center">
+                <p className="text-xs text-muted-foreground mb-0.5">المحمّل</p>
+                <p className="font-bold tabular-nums">
+                  {formatKg(receipt.loadedWeightKg)} كغ
+                </p>
+              </div>
+              <div className="rounded-lg border p-2.5 text-center">
+                <p className="text-xs text-muted-foreground mb-0.5">الفارغ</p>
+                <p className="font-bold tabular-nums">
+                  {emptyNum != null ? `${formatKg(emptyNum)} كغ` : "—"}
+                </p>
+              </div>
+              <div
+                className={`rounded-lg border p-2.5 text-center ${netPreview != null ? "bg-muted/30" : ""}`}
+              >
+                <p className="text-xs text-muted-foreground mb-0.5">الصافي الفعلي</p>
+                <p className="font-bold tabular-nums">
+                  {netPreview != null ? `${formatKg(netPreview)} كغ` : "—"}
+                </p>
+              </div>
+            </div>
+
             {canUnload && receipt.emptyWeightKg == null && (
               <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                 <p className="mb-2">
@@ -1004,20 +1034,12 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                     إغلاق
                   </Button>
                 </div>
-                {netPreview != null && (
+                {netPreviewDiff != null && (
                   <div className="rounded-md border p-3 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">الصافي المتوقّع:</span>
-                      <span className="tabular-nums font-semibold">
-                        {formatKg(netPreview)} كغ
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
                       <span className="text-muted-foreground">الفرق عن المعلن:</span>
-                      <span className="tabular-nums">
-                        {netPreviewDiff != null
-                          ? `${netPreviewDiff > 0 ? "+" : ""}${formatKg(netPreviewDiff)} كغ`
-                          : "—"}
+                      <span className="tabular-nums font-semibold">
+                        {`${netPreviewDiff > 0 ? "+" : ""}${formatKg(netPreviewDiff)} كغ`}
                       </span>
                     </div>
                   </div>
