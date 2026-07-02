@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+﻿import { describe, it, expect } from "vitest";
 import { salesOrderCreateSchema } from "./sales-order";
 
 function validBase(overrides: Record<string, unknown> = {}) {
@@ -79,6 +79,120 @@ describe("salesOrderCreateSchema", () => {
   it("rejects BILLET_WIRE with a special ratio", () => {
     const result = salesOrderCreateSchema.safeParse(
       validBase({ kind: "BILLET_WIRE", grade: null, specialRatioPct: 10 })
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const ratioIssue = result.error.issues.find((i) =>
+        i.path.includes("specialRatioPct"),
+      );
+      expect(ratioIssue).toBeDefined();
+    }
+  });
+
+  it("accepts a valid REBAR_UNDER_70CM order (no grade, no special ratio)", () => {
+    const result = salesOrderCreateSchema.safeParse(
+      validBase({
+        kind: "REBAR_UNDER_70CM",
+        grade: null,
+        settlementMode: "CREDIT",
+        paymentDeadlineDays: 30,
+        specialRatioPct: null,
+      })
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects REBAR_UNDER_70CM with grade set", () => {
+    const result = salesOrderCreateSchema.safeParse(
+      validBase({ kind: "REBAR_UNDER_70CM", grade: "FIRST", specialRatioPct: null })
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const gradeIssue = result.error.issues.find((i) => i.path.includes("grade"));
+      expect(gradeIssue).toBeDefined();
+      expect(gradeIssue!.message).toContain("النخب يُحدد فقط");
+    }
+  });
+
+  it("rejects REBAR_UNDER_70CM with a special ratio", () => {
+    const result = salesOrderCreateSchema.safeParse(
+      validBase({ kind: "REBAR_UNDER_70CM", grade: null, specialRatioPct: 10 })
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const ratioIssue = result.error.issues.find((i) =>
+        i.path.includes("specialRatioPct"),
+      );
+      expect(ratioIssue).toBeDefined();
+    }
+  });
+
+  it("accepts a valid BILLET_SCRAP_10M order (no grade, no special ratio)", () => {
+    const result = salesOrderCreateSchema.safeParse(
+      validBase({
+        kind: "BILLET_SCRAP_10M",
+        grade: null,
+        settlementMode: "CREDIT",
+        paymentDeadlineDays: 30,
+        specialRatioPct: null,
+      })
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects BILLET_SCRAP_10M with grade set", () => {
+    const result = salesOrderCreateSchema.safeParse(
+      validBase({ kind: "BILLET_SCRAP_10M", grade: "FIRST", specialRatioPct: null })
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const gradeIssue = result.error.issues.find((i) => i.path.includes("grade"));
+      expect(gradeIssue).toBeDefined();
+      expect(gradeIssue!.message).toContain("النخب يُحدد فقط");
+    }
+  });
+
+  it("rejects BILLET_SCRAP_10M with a special ratio", () => {
+    const result = salesOrderCreateSchema.safeParse(
+      validBase({ kind: "BILLET_SCRAP_10M", grade: null, specialRatioPct: 10 })
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const ratioIssue = result.error.issues.find((i) =>
+        i.path.includes("specialRatioPct"),
+      );
+      expect(ratioIssue).toBeDefined();
+    }
+  });
+
+  it("accepts a valid SCRAP_50CM_1M order (no grade, no special ratio)", () => {
+    const result = salesOrderCreateSchema.safeParse(
+      validBase({
+        kind: "SCRAP_50CM_1M",
+        grade: null,
+        settlementMode: "CREDIT",
+        paymentDeadlineDays: 30,
+        specialRatioPct: null,
+      })
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects SCRAP_50CM_1M with grade set", () => {
+    const result = salesOrderCreateSchema.safeParse(
+      validBase({ kind: "SCRAP_50CM_1M", grade: "FIRST", specialRatioPct: null })
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const gradeIssue = result.error.issues.find((i) => i.path.includes("grade"));
+      expect(gradeIssue).toBeDefined();
+      expect(gradeIssue!.message).toContain("النخب يُحدد فقط");
+    }
+  });
+
+  it("rejects SCRAP_50CM_1M with a special ratio", () => {
+    const result = salesOrderCreateSchema.safeParse(
+      validBase({ kind: "SCRAP_50CM_1M", grade: null, specialRatioPct: 10 })
     );
     expect(result.success).toBe(false);
     if (!result.success) {

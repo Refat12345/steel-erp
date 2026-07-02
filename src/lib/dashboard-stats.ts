@@ -1,4 +1,4 @@
-import { unstable_cache } from "next/cache";
+﻿import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/db";
 import { formatDate } from "@/lib/date-format";
 
@@ -103,6 +103,9 @@ export async function getDashboardStatsCached() {
         SHORTBAR_4_12M: "قصائر 4–12 م",
         SCRAP: "خردة",
         BILLET_WIRE: "أسلاك تربيط",
+        REBAR_UNDER_70CM: "مبروم أقل من 70 سم",
+        BILLET_SCRAP_10M: "بيلت خردة 10m",
+        SCRAP_50CM_1M: "سكراب من 50 سم إلى 1 م",
       };
       const METHOD_LABELS: Record<string, string> = {
         CASH: "نقدي",

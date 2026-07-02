@@ -1,6 +1,6 @@
-import { z } from "zod";
+﻿import { z } from "zod";
 
-const KIND_VALUES = ["REBAR", "SHORTBAR_1_4M", "SHORTBAR_4_12M", "SCRAP", "BILLET_WIRE"] as const;
+const KIND_VALUES = ["REBAR", "SHORTBAR_1_4M", "SHORTBAR_4_12M", "SCRAP", "BILLET_WIRE", "REBAR_UNDER_70CM", "BILLET_SCRAP_10M", "SCRAP_50CM_1M"] as const;
 const GRADE_VALUES = ["FIRST", "SECOND"] as const;
 const SETTLEMENT_VALUES = ["CREDIT", "PAYMENT_PLAN"] as const;
 const TOLERANCE_VALUES = ["percentage", "weight"] as const;

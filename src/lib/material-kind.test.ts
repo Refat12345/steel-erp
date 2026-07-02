@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 
 import {
   inferRoundMaterialKind,
@@ -19,6 +19,18 @@ describe("sizeCodeToKind", () => {
 
   it("maps the billet tying wire size code", () => {
     expect(sizeCodeToKind("billet_wire_6mm")).toBe("BILLET_WIRE");
+  });
+
+  it("maps the rebar under 70 cm size code", () => {
+    expect(sizeCodeToKind("rebar_under_70cm")).toBe("REBAR_UNDER_70CM");
+  });
+
+  it("maps the billet scrap 10m size code", () => {
+    expect(sizeCodeToKind("billet_scrap_10m")).toBe("BILLET_SCRAP_10M");
+  });
+
+  it("maps the scrap 50 cm to 1 m size code", () => {
+    expect(sizeCodeToKind("scrap_50cm_1m")).toBe("SCRAP_50CM_1M");
   });
 });
 
@@ -58,6 +70,27 @@ describe("materialKindMatchesProductFilter", () => {
     expect(materialKindMatchesProductFilter("BILLET_WIRE", "SCRAP")).toBe(false);
     expect(materialKindMatchesProductFilter("BILLET_WIRE", "SHORTBAR")).toBe(false);
   });
+
+  it("matches rebar under 70 cm only for REBAR_UNDER_70CM filter", () => {
+    expect(materialKindMatchesProductFilter("REBAR_UNDER_70CM", "REBAR_UNDER_70CM")).toBe(true);
+    expect(materialKindMatchesProductFilter("SCRAP", "REBAR_UNDER_70CM")).toBe(false);
+    expect(materialKindMatchesProductFilter("REBAR_UNDER_70CM", "SCRAP")).toBe(false);
+    expect(materialKindMatchesProductFilter("REBAR_UNDER_70CM", "BILLET_WIRE")).toBe(false);
+  });
+
+  it("matches billet scrap 10m only for BILLET_SCRAP_10M filter", () => {
+    expect(materialKindMatchesProductFilter("BILLET_SCRAP_10M", "BILLET_SCRAP_10M")).toBe(true);
+    expect(materialKindMatchesProductFilter("SCRAP", "BILLET_SCRAP_10M")).toBe(false);
+    expect(materialKindMatchesProductFilter("BILLET_SCRAP_10M", "SCRAP")).toBe(false);
+    expect(materialKindMatchesProductFilter("BILLET_SCRAP_10M", "BILLET_WIRE")).toBe(false);
+  });
+
+  it("matches scrap 50 cm to 1 m only for SCRAP_50CM_1M filter", () => {
+    expect(materialKindMatchesProductFilter("SCRAP_50CM_1M", "SCRAP_50CM_1M")).toBe(true);
+    expect(materialKindMatchesProductFilter("SCRAP", "SCRAP_50CM_1M")).toBe(false);
+    expect(materialKindMatchesProductFilter("SCRAP_50CM_1M", "SCRAP")).toBe(false);
+    expect(materialKindMatchesProductFilter("SCRAP_50CM_1M", "BILLET_SCRAP_10M")).toBe(false);
+  });
 });
 
 describe("sizeCodeSupportsGrade", () => {
@@ -67,6 +100,9 @@ describe("sizeCodeSupportsGrade", () => {
     expect(sizeCodeSupportsGrade("shortbar_4_12m")).toBe(false);
     expect(sizeCodeSupportsGrade("scrap")).toBe(false);
     expect(sizeCodeSupportsGrade("billet_wire_6mm")).toBe(false);
+    expect(sizeCodeSupportsGrade("rebar_under_70cm")).toBe(false);
+    expect(sizeCodeSupportsGrade("billet_scrap_10m")).toBe(false);
+    expect(sizeCodeSupportsGrade("scrap_50cm_1m")).toBe(false);
     expect(sizeCodeSupportsGrade("")).toBe(true);
   });
 });
@@ -95,6 +131,24 @@ describe("shouldWarnBridgeRoundProductMix", () => {
     expect(shouldWarnBridgeRoundProductMix(["12"], "billet_wire_6mm")).toBe(true);
     expect(shouldWarnBridgeRoundProductMix(["scrap"], "billet_wire_6mm")).toBe(true);
     expect(shouldWarnBridgeRoundProductMix(["billet_wire_6mm"], "billet_wire_6mm")).toBe(false);
+  });
+
+  it("treats rebar under 70 cm as its own product family", () => {
+    expect(shouldWarnBridgeRoundProductMix(["12"], "rebar_under_70cm")).toBe(true);
+    expect(shouldWarnBridgeRoundProductMix(["scrap"], "rebar_under_70cm")).toBe(true);
+    expect(shouldWarnBridgeRoundProductMix(["rebar_under_70cm"], "rebar_under_70cm")).toBe(false);
+  });
+
+  it("treats billet scrap 10m as its own product family", () => {
+    expect(shouldWarnBridgeRoundProductMix(["12"], "billet_scrap_10m")).toBe(true);
+    expect(shouldWarnBridgeRoundProductMix(["scrap"], "billet_scrap_10m")).toBe(true);
+    expect(shouldWarnBridgeRoundProductMix(["billet_scrap_10m"], "billet_scrap_10m")).toBe(false);
+  });
+
+  it("treats scrap 50 cm to 1 m as its own product family", () => {
+    expect(shouldWarnBridgeRoundProductMix(["12"], "scrap_50cm_1m")).toBe(true);
+    expect(shouldWarnBridgeRoundProductMix(["scrap"], "scrap_50cm_1m")).toBe(true);
+    expect(shouldWarnBridgeRoundProductMix(["scrap_50cm_1m"], "scrap_50cm_1m")).toBe(false);
   });
 });
 

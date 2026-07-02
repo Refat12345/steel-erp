@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -84,6 +84,9 @@ const PRODUCT_FILTER_OPTIONS = [
   { value: "SHORTBAR", label: "Short bars" },
   { value: "SCRAP", label: "Scrap" },
   { value: "BILLET_WIRE", label: "Billet tying wire" },
+  { value: "REBAR_UNDER_70CM", label: "Rebar under 70 cm" },
+  { value: "BILLET_SCRAP_10M", label: "Billet scrap 10m" },
+  { value: "SCRAP_50CM_1M", label: "Scrap 50 cm to 1 m" },
 ] as const;
 
 function formatTons(value: number | null): string {

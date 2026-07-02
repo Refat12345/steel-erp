@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 /**
  * ─── ARCHIVED — Sales / Finance Dashboard ─────────────────────────────
@@ -120,6 +120,9 @@ const KIND_COLORS: Record<string, string> = {
   SHORTBAR_4_12M: "#a855f7",
   SCRAP: "#f97316",
   BILLET_WIRE: "#14b8a6",
+  REBAR_UNDER_70CM: "#a855f7",
+  BILLET_SCRAP_10M: "#f97316",
+  SCRAP_50CM_1M: "#84cc16",
 };
 
 const METHOD_COLORS: Record<string, string> = {

@@ -36,6 +36,9 @@ enum SalesOrderKind {
   SHORTBAR_4_12M
   SCRAP
   BILLET_WIRE
+  REBAR_UNDER_70CM
+  BILLET_SCRAP_10M
+  SCRAP_50CM_1M
 }
 
 enum SalesOrderGrade {

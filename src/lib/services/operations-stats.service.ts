@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ─── Operations Dashboard Stats Service ───────────────────────────────
  *
  * Read-only aggregator that powers the new operations-focused KPI
@@ -125,7 +125,10 @@ type MaterialKind =
   | "SHORTBAR_1_4M"
   | "SHORTBAR_4_12M"
   | "SCRAP"
-  | "BILLET_WIRE";
+  | "BILLET_WIRE"
+  | "REBAR_UNDER_70CM"
+  | "BILLET_SCRAP_10M"
+  | "SCRAP_50CM_1M";
 
 const KIND_LABELS: Record<MaterialKind, string> = {
   REBAR: "مبروم",
@@ -133,6 +136,9 @@ const KIND_LABELS: Record<MaterialKind, string> = {
   SHORTBAR_4_12M: "قصائر 4–12 م",
   SCRAP: "خردة",
   BILLET_WIRE: "أسلاك تربيط",
+  REBAR_UNDER_70CM: "مبروم أقل من 70 سم",
+  BILLET_SCRAP_10M: "بيلت خردة 10m",
+  SCRAP_50CM_1M: "سكراب من 50 سم إلى 1 م",
 };
 
 const GRADE_LABELS: Record<SalesOrderGrade, string> = {
@@ -148,6 +154,9 @@ function sizeCodeToKind(code: string): MaterialKind {
   if (code === "shortbar_4_12m") return "SHORTBAR_4_12M";
   if (code === "scrap") return "SCRAP";
   if (code === "billet_wire_6mm") return "BILLET_WIRE";
+  if (code === "rebar_under_70cm") return "REBAR_UNDER_70CM";
+  if (code === "billet_scrap_10m") return "BILLET_SCRAP_10M";
+  if (code === "scrap_50cm_1m") return "SCRAP_50CM_1M";
   return "REBAR";
 }
 
