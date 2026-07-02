@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -56,6 +56,9 @@ const kindLabels: Record<string, string> = {
   SHORTBAR_4_12M: "قصائر 4–12 م",
   SCRAP: "خردة",
   BILLET_WIRE: "أسلاك تربيط",
+  REBAR_UNDER_70CM: "مبروم أقل من 70 سم",
+  BILLET_SCRAP_10M: "بيلت خردة 10m",
+  SCRAP_50CM_1M: "سكراب من 50 سم إلى 1 م",
 };
 
 function formatAmount(value: string): string {

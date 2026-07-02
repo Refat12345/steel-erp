@@ -1,4 +1,4 @@
-/**
+﻿/**
  * English label dictionary for the English-language reports (e.g. the Daily
  * Loading Summary). The database stores city names in Arabic
  * (`Destination.name`) and size names in Arabic (`SizeLookup.displayName`),
@@ -45,6 +45,9 @@ const SIZE_EN_BY_CODE: Record<string, string> = {
   shortbar_4_12m: "Short bars 4–12 m",
   scrap: "Scrap",
   billet_wire_6mm: "Imported billet tying wire 6mm",
+  rebar_under_70cm: "Rebar under 70 cm",
+  billet_scrap_10m: "Billet scrap 10m",
+  scrap_50cm_1m: "Scrap 50 cm to 1 m",
 };
 
 const ARABIC_DIGITS = "٠١٢٣٤٥٦٧٨٩";
@@ -108,6 +111,9 @@ export function productFilterLabelEn(
   if (filter === "SHORTBAR") return "Short bars";
   if (filter === "SCRAP") return "Scrap";
   if (filter === "BILLET_WIRE") return "Billet tying wire";
+  if (filter === "REBAR_UNDER_70CM") return "Rebar under 70 cm";
+  if (filter === "BILLET_SCRAP_10M") return "Billet scrap 10m";
+  if (filter === "SCRAP_50CM_1M") return "Scrap 50 cm to 1 m";
   return "—";
 }
 

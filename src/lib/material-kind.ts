@@ -5,17 +5,32 @@ export type MaterialKind =
   | "SHORTBAR_1_4M"
   | "SHORTBAR_4_12M"
   | "SCRAP"
-  | "BILLET_WIRE";
+  | "BILLET_WIRE"
+  | "REBAR_UNDER_70CM"
+  | "BILLET_SCRAP_10M"
+  | "SCRAP_50CM_1M";
 
 /** Stable SizeLookup.code for the imported billet tying wire (6mm). */
 export const BILLET_WIRE_SIZE_CODE = "billet_wire_6mm";
+
+/** Stable SizeLookup.code for rebar pieces under 70 cm (sold by ton). */
+export const REBAR_UNDER_70CM_SIZE_CODE = "rebar_under_70cm";
+
+/** Stable SizeLookup.code for billet scrap 10 m (sold by ton). */
+export const BILLET_SCRAP_10M_SIZE_CODE = "billet_scrap_10m";
+
+/** Stable SizeLookup.code for scrap 50 cm to 1 m (sold by ton). */
+export const SCRAP_50CM_1M_SIZE_CODE = "scrap_50cm_1m";
 
 /** Report filter values — extends rebar grades with non-rebar product groups. */
 export type ReportProductFilter =
   | SalesOrderGrade
   | "SHORTBAR"
   | "SCRAP"
-  | "BILLET_WIRE";
+  | "BILLET_WIRE"
+  | "REBAR_UNDER_70CM"
+  | "BILLET_SCRAP_10M"
+  | "SCRAP_50CM_1M";
 
 export const PRODUCT_FILTER_LABELS_AR: Record<ReportProductFilter, string> = {
   FIRST: "نخب أول",
@@ -23,6 +38,9 @@ export const PRODUCT_FILTER_LABELS_AR: Record<ReportProductFilter, string> = {
   SHORTBAR: "قصائر",
   SCRAP: "خردة",
   BILLET_WIRE: "أسلاك تربيط",
+  REBAR_UNDER_70CM: "مبروم أقل من 70 سم",
+  BILLET_SCRAP_10M: "بيلت خردة 10m",
+  SCRAP_50CM_1M: "سكراب من 50 سم إلى 1 م",
 };
 
 /** Map a SizeLookup.code to the high-level material kind. */
@@ -31,6 +49,9 @@ export function sizeCodeToKind(code: string): MaterialKind {
   if (code === "shortbar_4_12m") return "SHORTBAR_4_12M";
   if (code === "scrap") return "SCRAP";
   if (code === BILLET_WIRE_SIZE_CODE) return "BILLET_WIRE";
+  if (code === REBAR_UNDER_70CM_SIZE_CODE) return "REBAR_UNDER_70CM";
+  if (code === BILLET_SCRAP_10M_SIZE_CODE) return "BILLET_SCRAP_10M";
+  if (code === SCRAP_50CM_1M_SIZE_CODE) return "SCRAP_50CM_1M";
   return "REBAR";
 }
 
@@ -40,16 +61,22 @@ export function isShortbarKind(kind: MaterialKind): boolean {
 
 /**
  * Bulk material kinds that are NOT weighed on the internal scale — only the
- * external weighbridge (tare + gross) is used. Scrap and billet tying wire
- * (6mm) ship as loose bulk, so operators record no internal weigh sessions.
+ * external weighbridge (tare + gross) is used. Loose bulk products skip
+ * internal weigh sessions.
  */
 export function isInternalWeighingExemptKind(kind: MaterialKind): boolean {
-  return kind === "SCRAP" || kind === "BILLET_WIRE";
+  return (
+    kind === "SCRAP" ||
+    kind === "BILLET_WIRE" ||
+    kind === "REBAR_UNDER_70CM" ||
+    kind === "BILLET_SCRAP_10M" ||
+    kind === "SCRAP_50CM_1M"
+  );
 }
 
 /**
  * A truck is exempt from internal weighing when its request items reference a
- * single distinct size and that size is scrap or billet wire. Requiring one
+ * single distinct size and that size is a bulk-exempt kind. Requiring one
  * distinct size keeps the auto-generated internal line (= bridge net)
  * unambiguously attributable to that size in reports.
  */
@@ -62,12 +89,22 @@ export function requestSizeCodesExemptFromInternalWeighing(
 }
 
 /** Product family for one bridge round — multiple sizes within the same group are OK. */
-export type RoundMaterialGroup = "REBAR" | "SHORTBAR" | "SCRAP" | "BILLET_WIRE";
+export type RoundMaterialGroup =
+  | "REBAR"
+  | "SHORTBAR"
+  | "SCRAP"
+  | "BILLET_WIRE"
+  | "REBAR_UNDER_70CM"
+  | "BILLET_SCRAP_10M"
+  | "SCRAP_50CM_1M";
 
 export function materialKindToRoundGroup(kind: MaterialKind): RoundMaterialGroup {
   if (kind === "REBAR") return "REBAR";
   if (isShortbarKind(kind)) return "SHORTBAR";
   if (kind === "BILLET_WIRE") return "BILLET_WIRE";
+  if (kind === "REBAR_UNDER_70CM") return "REBAR_UNDER_70CM";
+  if (kind === "BILLET_SCRAP_10M") return "BILLET_SCRAP_10M";
+  if (kind === "SCRAP_50CM_1M") return "SCRAP_50CM_1M";
   return "SCRAP";
 }
 
@@ -109,6 +146,9 @@ export function materialKindMatchesProductFilter(
   if (filter === "SHORTBAR") return kind != null && isShortbarKind(kind);
   if (filter === "SCRAP") return kind === "SCRAP";
   if (filter === "BILLET_WIRE") return kind === "BILLET_WIRE";
+  if (filter === "REBAR_UNDER_70CM") return kind === "REBAR_UNDER_70CM";
+  if (filter === "BILLET_SCRAP_10M") return kind === "BILLET_SCRAP_10M";
+  if (filter === "SCRAP_50CM_1M") return kind === "SCRAP_50CM_1M";
   return false;
 }
 

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -292,6 +292,9 @@ export function NewSalesOrderForm() {
                   <SelectItem value="SHORTBAR_4_12M">قصائر 4–12 م</SelectItem>
                   <SelectItem value="SCRAP">خردة</SelectItem>
                   <SelectItem value="BILLET_WIRE">أسلاك تربيط</SelectItem>
+                  <SelectItem value="REBAR_UNDER_70CM">مبروم أقل من 70 سم</SelectItem>
+                  <SelectItem value="BILLET_SCRAP_10M">بيلت خردة 10m</SelectItem>
+                  <SelectItem value="SCRAP_50CM_1M">سكراب من 50 سم إلى 1 م</SelectItem>
                 </SelectContent>
               </Select>
               {errors.kind && (

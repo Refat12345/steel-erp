@@ -109,6 +109,15 @@ function sizesForKind(kind: string, sizes: CatalogSize[]): CatalogSize[] {
   if (kind === "BILLET_WIRE") {
     return sizes.filter((s) => s.code === "billet_wire_6mm");
   }
+  if (kind === "REBAR_UNDER_70CM") {
+    return sizes.filter((s) => s.code === "rebar_under_70cm");
+  }
+  if (kind === "BILLET_SCRAP_10M") {
+    return sizes.filter((s) => s.code === "billet_scrap_10m");
+  }
+  if (kind === "SCRAP_50CM_1M") {
+    return sizes.filter((s) => s.code === "scrap_50cm_1m");
+  }
   return [];
 }
 
@@ -118,6 +127,9 @@ const kindLabels: Record<string, string> = {
   SHORTBAR_4_12M: "قصائر 4–12 م",
   SCRAP: "خردة",
   BILLET_WIRE: "أسلاك تربيط",
+  REBAR_UNDER_70CM: "مبروم أقل من 70 سم",
+  BILLET_SCRAP_10M: "بيلت خردة 10m",
+  SCRAP_50CM_1M: "سكراب من 50 سم إلى 1 م",
 };
 
 const gradeLabels: Record<string, string> = {

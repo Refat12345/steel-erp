@@ -91,6 +91,80 @@ describe("sliceReportByProductFilter — SHORTBAR / SCRAP", () => {
   });
 });
 
+describe("sliceReportByProductFilter — bulk exempt kinds", () => {
+  const bulkSessions = [
+    {
+      bridgeRoundId: 10,
+      weightTons: 15.5,
+      sizeId: 201,
+      size: { code: "rebar_under_70cm" },
+    },
+    {
+      bridgeRoundId: 11,
+      weightTons: 12,
+      sizeId: 202,
+      size: { code: "billet_scrap_10m" },
+    },
+    {
+      bridgeRoundId: 12,
+      weightTons: 10,
+      sizeId: 203,
+      size: { code: "scrap_50cm_1m" },
+    },
+  ];
+
+  const bulkTruck = {
+    operationalGrade: null,
+    rounds: [
+      { id: 10, grade: null, startWeightKg: 15_000, endWeightKg: 30_500 },
+      { id: 11, grade: null, startWeightKg: 16_000, endWeightKg: 28_000 },
+      { id: 12, grade: null, startWeightKg: 14_000, endWeightKg: 24_000 },
+    ],
+  };
+
+  it("filters rebar under 70 cm round only", () => {
+    const slice = sliceReportByProductFilter(
+      bulkTruck,
+      "REBAR_UNDER_70CM",
+      37.5,
+      bulkSessions,
+    );
+    expect(slice.included).toBe(true);
+    expect(slice.bridgeTons).toBe(15.5);
+    expect(slice.internalTons).toBe(15.5);
+    expect(slice.matchingRoundIds).toEqual([10]);
+  });
+
+  it("filters billet scrap 10m round only", () => {
+    const slice = sliceReportByProductFilter(
+      bulkTruck,
+      "BILLET_SCRAP_10M",
+      37.5,
+      bulkSessions,
+    );
+    expect(slice.included).toBe(true);
+    expect(slice.bridgeTons).toBe(12);
+    expect(slice.matchingRoundIds).toEqual([11]);
+  });
+
+  it("filters scrap 50 cm to 1 m round only", () => {
+    const slice = sliceReportByProductFilter(
+      bulkTruck,
+      "SCRAP_50CM_1M",
+      37.5,
+      bulkSessions,
+    );
+    expect(slice.included).toBe(true);
+    expect(slice.bridgeTons).toBe(10);
+    expect(slice.matchingRoundIds).toEqual([12]);
+  });
+
+  it("excludes bulk kinds from generic SCRAP filter", () => {
+    const slice = sliceReportByProductFilter(bulkTruck, "SCRAP", 37.5, bulkSessions);
+    expect(slice.included).toBe(false);
+  });
+});
+
 describe("admin grade correction moves tonnage between grade filters", () => {
   // A two-round visit: round 1 FIRST, round 2 SECOND.
   const sessions = [

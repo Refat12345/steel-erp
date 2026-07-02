@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+﻿import { prisma } from "@/lib/db";
 import { Prisma, type SalesOrderKind, type SalesOrderStatus } from "@prisma/client";
 import type { SalesOrderCreateInput, SalesOrderUpdateInput } from "@/lib/validators/sales-order";
 import type { PaginationParams, PaginatedResult } from "@/lib/api-utils";
@@ -152,7 +152,7 @@ export async function createSalesOrder(
           data: {
             orderNumber,
             contractNumber: data.contractNumber,
-            kind: data.kind,
+            kind: data.kind as SalesOrderKind,
             grade: data.kind === "REBAR" ? data.grade : null,
             settlementMode: data.settlementMode,
             paymentDeadlineDays:
@@ -347,6 +347,9 @@ const KIND_LABELS: Record<string, string> = {
   SHORTBAR_4_12M: "قصائر 4–12 م",
   SCRAP: "خردة",
   BILLET_WIRE: "أسلاك تربيط",
+  REBAR_UNDER_70CM: "مبروم أقل من 70 سم",
+  BILLET_SCRAP_10M: "بيلت خردة 10m",
+  SCRAP_50CM_1M: "سكراب من 50 سم إلى 1 م",
 };
 
 const GRADE_LABELS: Record<string, string> = {
