@@ -60,9 +60,12 @@ export const grossSchema = z.object({
 });
 
 // Loader's confirmation of the current round; optionally declares the grade
-// actually loaded in this round (one grade per round — management rule).
+// actually loaded in this round (one grade per round — management rule) and,
+// for internal-weighing-exempt trucks carrying more than one material, the
+// material (size) loaded in this round.
 export const loadingCompleteSchema = z.object({
   grade: z.enum(["FIRST", "SECOND"]).optional().nullable(),
+  sizeId: z.number().int().positive("مادة الدورة غير صالحة").optional().nullable(),
 });
 
 // Corrections carry the version the client read, so concurrent edits are

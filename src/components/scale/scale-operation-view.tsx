@@ -110,6 +110,8 @@ interface BridgeRoundItem {
   id: number;
   roundNumber: number;
   grade: SalesOrderGrade | null;
+  sizeId: number | null;
+  size: { id: number; displayName: string } | null;
   startWeightKg: string;
   endWeightKg: string | null;
   startTime: string;
@@ -923,16 +925,20 @@ export function ScaleOperationView({
         skipInternalWeighing={truck.skipInternalWeighing}
         roundNumber={openRound?.roundNumber ?? 1}
         initialGrade={openRound?.grade ?? null}
+        initialSizeId={openRound?.sizeId ?? null}
         showGradeSelect={
           truck.operationalGrade != null ||
           truck.requestItems.some((i) => i.grade != null) ||
           isMultiRound
         }
-        onConfirm={async (grade) => {
+        onConfirm={async (grade, sizeId) => {
+          const body: { grade?: SalesOrderGrade | null; sizeId?: number | null } = {};
+          if (grade !== undefined) body.grade = grade;
+          if (sizeId !== undefined) body.sizeId = sizeId;
           const ok = await doAction(
             `/api/trucks/${truck.id}/loading-complete`,
             "POST",
-            grade === undefined ? undefined : { grade },
+            Object.keys(body).length > 0 ? body : undefined,
           );
           if (ok) setShowLoadingCompleteDialog(false);
           return ok;
@@ -1023,7 +1029,9 @@ function RoundsCard({
                     <TableCell className="font-mono">{r.roundNumber}</TableCell>
                     <TableCell>{r.grade ? GRADE_LABELS[r.grade] : "—"}</TableCell>
                     <TableCell className="text-xs">
-                      {sizeNames.length > 0 ? sizeNames.join("، ") : "—"}
+                      {sizeNames.length > 0
+                        ? sizeNames.join("، ")
+                        : r.size?.displayName ?? "—"}
                     </TableCell>
                     <TableCell className="font-mono">
                       {startKg.toLocaleString("en-US")}
@@ -2043,6 +2051,7 @@ function LoadingCompleteDialog({
   skipInternalWeighing,
   roundNumber,
   initialGrade,
+  initialSizeId,
   showGradeSelect,
   onConfirm,
 }: {
@@ -2059,16 +2068,32 @@ function LoadingCompleteDialog({
   skipInternalWeighing: boolean;
   roundNumber: number;
   initialGrade: SalesOrderGrade | null;
+  /** Previously chosen material of the open round (re-confirm after reopen). */
+  initialSizeId: number | null;
   showGradeSelect: boolean;
-  onConfirm: (grade?: SalesOrderGrade | null) => Promise<boolean>;
+  onConfirm: (
+    grade?: SalesOrderGrade | null,
+    sizeId?: number | null,
+  ) => Promise<boolean>;
 }) {
   const [saving, setSaving] = useState(false);
   const [grade, setGrade] = useState<SalesOrderGrade | "">(initialGrade ?? "");
+  const [sizeId, setSizeId] = useState<number | null>(initialSizeId);
 
-  // Re-sync the default whenever the dialog opens for a (possibly new) round.
+  // Exempt trucks carrying more than one material: the loader must declare
+  // which material this round loaded (the round net is attributed to it).
+  const materialOptions = skipInternalWeighing
+    ? [...new Map(requestItems.map((i) => [i.sizeId, i.size])).values()]
+    : [];
+  const showMaterialSelect = materialOptions.length > 1;
+
+  // Re-sync the defaults whenever the dialog opens for a (possibly new) round.
   useEffect(() => {
-    if (open) setGrade(initialGrade ?? "");
-  }, [open, initialGrade]);
+    if (open) {
+      setGrade(initialGrade ?? "");
+      setSizeId(initialSizeId);
+    }
+  }, [open, initialGrade, initialSizeId]);
 
   const bySize = aggregateWeighSessionsBySize(sessions);
   const { rows: requestRows, warnings: requestWarnings } =
@@ -2083,7 +2108,9 @@ function LoadingCompleteDialog({
       ? bySize.reduce((sum, row) => sum + (row.totalBundles ?? 0), 0)
       : null;
 
-  const warnings: string[] = [...requestWarnings];
+  // Exempt trucks never carry internal sessions, so "nothing loaded yet"
+  // comparison warnings are noise — the round net is recorded at gross.
+  const warnings: string[] = skipInternalWeighing ? [] : [...requestWarnings];
   if (!skipInternalWeighing && sessions.length === 0) {
     warnings.push("لا توجد وزنات داخلية — يُفضّل إضافة وزنة واحدة على الأقل قبل التأكيد");
   }
@@ -2099,9 +2126,16 @@ function LoadingCompleteDialog({
   }
 
   const handleConfirm = async () => {
+    if (showMaterialSelect && sizeId == null) {
+      toast.error("حدد مادة هذه الدورة قبل التأكيد");
+      return;
+    }
     setSaving(true);
     try {
-      await onConfirm(showGradeSelect ? (grade === "" ? null : grade) : undefined);
+      await onConfirm(
+        showGradeSelect ? (grade === "" ? null : grade) : undefined,
+        showMaterialSelect ? sizeId : undefined,
+      );
     } finally {
       setSaving(false);
     }
@@ -2151,6 +2185,32 @@ function LoadingCompleteDialog({
               </Select>
               <p className="text-xs text-muted-foreground">
                 نخب واحد لكل دورة — إذا حمّلت الشاحنة نخبين، افصلهما بوزنة
+                «رجوع للتحميل» بين الدورتين.
+              </p>
+            </div>
+          )}
+
+          {showMaterialSelect && (
+            <div className="space-y-2">
+              <Label>مادة هذه الدورة *</Label>
+              <Select
+                value={sizeId != null ? String(sizeId) : ""}
+                onValueChange={(v) => setSizeId(v ? Number(v) : null)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="اختر المادة المحمّلة" />
+                </SelectTrigger>
+                <SelectContent>
+                  {materialOptions.map((size) => (
+                    <SelectItem key={size.id} value={String(size.id)}>
+                      {size.displayName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                مادة واحدة لكل دورة — صافي القبان لهذه الدورة سيُسجَّل تلقائياً
+                على المادة المختارة. إذا حمّلت الشاحنة مادتين، افصلهما بوزنة
                 «رجوع للتحميل» بين الدورتين.
               </p>
             </div>

@@ -45,6 +45,7 @@ export async function POST(
         truckId,
         session.userId,
         validated.data.grade,
+        validated.data.sizeId,
       );
       return ok(truck);
     } catch (e) {

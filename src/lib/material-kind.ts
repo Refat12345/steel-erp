@@ -75,17 +75,22 @@ export function isInternalWeighingExemptKind(kind: MaterialKind): boolean {
 }
 
 /**
- * A truck is exempt from internal weighing when its request items reference a
- * single distinct size and that size is a bulk-exempt kind. Requiring one
- * distinct size keeps the auto-generated internal line (= bridge net)
- * unambiguously attributable to that size in reports.
+ * A truck is exempt from internal weighing when EVERY distinct size on its
+ * request items is a bulk-exempt kind (scrap, billet wire, …). A single
+ * non-exempt size (e.g. rebar) disables the exemption because that material
+ * genuinely needs internal weigh sessions.
+ *
+ * When more than one exempt size is on the truck (e.g. scrap in round 1 +
+ * billet wire in round 2), the loader picks the material of each bridge
+ * round at loading-complete time (`BridgeRound.sizeId`) so the auto-generated
+ * mirror session stays unambiguously attributable in reports.
  */
 export function requestSizeCodesExemptFromInternalWeighing(
   sizeCodes: ReadonlyArray<string>,
 ): boolean {
   const distinct = [...new Set(sizeCodes.filter(Boolean))];
-  if (distinct.length !== 1) return false;
-  return isInternalWeighingExemptKind(sizeCodeToKind(distinct[0]));
+  if (distinct.length === 0) return false;
+  return distinct.every((code) => isInternalWeighingExemptKind(sizeCodeToKind(code)));
 }
 
 /** Product family for one bridge round — multiple sizes within the same group are OK. */
