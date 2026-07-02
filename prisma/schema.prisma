@@ -423,6 +423,7 @@ model SizeLookup {
   orderItems        OrderItem[]
   weighSessions     WeighSession[]
   truckRequestItems TruckRequestItem[]
+  bridgeRounds      BridgeRound[]
 
   @@map("size_lookup")
 }
@@ -535,6 +536,12 @@ model BridgeRound {
   /// One grade per round (management rule): a round may load several sizes
   /// but never mixes FIRST and SECOND grade rebar.
   grade              SalesOrderGrade?
+  /// Material loaded in this round, for internal-weighing-exempt trucks
+  /// (scrap / billet wire / …). Chosen by the loader at loading-complete when
+  /// the truck carries more than one exempt size; the auto-generated mirror
+  /// session at gross is attributed to it. Null for non-exempt trucks and
+  /// legacy rounds.
+  sizeId             Int?             @map("size_id")
   startWeightKg      Decimal          @map("start_weight_kg") @db.Decimal(10, 1)
   endWeightKg        Decimal?         @map("end_weight_kg") @db.Decimal(10, 1)
   startTime          DateTime         @map("start_time")
@@ -550,12 +557,14 @@ model BridgeRound {
 
   truckOperation TruckOperation @relation(fields: [truckOperationId], references: [id])
   loader         User?          @relation("BridgeRoundLoader", fields: [loaderId], references: [id])
+  size           SizeLookup?    @relation(fields: [sizeId], references: [id])
   sessions       WeighSession[]
   photos         TruckPhoto[]
 
   @@unique([truckOperationId, roundNumber])
   @@index([truckOperationId])
   @@index([loaderId])
+  @@index([sizeId])
   @@map("bridge_rounds")
 }
 

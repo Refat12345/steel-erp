@@ -39,11 +39,18 @@ const mockPrisma = vi.hoisted(() => ({
     update: vi.fn(),
     updateMany: vi.fn(),
   },
-  truckRequestItem: { createMany: vi.fn(), deleteMany: vi.fn() },
+  truckRequestItem: {
+    createMany: vi.fn(),
+    deleteMany: vi.fn(),
+    findMany: vi.fn(),
+    findFirst: vi.fn(),
+  },
   weighSession: {
     findMany: vi.fn(),
     findUnique: vi.fn(),
+    findFirst: vi.fn(),
     count: vi.fn(),
+    create: vi.fn(),
     deleteMany: vi.fn(),
   },
   truckPhoto: { count: vi.fn(), updateMany: vi.fn() },
@@ -116,6 +123,7 @@ interface MockRound {
   id: number;
   roundNumber: number;
   grade?: string | null;
+  sizeId?: number | null;
   startWeightKg?: number;
   endWeightKg?: number | null;
   isFinal?: boolean;
@@ -643,6 +651,92 @@ describe("confirmLoadingComplete", () => {
   });
 });
 
+// ─── 3b. Loader confirmation — exempt trucks (scrap / billet wire) ──
+
+describe("confirmLoadingComplete — internal-weighing-exempt trucks", () => {
+  beforeEach(() => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValue({
+      id: 1,
+      status: "FirstWeigh",
+      loadingConfirmedAt: null,
+      loaderId: null,
+      skipInternalWeighing: true,
+    });
+    mockRounds({ open: { id: 11, roundNumber: 1, grade: null, sizeId: null } });
+    // Exempt trucks have no internal sessions but still require a photo.
+    mockPrisma.weighSession.findMany.mockResolvedValue([]);
+    mockPrisma.truckPhoto.count.mockResolvedValue(1);
+    mockPrisma.truckOperation.update.mockResolvedValue({
+      id: 1,
+      status: "LoadingComplete",
+    });
+  });
+
+  it("auto-attributes the round to the single request material", async () => {
+    mockPrisma.truckRequestItem.findMany.mockResolvedValue([{ sizeId: 5 }]);
+
+    await confirmLoadingComplete(1, 99);
+
+    expect(mockPrisma.bridgeRound.update).toHaveBeenCalledWith({
+      where: { id: 11 },
+      data: expect.objectContaining({ sizeId: 5 }),
+    });
+    const audit = mockPrisma.auditLog.create.mock.calls[0][0];
+    expect(audit.data.details.newValue.roundSizeId).toBe(5);
+  });
+
+  it("requires an explicit material when the truck carries several exempt materials", async () => {
+    mockPrisma.truckRequestItem.findMany.mockResolvedValue([
+      { sizeId: 5 },
+      { sizeId: 7 },
+    ]);
+
+    await expect(confirmLoadingComplete(1, 99)).rejects.toThrow(/أكثر من مادة/);
+  });
+
+  it("stamps the loader's chosen material onto the round", async () => {
+    mockPrisma.truckRequestItem.findMany.mockResolvedValue([
+      { sizeId: 5 },
+      { sizeId: 7 },
+    ]);
+
+    await confirmLoadingComplete(1, 99, undefined, 7);
+
+    expect(mockPrisma.bridgeRound.update).toHaveBeenCalledWith({
+      where: { id: 11 },
+      data: expect.objectContaining({ sizeId: 7 }),
+    });
+    const audit = mockPrisma.auditLog.create.mock.calls[0][0];
+    expect(audit.data.details.newValue.roundSizeId).toBe(7);
+  });
+
+  it("rejects a material that is not on the truck's request items", async () => {
+    mockPrisma.truckRequestItem.findMany.mockResolvedValue([
+      { sizeId: 5 },
+      { sizeId: 7 },
+    ]);
+
+    await expect(confirmLoadingComplete(1, 99, undefined, 9)).rejects.toThrow(
+      /تفاصيل الطلبية/,
+    );
+  });
+
+  it("keeps the round's previously chosen material on re-confirm after reopen", async () => {
+    mockPrisma.truckRequestItem.findMany.mockResolvedValue([
+      { sizeId: 5 },
+      { sizeId: 7 },
+    ]);
+    mockRounds({ open: { id: 11, roundNumber: 1, grade: null, sizeId: 7 } });
+
+    await confirmLoadingComplete(1, 99);
+
+    expect(mockPrisma.bridgeRound.update).toHaveBeenCalledWith({
+      where: { id: 11 },
+      data: expect.objectContaining({ sizeId: 7 }),
+    });
+  });
+});
+
 // ─── 4. Record gross + 5. Net weight + 7. Block gross before confirmation ──
 
 describe("enterGross", () => {
@@ -761,6 +855,57 @@ describe("enterGross", () => {
     ["Infinity", Number.POSITIVE_INFINITY],
   ])("rejects invalid gross weight = %s early", async (_l, kg) => {
     await expect(enterGross(1, kg, 7)).rejects.toThrow(ServiceError);
+  });
+});
+
+// ─── Gross on exempt trucks: mirror session attribution ────────
+
+describe("enterGross — exempt truck mirror session", () => {
+  beforeEach(() => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValue({
+      id: 1,
+      status: "LoadingComplete",
+      tareWeightKg: 10_000,
+      grossWeightKg: null,
+      loadingConfirmedAt: new Date("2026-07-02T08:00:00Z"),
+      loaderId: 99,
+      skipInternalWeighing: true,
+    });
+    mockPrisma.weighSession.count.mockResolvedValue(0);
+    mockPrisma.weighSession.findFirst.mockResolvedValue(null);
+    mockPrisma.weighSession.create.mockResolvedValue({});
+    mockPrisma.weighSession.findMany.mockResolvedValue([{ weightTons: 15 }]);
+    mockPrisma.truckOperation.update.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => ({ id: 1, ...data }),
+    );
+  });
+
+  it("attributes the mirror session to the ROUND's material when set", async () => {
+    mockRounds({
+      open: { id: 11, roundNumber: 2, grade: null, sizeId: 7, startWeightKg: 10_000 },
+    });
+
+    await enterGross(1, 25_000, 3);
+
+    const created = mockPrisma.weighSession.create.mock.calls[0][0];
+    expect(created.data.sizeId).toBe(7);
+    expect(created.data.bridgeRoundId).toBe(11);
+    // Net = (25_000 − 10_000) / 1000 tons.
+    expect(created.data.weightTons).toBe("15.000");
+    // The chosen material makes the fallback lookup unnecessary.
+    expect(mockPrisma.truckRequestItem.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the first request item for legacy rounds without a material", async () => {
+    mockRounds({
+      open: { id: 11, roundNumber: 1, grade: null, sizeId: null, startWeightKg: 10_000 },
+    });
+    mockPrisma.truckRequestItem.findFirst.mockResolvedValue({ sizeId: 5 });
+
+    await enterGross(1, 25_000, 3);
+
+    const created = mockPrisma.weighSession.create.mock.calls[0][0];
+    expect(created.data.sizeId).toBe(5);
   });
 });
 

@@ -22,8 +22,9 @@ type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
 /**
  * Whether a truck whose request items reference these sizes should skip
- * internal weighing (scrap / billet tying wire — single distinct size).
- * Resolves the size codes from the catalog inside the same transaction.
+ * internal weighing (every distinct size is a bulk-exempt kind — scrap,
+ * billet tying wire, …). Resolves the size codes from the catalog inside the
+ * same transaction.
  */
 async function deriveSkipInternalWeighing(
   tx: TxClient,
@@ -1791,6 +1792,7 @@ export async function confirmLoadingComplete(
   truckId: number,
   userId: number,
   roundGrade?: SalesOrderGrade | null,
+  roundSizeId?: number | null,
 ) {
   return withRetry(() =>
     prisma.$transaction(
@@ -1837,6 +1839,34 @@ export async function confirmLoadingComplete(
           throw new ServiceError("يجب رفع صورة واحدة على الأقل قبل تأكيد اكتمال التحميل");
         }
 
+        // Exempt trucks: resolve which material this round carried, so the
+        // mirror session created at gross is attributed to the right size.
+        // Single-size trucks resolve automatically; multi-size trucks require
+        // the loader's explicit choice (one material per round).
+        let nextRoundSizeId: number | null | undefined;
+        if (truck.skipInternalWeighing) {
+          const requestItems = await tx.truckRequestItem.findMany({
+            where: { truckOperationId: truckId },
+            select: { sizeId: true },
+          });
+          const distinctSizeIds = [...new Set(requestItems.map((i) => i.sizeId))];
+          if (roundSizeId != null) {
+            if (!distinctSizeIds.includes(roundSizeId)) {
+              throw new ServiceError("مادة الدورة يجب أن تكون من المواد المسجّلة في تفاصيل الطلبية");
+            }
+            nextRoundSizeId = roundSizeId;
+          } else if (distinctSizeIds.length === 1) {
+            nextRoundSizeId = distinctSizeIds[0];
+          } else if (openRound.sizeId != null) {
+            // Re-confirm after reopen keeps the previously chosen material.
+            nextRoundSizeId = openRound.sizeId;
+          } else {
+            throw new ServiceError(
+              "هذه الشاحنة تحمل أكثر من مادة — يجب تحديد مادة هذه الدورة قبل تأكيد اكتمال التحميل",
+            );
+          }
+        }
+
         const totalInternalTons = sessions.reduce(
           (sum, s) => sum.plus(s.weightTons),
           new Decimal(0),
@@ -1861,6 +1891,7 @@ export async function confirmLoadingComplete(
             loadingConfirmedAt: confirmedAt,
             loaderId: userId,
             grade: nextGrade,
+            ...(nextRoundSizeId !== undefined ? { sizeId: nextRoundSizeId } : {}),
           },
         });
 
@@ -1882,6 +1913,7 @@ export async function confirmLoadingComplete(
               loaderId: userId,
               roundNumber: openRound.roundNumber,
               roundGrade: nextGrade ?? null,
+              roundSizeId: nextRoundSizeId ?? null,
               sessionCount: sessions.length,
               totalInternalTons: totalInternalTons.toNumber(),
             },
@@ -2068,7 +2100,9 @@ export async function enterGross(
 
         // Exempt trucks (scrap / billet wire) record no internal sessions. When
         // the round is closed we mirror its external net as ONE
-        // system-generated weigh session attributed to the request item's size.
+        // system-generated weigh session attributed to the ROUND's material
+        // (chosen by the loader at loading-complete; falls back to the first
+        // request item for legacy rounds recorded before per-round materials).
         // Created BEFORE the discrepancy is computed so internal == external
         // (zero discrepancy), and so every by-size report, the scale card, and
         // the dashboard kind breakdown keep working without special-casing.
@@ -2077,10 +2111,14 @@ export async function enterGross(
             where: { bridgeRoundId: openRound.id },
           });
           if (roundSessionCount === 0) {
-            const requestItem = await tx.truckRequestItem.findFirst({
-              where: { truckOperationId: truckId },
-              select: { sizeId: true },
-            });
+            let mirrorSizeId: number | null = openRound.sizeId;
+            if (mirrorSizeId == null) {
+              const requestItem = await tx.truckRequestItem.findFirst({
+                where: { truckOperationId: truckId },
+                select: { sizeId: true },
+              });
+              mirrorSizeId = requestItem?.sizeId ?? null;
+            }
             const lastSession = await tx.weighSession.findFirst({
               where: { truckOperationId: truckId },
               orderBy: { sessionNumber: "desc" },
@@ -2095,7 +2133,7 @@ export async function enterGross(
                 truckOperationId: truckId,
                 bridgeRoundId: openRound.id,
                 sessionNumber: (lastSession?.sessionNumber ?? 0) + 1,
-                sizeId: requestItem?.sizeId ?? null,
+                sizeId: mirrorSizeId,
                 bundleCount: null,
                 weightTons: netTons,
               },
@@ -2266,6 +2304,7 @@ export async function closeOperation(truckId: number, userId: number) {
             rounds: truck.rounds.map((r) => ({
               roundNumber: r.roundNumber,
               grade: r.grade,
+              sizeId: r.sizeId,
               startWeightKg: Number(r.startWeightKg),
               endWeightKg: r.endWeightKg != null ? Number(r.endWeightKg) : null,
               netKg:
@@ -2369,7 +2408,10 @@ const DETAIL_INCLUDE = {
   },
   rounds: {
     orderBy: { roundNumber: "asc" as const },
-    include: { loader: { select: { id: true, fullName: true, username: true } } },
+    include: {
+      loader: { select: { id: true, fullName: true, username: true } },
+      size: { select: { id: true, displayName: true } },
+    },
   },
   photos: { orderBy: { capturedAt: "asc" as const } },
   creator: { select: { id: true, fullName: true, username: true } },

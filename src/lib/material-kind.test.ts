@@ -3,6 +3,7 @@
 import {
   inferRoundMaterialKind,
   materialKindMatchesProductFilter,
+  requestSizeCodesExemptFromInternalWeighing,
   sessionMatchesProductFilter,
   sizeCodeSupportsGrade,
   shouldWarnBridgeRoundProductMix,
@@ -90,6 +91,44 @@ describe("materialKindMatchesProductFilter", () => {
     expect(materialKindMatchesProductFilter("SCRAP", "SCRAP_50CM_1M")).toBe(false);
     expect(materialKindMatchesProductFilter("SCRAP_50CM_1M", "SCRAP")).toBe(false);
     expect(materialKindMatchesProductFilter("SCRAP_50CM_1M", "BILLET_SCRAP_10M")).toBe(false);
+  });
+});
+
+describe("requestSizeCodesExemptFromInternalWeighing", () => {
+  it("exempts a single exempt size", () => {
+    expect(requestSizeCodesExemptFromInternalWeighing(["scrap"])).toBe(true);
+    expect(requestSizeCodesExemptFromInternalWeighing(["billet_wire_6mm"])).toBe(true);
+    expect(
+      requestSizeCodesExemptFromInternalWeighing(["scrap", "scrap"]),
+    ).toBe(true);
+  });
+
+  it("exempts multiple distinct exempt sizes on one truck", () => {
+    expect(
+      requestSizeCodesExemptFromInternalWeighing(["scrap", "billet_wire_6mm"]),
+    ).toBe(true);
+    expect(
+      requestSizeCodesExemptFromInternalWeighing([
+        "scrap",
+        "rebar_under_70cm",
+        "scrap_50cm_1m",
+      ]),
+    ).toBe(true);
+  });
+
+  it("does not exempt when any size needs internal weighing", () => {
+    expect(requestSizeCodesExemptFromInternalWeighing(["12"])).toBe(false);
+    expect(
+      requestSizeCodesExemptFromInternalWeighing(["scrap", "12"]),
+    ).toBe(false);
+    expect(
+      requestSizeCodesExemptFromInternalWeighing(["billet_wire_6mm", "shortbar_1_4m"]),
+    ).toBe(false);
+  });
+
+  it("does not exempt empty or blank size lists", () => {
+    expect(requestSizeCodesExemptFromInternalWeighing([])).toBe(false);
+    expect(requestSizeCodesExemptFromInternalWeighing([""])).toBe(false);
   });
 });
 
