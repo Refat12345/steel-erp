@@ -24,7 +24,15 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
-import { Plus, Search, Truck, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Plus,
+  Search,
+  Truck,
+  ChevronLeft,
+  ChevronRight,
+  CalendarDays,
+} from "lucide-react";
+import { defaultOperationalDateInput } from "@/lib/operational-day";
 import { RegisterBilletReceiptDialog } from "@/components/billet/register-billet-receipt-dialog";
 
 interface ReceiptItem {
@@ -67,10 +75,16 @@ export function BilletReceiptList() {
   const [loading, setLoading] = useState(true);
   const [plateNumber, setPlateNumber] = useState("");
   const [status, setStatus] = useState("");
+  const [operationalDate, setOperationalDate] = useState(() =>
+    defaultOperationalDateInput(),
+  );
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [dialogOpen, setDialogOpen] = useState(false);
   const pageSize = 25;
+
+  const todayOperationalDate = defaultOperationalDateInput();
+  const isTodaySelected = operationalDate === todayOperationalDate;
 
   const fetchReceipts = useCallback(async () => {
     setLoading(true);
@@ -78,6 +92,7 @@ export function BilletReceiptList() {
       const params = new URLSearchParams();
       if (plateNumber) params.set("plateNumber", plateNumber);
       if (status) params.set("status", status);
+      if (operationalDate) params.set("operationalDate", operationalDate);
       params.set("page", String(page));
       params.set("pageSize", String(pageSize));
       const res = await fetch(`/api/billet-receipts?${params}`);
@@ -91,11 +106,11 @@ export function BilletReceiptList() {
     } finally {
       setLoading(false);
     }
-  }, [plateNumber, status, page]);
+  }, [plateNumber, status, operationalDate, page]);
 
   useEffect(() => {
     setPage(1);
-  }, [plateNumber, status]);
+  }, [plateNumber, status, operationalDate]);
 
   useEffect(() => {
     const timer = setTimeout(fetchReceipts, 300);
@@ -106,36 +121,91 @@ export function BilletReceiptList() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[12rem] max-w-sm">
-          <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="بحث برقم اللوحة..."
-            value={plateNumber}
-            onChange={(e) => setPlateNumber(e.target.value)}
-            className="pr-9"
-          />
+      <div className="rounded-xl border bg-card/70 p-3 shadow-sm">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex min-w-[12rem] flex-1 flex-col gap-1.5">
+            <label
+              htmlFor="billet-plate-search"
+              className="text-xs font-medium text-muted-foreground"
+            >
+              بحث
+            </label>
+            <div className="relative">
+              <Search className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id="billet-plate-search"
+                placeholder="بحث برقم اللوحة..."
+                className="ps-9"
+                value={plateNumber}
+                onChange={(e) => setPlateNumber(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="flex w-full flex-col gap-1.5 sm:w-[11rem]">
+            <label className="text-xs font-medium text-muted-foreground">الحالة</label>
+            <Select value={status} onValueChange={(v) => setStatus(v ?? "")}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="كل الحالات" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">كل الحالات</SelectItem>
+                <SelectItem value="Registered">مسجّلة</SelectItem>
+                <SelectItem value="Loaded">وُزنت محمّلة</SelectItem>
+                <SelectItem value="Unloading">قيد التفريغ</SelectItem>
+                <SelectItem value="AwaitingExit">بانتظار الخروج</SelectItem>
+                <SelectItem value="Completed">مكتملة</SelectItem>
+                <SelectItem value="Cancelled">ملغاة</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="billet-operational-date"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                يوم التشغيل
+              </label>
+              <span className="text-[11px] text-muted-foreground">(08:00 ← 08:00)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                id="billet-operational-date"
+                type="date"
+                className="w-[10.5rem] shrink-0"
+                value={operationalDate}
+                onChange={(e) => setOperationalDate(e.target.value)}
+              />
+              <Button
+                type="button"
+                variant={isTodaySelected ? "default" : "outline"}
+                className="shrink-0"
+                onClick={() => setOperationalDate(defaultOperationalDateInput())}
+              >
+                <CalendarDays className="h-4 w-4 me-1" />
+                اليوم
+              </Button>
+            </div>
+          </div>
+
+          {operationalDate && (
+            <Badge
+              variant="secondary"
+              className="h-10 shrink-0 px-3 text-sm tabular-nums"
+            >
+              {loading ? "…" : `${total.toLocaleString("ar-SY")} سجل`}
+            </Badge>
+          )}
+
+          {canRegister && (
+            <Button className="shrink-0" onClick={() => setDialogOpen(true)}>
+              <Plus className="h-4 w-4 me-1" />
+              تسجيل استلام
+            </Button>
+          )}
         </div>
-        <Select value={status} onValueChange={(v) => setStatus(v ?? "")}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="كل الحالات" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">كل الحالات</SelectItem>
-            <SelectItem value="Registered">مسجّلة</SelectItem>
-            <SelectItem value="Loaded">وُزنت محمّلة</SelectItem>
-            <SelectItem value="Unloading">قيد التفريغ</SelectItem>
-            <SelectItem value="AwaitingExit">بانتظار الخروج</SelectItem>
-            <SelectItem value="Completed">مكتملة</SelectItem>
-            <SelectItem value="Cancelled">ملغاة</SelectItem>
-          </SelectContent>
-        </Select>
-        {canRegister && (
-          <Button onClick={() => setDialogOpen(true)} size="sm">
-            <Plus className="h-4 w-4" />
-            تسجيل استلام
-          </Button>
-        )}
       </div>
 
       <div className="rounded-lg border overflow-x-auto">
@@ -167,7 +237,9 @@ export function BilletReceiptList() {
                 <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
                   <div className="flex flex-col items-center gap-2">
                     <Truck className="h-8 w-8 opacity-40" />
-                    {plateNumber || status ? "لا توجد نتائج" : "لا توجد سجلات استلام بعد"}
+                    {plateNumber || status
+                      ? "لا توجد نتائج"
+                      : "لا توجد سجلات في يوم التشغيل المحدد"}
                   </div>
                 </TableCell>
               </TableRow>
