@@ -9,6 +9,10 @@ import {
   handleServiceError,
   parsePagination,
 } from "@/lib/api-utils";
+import {
+  getOperationalDayWindow,
+  type OperationalDayWindow,
+} from "@/lib/operational-day";
 import { registerReceiptSchema } from "@/lib/validators/billet-receipt";
 import { listReceipts, registerReceipt } from "@/lib/services/billet-receipt.service";
 import type { BilletReceiptStatus } from "@prisma/client";
@@ -22,14 +26,26 @@ export async function GET(req: NextRequest) {
   const status = searchParams.get("status") || "";
   const plateNumber = searchParams.get("plateNumber") || "";
   const supplierContractNumber = searchParams.get("contractNumber") || "";
+  const operationalDate = searchParams.get("operationalDate");
   const pagination = parsePagination(searchParams);
 
   try {
+    let window: OperationalDayWindow | null = null;
+    if (operationalDate) {
+      try {
+        window = getOperationalDayWindow(operationalDate);
+      } catch {
+        return badRequest("تاريخ يوم التشغيل غير صالح");
+      }
+    }
+
     const result = await listReceipts(
       {
         status: status ? (status as BilletReceiptStatus) : undefined,
         plateNumber: plateNumber || undefined,
         supplierContractNumber: supplierContractNumber || undefined,
+        dateFrom: window?.from,
+        dateTo: window?.to,
       },
       pagination,
     );

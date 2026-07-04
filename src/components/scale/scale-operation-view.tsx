@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { sessionHasPermission } from "@/lib/client-permissions";
@@ -927,9 +927,10 @@ export function ScaleOperationView({
         initialGrade={openRound?.grade ?? null}
         initialSizeId={openRound?.sizeId ?? null}
         showGradeSelect={
-          truck.operationalGrade != null ||
-          truck.requestItems.some((i) => i.grade != null) ||
-          isMultiRound
+          !truck.skipInternalWeighing &&
+          (truck.operationalGrade != null ||
+            truck.requestItems.some((i) => i.grade != null) ||
+            isMultiRound)
         }
         onConfirm={async (grade, sizeId) => {
           const body: { grade?: SalesOrderGrade | null; sizeId?: number | null } = {};
@@ -2086,6 +2087,15 @@ function LoadingCompleteDialog({
     ? [...new Map(requestItems.map((i) => [i.sizeId, i.size])).values()]
     : [];
   const showMaterialSelect = materialOptions.length > 1;
+  /** Base UI Select renders raw `value` without `items` — map id → display name. */
+  const materialSelectItems = useMemo(
+    () =>
+      materialOptions.map((size) => ({
+        value: String(size.id),
+        label: size.displayName,
+      })),
+    [materialOptions],
+  );
 
   // Re-sync the defaults whenever the dialog opens for a (possibly new) round.
   useEffect(() => {
@@ -2194,6 +2204,7 @@ function LoadingCompleteDialog({
             <div className="space-y-2">
               <Label>مادة هذه الدورة *</Label>
               <Select
+                items={materialSelectItems}
                 value={sizeId != null ? String(sizeId) : ""}
                 onValueChange={(v) => setSizeId(v ? Number(v) : null)}
               >

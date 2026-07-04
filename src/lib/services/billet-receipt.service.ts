@@ -889,6 +889,10 @@ export interface ReceiptListFilters {
   status?: BilletReceiptStatus;
   plateNumber?: string;
   supplierContractNumber?: string;
+  /** Operational-day window start (inclusive), matched against createdAt. */
+  dateFrom?: Date;
+  /** Operational-day window end (exclusive), matched against createdAt. */
+  dateTo?: Date;
 }
 
 export type ReceiptListItem = Prisma.BilletReceiptGetPayload<{
@@ -911,6 +915,12 @@ export async function listReceipts(
   }
   if (filters.supplierContractNumber) {
     where.supplierContractNumber = filters.supplierContractNumber;
+  }
+  if (filters.dateFrom || filters.dateTo) {
+    where.createdAt = {
+      ...(filters.dateFrom ? { gte: filters.dateFrom } : {}),
+      ...(filters.dateTo ? { lt: filters.dateTo } : {}),
+    };
   }
 
   const [data, total] = await Promise.all([
