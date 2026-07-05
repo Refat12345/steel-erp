@@ -498,6 +498,10 @@ model TruckOperation {
   @@index([createdAt])
   @@index([loaderId])
   @@index([status, createdAt(sort: Desc)])
+  /// Dashboard / operations-stats queries filter on
+  /// `status = 'Completed' AND closed_at >= X` — this composite index keeps
+  /// them off a full scan as completed history grows.
+  @@index([status, closedAt])
   @@map("truck_operations")
 }
 
