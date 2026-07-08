@@ -432,7 +432,7 @@ Avoid in a single migration: dropping a column that the old code still reads, re
 
 ### 8.5 Off-site backup verification / التحقق من النسخ خارج السيرفر
 
-The off-site push is now **built into `scripts/backup-db.sh`** itself: every run uploads the DB dump and the uploads tarball to `b2:steel-erp-backups/daily/` via `rclone copy`, then re-runs `rclone lsf` to confirm both keys landed. `scripts/deploy.sh` then re-verifies both keys before any code change. There is **no separate `rclone copy` cron**.
+The off-site push is now **built into `scripts/backup-db.sh`** itself: every run uploads the DB dump to `b2:steel-erp-backups/daily/` via `rclone copy` then re-runs `rclone lsf` to confirm the key landed, and **differentially mirrors** the uploads directory to `b2:steel-erp-backups/uploads-mirror/` via `rclone sync` (only new/changed files transfer; locally-deleted files move to `uploads-deleted/YYYY-MM-DD/` and are kept `BACKUP_TRASH_KEEP_DAYS` days, default 30). The full uploads tarball is still created and verified locally every night and pushed to `weekly/` on Sundays. `scripts/deploy.sh` re-verifies the DB key on B2 and the mirror's reachability before any code change. There is **no separate `rclone copy` cron**.
 
 To make this end-to-end on a new VPS:
 

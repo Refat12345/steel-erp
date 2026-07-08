@@ -3,11 +3,23 @@
 #
 # Backs up BOTH:
 #   1. PostgreSQL database (custom-format pg_dump | gzip)
-#   2. Application uploads directory (tar.gz)
+#   2. Application uploads directory (tar.gz kept locally + differential
+#      mirror off-site)
 #
-# And pushes both artifacts off-site to Backblaze B2 (via rclone) so the
-# four-point verification required by production-safety.mdc §7 holds end to
-# end (local file + size + gunzip -t + off-site presence).
+# Off-site strategy (Backblaze B2 via rclone):
+#   - DB dumps: pushed daily to daily/ (and weekly/ on Sundays) — this is the
+#     artifact covered by the four-point verification required by
+#     production-safety.mdc §7 (local file + size + gunzip -t + off-site
+#     presence).
+#   - Uploads: mirrored differentially via `rclone sync` to
+#     ${B2_UPLOADS_MIRROR_PREFIX}/ — only new/changed files are transferred.
+#     Files deleted locally are moved (not destroyed) to
+#     ${B2_UPLOADS_TRASH_PREFIX}/YYYY-MM-DD/ and kept for
+#     ${BACKUP_TRASH_KEEP_DAYS} days. The full uploads tar.gz is still
+#     created and verified locally every night, and still pushed to weekly/
+#     on Sundays. Daily full-archive uploads to B2 were removed because they
+#     re-uploaded ~500 MB of immutable files every night and blew through the
+#     B2 storage cap.
 #
 # Run via cron as root from /etc/cron.d/steel-erp-backup, OR invoked by
 # scripts/deploy.sh before every deploy (the deploy user has a dedicated
@@ -25,6 +37,9 @@
 #   BACKUP_KEEP_DAYS     — daily local + remote retention (default 7)
 #   BACKUP_KEEP_WEEKLY   — weekly local + remote retention in weeks (default 4)
 #   B2_REMOTE            — rclone remote prefix (default b2:steel-erp-backups)
+#   B2_UPLOADS_MIRROR_PREFIX — remote prefix for the uploads mirror (default uploads-mirror)
+#   B2_UPLOADS_TRASH_PREFIX  — remote prefix for files deleted from the mirror (default uploads-deleted)
+#   BACKUP_TRASH_KEEP_DAYS   — retention for trashed mirror files in days (default 30)
 #   SKIP_B2=1            — skip the off-site push (UAT/dev only — never prod)
 #
 # References:
@@ -73,6 +88,9 @@ MIN_FREE_KB=524288         # 512 MB minimum free; below = refuse to run
 B2_REMOTE="${B2_REMOTE:-b2:steel-erp-backups}"
 B2_DAILY_PREFIX="${B2_DAILY_PREFIX:-daily}"
 B2_WEEKLY_PREFIX="${B2_WEEKLY_PREFIX:-weekly}"
+B2_UPLOADS_MIRROR_PREFIX="${B2_UPLOADS_MIRROR_PREFIX:-uploads-mirror}"
+B2_UPLOADS_TRASH_PREFIX="${B2_UPLOADS_TRASH_PREFIX:-uploads-deleted}"
+BACKUP_TRASH_KEEP_DAYS="${BACKUP_TRASH_KEEP_DAYS:-30}"
 SKIP_B2="${SKIP_B2:-0}"
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
@@ -113,6 +131,55 @@ push_to_b2() {
     fail "Off-site verification failed: ${key} not visible at ${B2_REMOTE}/${prefix}/"
   fi
   log "Off-site OK: ${B2_REMOTE}/${prefix}/${key}"
+}
+
+# Differentially mirror the uploads directory to B2. Only new/changed files
+# are transferred; files removed locally are moved to a dated trash prefix
+# (kept BACKUP_TRASH_KEEP_DAYS days) instead of being deleted outright.
+# Honours SKIP_B2=1 the same way push_to_b2 does. A sync failure fails the
+# whole backup — a silently stale mirror is worse than a loud failure.
+sync_uploads_to_b2() {
+  if [ "${SKIP_B2}" = "1" ]; then
+    log "SKIP_B2=1 — not syncing ${UPLOADS_DIR} to ${B2_REMOTE}/${B2_UPLOADS_MIRROR_PREFIX}/"
+    return 0
+  fi
+
+  local trash_dir
+  trash_dir="${B2_REMOTE}/${B2_UPLOADS_TRASH_PREFIX}/$(date +%Y-%m-%d)/"
+
+  # Sync + count verification, with ONE retry on count mismatch: the app may
+  # legitimately write new uploads between the sync pass and the local count
+  # (live server), which is a race, not corruption. A second pass picks those
+  # up. If counts still disagree after the retry, something is actually wrong.
+  local attempt local_count remote_count
+  for attempt in 1 2; do
+    log "Syncing uploads -> ${B2_REMOTE}/${B2_UPLOADS_MIRROR_PREFIX}/ (deletions -> ${trash_dir}) [attempt ${attempt}/2]"
+    if ! rclone sync "${UPLOADS_DIR}" "${B2_REMOTE}/${B2_UPLOADS_MIRROR_PREFIX}/" \
+          --backup-dir "${trash_dir}" \
+          --exclude '*.tmp' --exclude '.DS_Store' \
+          --fast-list --transfers 4 \
+          --log-file="${LOG_FILE}" --log-level NOTICE 2>>"${LOG_FILE}"; then
+      fail "rclone sync failed for ${UPLOADS_DIR} -> ${B2_REMOTE}/${B2_UPLOADS_MIRROR_PREFIX}/"
+    fi
+
+    # Lightweight verification: the mirror must contain exactly as many files
+    # as the local dir (applying the same excludes as the sync above).
+    local_count=$(find "${UPLOADS_DIR}" -type f ! -name '*.tmp' ! -name '.DS_Store' | wc -l)
+    remote_count=$(rclone size "${B2_REMOTE}/${B2_UPLOADS_MIRROR_PREFIX}/" --json 2>>"${LOG_FILE}" \
+                   | grep -oE '"count":[0-9]+' | grep -oE '[0-9]+' || true)
+    if [ -z "${remote_count}" ]; then
+      fail "Could not read mirror file count from rclone size --json"
+    fi
+    if [ "${local_count}" = "${remote_count}" ]; then
+      log "Mirror OK: ${B2_REMOTE}/${B2_UPLOADS_MIRROR_PREFIX}/ (${remote_count} files, matches local)"
+      return 0
+    fi
+    if [ "${attempt}" = "1" ]; then
+      log "WARNING: mirror count mismatch (local=${local_count}, mirror=${remote_count}) — retrying sync once (files may have been uploaded mid-run)"
+    fi
+  done
+
+  fail "Mirror verification failed after retry: local=${local_count} files, mirror=${remote_count} files at ${B2_REMOTE}/${B2_UPLOADS_MIRROR_PREFIX}/"
 }
 
 # ─── Pre-flight ───────────────────────────────────────────────────────────────
@@ -241,7 +308,9 @@ else
   UPL_FILES=$(tar -tzf "${UPLOADS_FILE}" | wc -l)
   log "[2/2] Uploads archive OK: ${UPLOADS_FILE} (${UPL_SIZE_MB} MB, ${UPL_FILES} entries)"
 
-  push_to_b2 "${UPLOADS_FILE}" "${B2_DAILY_PREFIX}"
+  # Off-site: differential mirror instead of pushing the full tarball daily.
+  # The tarball stays local (and goes to weekly/ on Sundays, below).
+  sync_uploads_to_b2
 fi
 
 # ─── Weekly snapshot (Sunday) ─────────────────────────────────────────────────
@@ -291,6 +360,30 @@ if [ "${SKIP_B2}" != "1" ]; then
     --min-age "${WEEKLY_KEEP_DAYS}d" \
     --log-file="${LOG_FILE}" --log-level NOTICE 2>>"${LOG_FILE}" \
     || log "WARNING: rclone delete (weekly) returned non-zero — investigate"
+
+  # Trash prefix holds files that were deleted locally and moved out of the
+  # mirror by `rclone sync --backup-dir` into dated YYYY-MM-DD directories.
+  # Prune by DIRECTORY NAME, not file age: --backup-dir preserves the original
+  # upload mtime, so `rclone delete --min-age` would wipe an old file the same
+  # night it was trashed. The dated dir name is the actual deletion date.
+  log "Pruning mirror trash dirs dated older than ${BACKUP_TRASH_KEEP_DAYS}d at ${B2_REMOTE}/${B2_UPLOADS_TRASH_PREFIX}/"
+  TRASH_CUTOFF=$(date -d "${BACKUP_TRASH_KEEP_DAYS} days ago" +%Y-%m-%d)
+  TRASH_DIRS=$(rclone lsf "${B2_REMOTE}/${B2_UPLOADS_TRASH_PREFIX}/" --dirs-only 2>>"${LOG_FILE}") \
+    || { log "WARNING: rclone lsf (mirror trash) returned non-zero — skipping trash prune"; TRASH_DIRS=""; }
+  while IFS= read -r trash_day; do
+    trash_day="${trash_day%/}"
+    # Only touch YYYY-MM-DD dirs; ISO dates compare correctly as strings.
+    case "${trash_day}" in
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+      *) continue ;;
+    esac
+    if [ "${trash_day}" \< "${TRASH_CUTOFF}" ]; then
+      log "Purging mirror trash ${trash_day}/ (dated before ${TRASH_CUTOFF})"
+      rclone purge "${B2_REMOTE}/${B2_UPLOADS_TRASH_PREFIX}/${trash_day}/" \
+        --log-file="${LOG_FILE}" --log-level NOTICE 2>>"${LOG_FILE}" \
+        || log "WARNING: rclone purge (mirror trash ${trash_day}) returned non-zero — investigate"
+    fi
+  done <<< "${TRASH_DIRS}"
 fi
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
@@ -304,7 +397,7 @@ log "Retained — daily: ${DB_COUNT} db / ${UPL_COUNT} uploads; weekly: ${WEEKLY
 if [ "${SKIP_B2}" = "1" ]; then
   log "Off-site: SKIPPED (SKIP_B2=1)"
 else
-  log "Off-site: pushed to ${B2_REMOTE}/${B2_DAILY_PREFIX}/ and verified"
+  log "Off-site: DB dump pushed to ${B2_REMOTE}/${B2_DAILY_PREFIX}/ and verified; uploads mirrored to ${B2_REMOTE}/${B2_UPLOADS_MIRROR_PREFIX}/ (deletions kept ${BACKUP_TRASH_KEEP_DAYS}d in ${B2_UPLOADS_TRASH_PREFIX}/)"
 fi
 log "=== Backup completed successfully ==="
 
