@@ -24,14 +24,17 @@ set -euo pipefail
 
 APP_DIR="/opt/steel-erp/app"
 STATE_DIR="/opt/steel-erp/state"
-# Single source of truth: scripts/backup-db.sh in this repo. It produces both
-# the DB dump and the uploads tarball, and pushes both off-site to B2.
+# Single source of truth: scripts/backup-db.sh in this repo. It produces the
+# DB dump (pushed off-site to B2 daily/) and the uploads tarball (verified
+# locally; uploads go off-site via a differential rclone mirror at
+# uploads-mirror/ rather than as a daily tarball).
 # We invoke it via `sudo -n` because backup-db.sh internally uses
 # `sudo -u postgres pg_dump`. See DEPLOYMENT.md for the sudoers.d entry.
 BACKUP_SCRIPT="${APP_DIR}/scripts/backup-db.sh"
 LOCAL_BACKUP_DIR="/opt/steel-erp/backups/daily"
 B2_REMOTE="b2:steel-erp-backups"
 B2_DAILY_PREFIX="daily"
+B2_UPLOADS_MIRROR_PREFIX="uploads-mirror"
 LOCK_FILE="/var/lock/steel-erp-deploy.lock"
 LOG_FILE="/var/log/steel-erp-deploy.log"
 CHANGES_FILE="/opt/steel-erp/CHANGES.md"
@@ -190,10 +193,19 @@ run_backup_and_verify() {
       || die "Uploads tarball gzip integrity check failed: $BACKUP_FILE_UPLOADS"
 
     B2_KEY_UPLOADS=$(basename "$BACKUP_FILE_UPLOADS")
-    rclone lsf "${B2_REMOTE}/${B2_DAILY_PREFIX}/" 2>/dev/null | grep -Fxq "$B2_KEY_UPLOADS" \
-      || die "Uploads tarball not found off-site at ${B2_REMOTE}/${B2_DAILY_PREFIX}/${B2_KEY_UPLOADS}"
 
-    log "Uploads archive verified: $BACKUP_FILE_UPLOADS (${upl_size} bytes, off-site OK)"
+    # Uploads go off-site as a differential mirror (backup-db.sh runs
+    # `rclone sync` and fails the whole backup on any sync/count mismatch).
+    # Here we only confirm the mirror prefix is reachable — the strict
+    # local-vs-mirror file-count check already happened inside backup-db.sh.
+    local mirror_count
+    mirror_count=$(rclone size "${B2_REMOTE}/${B2_UPLOADS_MIRROR_PREFIX}/" --json 2>/dev/null \
+                   | jq -r '.count // empty') \
+      || die "Could not query uploads mirror at ${B2_REMOTE}/${B2_UPLOADS_MIRROR_PREFIX}/"
+    [ -n "$mirror_count" ] \
+      || die "Uploads mirror unreadable at ${B2_REMOTE}/${B2_UPLOADS_MIRROR_PREFIX}/"
+
+    log "Uploads archive verified: $BACKUP_FILE_UPLOADS (${upl_size} bytes local); mirror OK (${mirror_count} files at ${B2_REMOTE}/${B2_UPLOADS_MIRROR_PREFIX}/)"
   else
     # backup-db.sh logs a WARNING when uploads dir doesn't exist; mirror it
     # here so the deploy log itself records the absence (no silent gap).

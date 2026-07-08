@@ -820,10 +820,11 @@ rclone ls b2:steel-erp-backups   # لازم ما يعطي خطأ (فاضي طب�
 شو يعمل بالضبط:
 
 1. `pg_dump --format=custom` → gzip → `/opt/steel-erp/backups/daily/db_<DB>_<TS>.dump.gz` ثم `gunzip -t` للتحقق.
-2. `tar -czf /opt/steel-erp/backups/daily/uploads_<TS>.tar.gz` لمجلد الرفع، ثم `gzip -t` و `tar -tzf`.
-3. **`rclone copy`** للملفين إلى `b2:steel-erp-backups/daily/` ثم **`rclone lsf` للتأكد** أن كل ملف ظهر فعلاً (هذه هي النقطة الرابعة من تحقق `production-safety.mdc` §7).
-4. أيام الأحد: نسخة موازية تحت `weekly/` محلياً وعلى B2.
-5. تنظيم الاحتفاظ محلياً + على B2 حسب `BACKUP_KEEP_DAYS` (افتراضي 7) و `BACKUP_KEEP_WEEKLY` (افتراضي 4 أسابيع).
+2. `tar -czf /opt/steel-erp/backups/daily/uploads_<TS>.tar.gz` لمجلد الرفع، ثم `gzip -t` و `tar -tzf` — **الأرشيف الكامل يبقى محلياً فقط** (خط دفاع محلي + مصدر النسخة الأسبوعية).
+3. **`rclone copy`** لملف الـ DB dump إلى `b2:steel-erp-backups/daily/` ثم **`rclone lsf` للتأكد** أنه ظهر فعلاً (هذه هي النقطة الرابعة من تحقق `production-safety.mdc` §7).
+4. **مزامنة تفاضلية للـ uploads**: `rclone sync` إلى `b2:steel-erp-backups/uploads-mirror/` — يرفع الملفات الجديدة/المتغيرة فقط (بدل رفع ~500MB tar كامل كل ليلة). الملفات المحذوفة محلياً تُنقل إلى `uploads-deleted/YYYY-MM-DD/` وتُحفظ `BACKUP_TRASH_KEEP_DAYS` يوماً (افتراضي 30) قبل تنظيفها. بعد المزامنة يقارن السكربت عدد الملفات المحلية مع المرآة — أي فرق = فشل النسخة كلها.
+5. أيام الأحد: نسخة موازية تحت `weekly/` محلياً وعلى B2 (DB dump + أرشيف uploads الكامل — بدون تغيير).
+6. تنظيم الاحتفاظ محلياً + على B2 حسب `BACKUP_KEEP_DAYS` (افتراضي 7) و `BACKUP_KEEP_WEEKLY` (افتراضي 4 أسابيع)، وتنظيف `uploads-deleted/` الأقدم من `BACKUP_TRASH_KEEP_DAYS`.
 
 **ما تنشئ سكربت `backup.sh` يدوي.** هذا الملف الواحد كافٍ.
 
@@ -846,6 +847,11 @@ export BACKUP_UPLOADS_DIR="/opt/steel-erp/app/uploads"
 export B2_REMOTE="b2:steel-erp-backups"
 export BACKUP_KEEP_DAYS=7
 export BACKUP_KEEP_WEEKLY=4
+
+# Uploads differential mirror (defaults shown — override only if needed)
+# export B2_UPLOADS_MIRROR_PREFIX="uploads-mirror"
+# export B2_UPLOADS_TRASH_PREFIX="uploads-deleted"
+# export BACKUP_TRASH_KEEP_DAYS=30
 
 # If rclone config sits at a non-default path, point to it:
 # export RCLONE_CONFIG="/root/.config/rclone/rclone.conf"
@@ -891,10 +897,11 @@ sudo -n -l /opt/steel-erp/app/scripts/backup-db.sh
 sudo /opt/steel-erp/app/scripts/backup-db.sh
 # لازم ينتهي بـ "=== Backup completed successfully ==="
 # ولازم يطبع "Off-site OK: b2:steel-erp-backups/daily/db_…dump.gz"
-# و"Off-site OK: b2:steel-erp-backups/daily/uploads_…tar.gz"
+# و"Mirror OK: b2:steel-erp-backups/uploads-mirror/ (N files, matches local)"
 
 ls -lh /opt/steel-erp/backups/daily/ | tail
 rclone lsf b2:steel-erp-backups/daily/ | tail
+rclone size b2:steel-erp-backups/uploads-mirror/
 ```
 
 #### 8. جدولة cron (يومياً 02:00)
@@ -1000,7 +1007,7 @@ tail -100 /var/log/steel-erp-backup.log   # آخر backups نجحت
 - يأخذ قفل `flock` لمنع التداخل.
 - يفرض نافذة الصيانة 07:00–18:00 Asia/Damascus (`FORCE=1` للطوارئ فقط).
 - ينفّذ pre-flight (شجرة git نظيفة، فرع `main`، قرص ≥ 2 GB، RAM ≥ 300 MB، PM2 online، وجود sudoers).
-- يستدعي **`backup-db.sh` عبر `sudo -n`** ويتحقق من الملفين (DB + uploads) محلياً وعلى B2.
+- يستدعي **`backup-db.sh` عبر `sudo -n`** ويتحقق من DB dump محلياً وعلى B2 (`daily/`)، ومن أرشيف uploads محلياً + من وصول مرآة `uploads-mirror/` على B2.
 - يحفظ snapshot الحالة في `/opt/steel-erp/state/last-pre-deploy.env` مع `PREV_SHA` و`BACKUP_FILE_DB` و`B2_KEY_DB` و`BACKUP_FILE_UPLOADS` و`B2_KEY_UPLOADS`.
 - يعمل `git pull --ff-only`، Prisma migrations (إن وُجدت)، build، `pm2 reload`، ثم health check على `/api/health`.
 - عند الفشل: يعمل `git reset --hard PREV_SHA` تلقائياً ويذكر الأمر اليدوي لاستعادة DB + uploads.
