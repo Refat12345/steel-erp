@@ -1,3 +1,5 @@
+// SECURITY NOTE: xlsx@0.18.5 has known CVEs (prototype pollution, ReDoS) in its *read/parse* path only.
+// We use it strictly for export (write). Do NOT add XLSX.read() of external files anywhere before replacing this library.
 import * as XLSX from "xlsx";
 import { formatDateTime } from "@/lib/date-format";
 import { BRAND } from "@/lib/brand";
