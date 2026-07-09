@@ -46,8 +46,11 @@ import {
   Pencil,
   Trash2,
   AlertTriangle,
+  StickyNote,
 } from "lucide-react";
 import Link from "next/link";
+import { TruckNotesDialog } from "@/components/trucks/truck-notes-dialog";
+import { canShowTruckNotesButton } from "@/lib/truck-edit-ui";
 import { buildFileViewUrl } from "@/lib/uploaded-file-url";
 import { aggregateWeighSessionsBySize } from "@/lib/weigh-session-aggregate";
 import { buildRequestVsLoadedComparison } from "@/lib/loading-complete-comparison";
@@ -194,6 +197,7 @@ export function ScaleOperationView({
   const [showSessionDialog, setShowSessionDialog] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [showLoadingCompleteDialog, setShowLoadingCompleteDialog] = useState(false);
+  const [showNotesDialog, setShowNotesDialog] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
   const canTare = sessionHasPermission(session, "scale.enter_tare");
@@ -210,6 +214,7 @@ export function ScaleOperationView({
   const canClose = sessionHasPermission(session, "scale.close");
   const canCancel = sessionHasPermission(session, "scale.cancel");
   const canCorrectCompleted = sessionHasPermission(session, "scale.correct_completed");
+  const canEditApproved = sessionHasPermission(session, "truck.edit_approved");
 
   const fetchTruck = useCallback(async () => {
     try {
@@ -404,6 +409,24 @@ export function ScaleOperationView({
           value={gross != null ? `${gross.toLocaleString("en-US")} كغ` : "—"}
         />
       </div>
+
+      {/* Operational note — surfaced prominently near the top, not buried in
+          the footer metadata, so operators see it while working the bridge. */}
+      {truck.notes && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-950/30">
+          <div className="flex items-start gap-2">
+            <StickyNote className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+                ملاحظة
+              </p>
+              <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-amber-900 dark:text-amber-100">
+                {truck.notes}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {bridgeNetKg != null && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -610,6 +633,16 @@ export function ScaleOperationView({
                 إغلاق العملية
               </Button>
             )}
+            {canShowTruckNotesButton(truck.status, canEditApproved) && (
+              <Button
+                variant="outline"
+                onClick={() => setShowNotesDialog(true)}
+                disabled={actionLoading}
+              >
+                <StickyNote className="h-4 w-4 me-1" />
+                {truck.notes ? "تعديل ملاحظة" : "إضافة ملاحظة"}
+              </Button>
+            )}
             {canCancel && (
               <Button
                 variant="destructive"
@@ -814,11 +847,16 @@ export function ScaleOperationView({
               {truck.status === "Cancelled" ? "ألغى" : "أغلق"} بواسطة: {truck.closer.fullName} — {formatDateTime(truck.closedAt)}
             </div>
           )}
-          {truck.notes && <div>ملاحظات: {truck.notes}</div>}
         </CardContent>
       </Card>
 
       {/* Dialogs */}
+      <TruckNotesDialog
+        truckId={showNotesDialog ? truck.id : null}
+        open={showNotesDialog}
+        onOpenChange={setShowNotesDialog}
+        onSuccess={fetchTruck}
+      />
       <WeightDialog
         open={showTareDialog}
         onOpenChange={setShowTareDialog}

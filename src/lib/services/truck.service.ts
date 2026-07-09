@@ -557,6 +557,81 @@ export async function updateTruckBeforeWeigh(
   );
 }
 
+// ─── Update Notes (mid-weighing) ───────────────────────────────────
+//
+// Once a truck is on the bridge the registration and order data is frozen,
+// but operators still need to record operational notes (e.g. why a weighing
+// was retried, a plate discrepancy, …). In these statuses `notes` is the ONLY
+// mutable field — every other field stays locked exactly as before. Callers
+// (the API layer) must reject any non-notes field before reaching here.
+const NOTES_EDITABLE_STATUSES: TruckStatus[] = ["OnScale", "LoadingComplete", "SecondWeigh"];
+
+export async function updateTruckNotes(
+  truckId: number,
+  notes: string | null,
+  expectedVersion: number,
+  userId: number,
+) {
+  return withRetry(() =>
+    prisma.$transaction(
+      async (tx: TxClient) => {
+        const locked = await tx.$queryRaw<{ id: number }[]>`
+          SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
+        `;
+        if (locked.length === 0) {
+          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        }
+
+        const truck = await tx.truckOperation.findUnique({
+          where: { id: truckId },
+          select: { id: true, version: true, status: true, notes: true },
+        });
+        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+
+        if (truck.version !== expectedVersion) {
+          throw new ServiceError(
+            "تم تعديل السجل من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
+            "CONFLICT",
+          );
+        }
+
+        if (!NOTES_EDITABLE_STATUSES.includes(truck.status)) {
+          throw new ServiceError("لا يمكن تعديل الملاحظات في الحالة الحالية");
+        }
+
+        const nextNotes = notes?.trim() || null;
+
+        const updated = await tx.truckOperation.update({
+          where: { id: truckId },
+          data: { notes: nextNotes, version: { increment: 1 } },
+        });
+
+        await logAudit(tx, {
+          userId,
+          action: "update",
+          entityType: "TruckOperation",
+          entityId: String(truckId),
+          details: {
+            event: "truck_notes_updated",
+            previousValue: { status: truck.status, notes: truck.notes },
+            newValue: { status: updated.status, notes: updated.notes },
+          } as unknown as Prisma.InputJsonValue,
+        });
+
+        logger.info({ truckId, status: truck.status }, "truck notes updated");
+
+        const reloaded = await tx.truckOperation.findUnique({
+          where: { id: truckId },
+          include: DETAIL_INCLUDE,
+        });
+        if (!reloaded) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        return reloaded;
+      },
+      { isolationLevel: "Serializable" },
+    ),
+  );
+}
+
 // ─── Enter Tare ────────────────────────────────────────────────────
 
 export async function enterTare(truckId: number, weightKg: number, userId: number) {
