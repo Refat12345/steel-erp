@@ -79,6 +79,7 @@ vi.mock("./tx-retry", () => ({
 import {
   registerTruck,
   updateTruckBeforeWeigh,
+  updateTruckNotes,
   listOperations,
   enterTare,
   correctTare,
@@ -407,6 +408,88 @@ describe("updateTruckBeforeWeigh", () => {
         7,
       ),
     ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Update Notes (mid-weighing) ───────────────────────────────
+
+describe("updateTruckNotes", () => {
+  const onScaleTruck = {
+    id: 1,
+    status: "OnScale",
+    version: 3,
+    notes: "قديمة",
+  };
+
+  it.each(["OnScale", "LoadingComplete", "SecondWeigh"] as const)(
+    "updates notes and writes an audit log for %s",
+    async (status) => {
+      const truck = { ...onScaleTruck, status };
+      mockPrisma.truckOperation.findUnique
+        .mockResolvedValueOnce({ ...truck })
+        .mockResolvedValueOnce({ ...truck, version: 4, notes: "جديدة" });
+      mockPrisma.truckOperation.update.mockResolvedValue({
+        ...truck,
+        version: 4,
+        notes: "جديدة",
+      });
+
+      const result = await updateTruckNotes(1, "  جديدة  ", 3, 7);
+
+      expect(result?.notes).toBe("جديدة");
+      expect(mockPrisma.truckOperation.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 1 },
+          data: { notes: "جديدة", version: { increment: 1 } },
+        }),
+      );
+      expect(mockPrisma.auditLog.create.mock.calls[0][0].data.details.event).toBe(
+        "truck_notes_updated",
+      );
+    },
+  );
+
+  it("clears notes when passed null", async () => {
+    mockPrisma.truckOperation.findUnique
+      .mockResolvedValueOnce({ ...onScaleTruck })
+      .mockResolvedValueOnce({ ...onScaleTruck, version: 4, notes: null });
+    mockPrisma.truckOperation.update.mockResolvedValue({
+      ...onScaleTruck,
+      version: 4,
+      notes: null,
+    });
+
+    await updateTruckNotes(1, null, 3, 7);
+
+    expect(mockPrisma.truckOperation.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { notes: null, version: { increment: 1 } },
+      }),
+    );
+  });
+
+  it("rejects when the status is not a mid-weighing status", async () => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValueOnce({
+      ...onScaleTruck,
+      status: "Completed",
+    });
+
+    await expect(updateTruckNotes(1, "x", 3, 7)).rejects.toThrow(
+      /لا يمكن تعديل الملاحظات/,
+    );
+    expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects on a version mismatch", async () => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValueOnce({
+      ...onScaleTruck,
+      version: 5,
+    });
+
+    await expect(updateTruckNotes(1, "x", 3, 7)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
     expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
   });
 });

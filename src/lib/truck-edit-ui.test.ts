@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   canShowTruckEditButton,
+  canShowTruckNotesButton,
   effectiveOperationalGrade,
   notesForPatch,
   operationalGradeIfChanged,
@@ -83,5 +84,26 @@ describe("canShowTruckEditButton", () => {
   it("hides for OnScale and other statuses", () => {
     expect(canShowTruckEditButton("OnScale", 0, false, true)).toBe(false);
     expect(canShowTruckEditButton("Completed", 0, true, true)).toBe(false);
+  });
+});
+
+describe("canShowTruckNotesButton", () => {
+  it("shows for mid-weighing statuses with edit_approved permission", () => {
+    expect(canShowTruckNotesButton("OnScale", true)).toBe(true);
+    expect(canShowTruckNotesButton("LoadingComplete", true)).toBe(true);
+    expect(canShowTruckNotesButton("SecondWeigh", true)).toBe(true);
+  });
+
+  it("hides without edit_approved permission", () => {
+    expect(canShowTruckNotesButton("OnScale", false)).toBe(false);
+    expect(canShowTruckNotesButton("LoadingComplete", false)).toBe(false);
+  });
+
+  it("hides for statuses outside the mid-weighing window", () => {
+    expect(canShowTruckNotesButton("Queued", true)).toBe(false);
+    expect(canShowTruckNotesButton("Approved", true)).toBe(false);
+    expect(canShowTruckNotesButton("FirstWeigh", true)).toBe(false);
+    expect(canShowTruckNotesButton("Completed", true)).toBe(false);
+    expect(canShowTruckNotesButton("Cancelled", true)).toBe(false);
   });
 });

@@ -13,9 +13,11 @@ import { truckUpdateSchema } from "@/lib/validators/truck";
 import {
   getOperationDetail,
   updateTruckBeforeWeigh,
+  updateTruckNotes,
   type UpdateTruckInput,
 } from "@/lib/services/truck.service";
 import { computeTruckTimings } from "@/lib/truck-timing";
+import { NOTES_ONLY_EDITABLE_STATUSES } from "@/lib/truck-edit-ui";
 
 export async function GET(
   _req: NextRequest,
@@ -79,6 +81,38 @@ export async function PATCH(
 
     try {
       const current = await getOperationDetail(truckId);
+      const { expectedVersion, ...patch } = validated.data;
+
+      // Mid-weighing (OnScale/LoadingComplete/SecondWeigh): notes-only edits,
+      // gated by the same permission as approved-truck edits. Any other field
+      // in the payload is rejected — registration/order data is frozen here.
+      if (
+        (NOTES_ONLY_EDITABLE_STATUSES as readonly string[]).includes(current.status)
+      ) {
+        if (!hasPermission(session, "truck.edit_approved")) {
+          return forbidden();
+        }
+        const NON_NOTES_FIELDS = [
+          "customerId",
+          "destinationId",
+          "plateNumber",
+          "driverName",
+          "salesOrderNumber",
+          "requestItems",
+          "operationalGrade",
+        ] as const;
+        if (NON_NOTES_FIELDS.some((field) => patch[field] !== undefined)) {
+          return badRequest("في هذه الحالة يمكن تعديل الملاحظات فقط");
+        }
+        const truck = await updateTruckNotes(
+          truckId,
+          patch.notes ?? null,
+          expectedVersion,
+          session.userId,
+        );
+        return ok(truck);
+      }
+
       if (current.status === "Queued" && !hasPermission(session, "truck.edit_queued")) {
         return forbidden();
       }
@@ -89,7 +123,6 @@ export async function PATCH(
         return forbidden();
       }
 
-      const { expectedVersion, ...patch } = validated.data;
       const updateInput: UpdateTruckInput = { ...patch };
       // Only normalize fields the client actually sent. Injecting `null` for omitted
       // keys would look like an attempted SO/notes change and trip FirstWeigh guards.
