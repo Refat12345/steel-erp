@@ -618,8 +618,6 @@ function CustomerWithdrawalsPrintable({
   report: CustomerWithdrawalsReport;
 }) {
   const printRef = useRef<HTMLDivElement>(null);
-  const showAllSizes = report.filters.sizeId == null;
-  const showAllCustomers = report.filters.customerId == null;
 
   const resetPrintFit = useCallback(() => {
     const el = printRef.current;
@@ -684,73 +682,30 @@ function CustomerWithdrawalsPrintable({
           : "All sizes"}
       </p>
 
-      {showAllSizes && report.sizeTotals.length > 0 ? (
-        <>
-          <h2 className="section-title">1. Totals by size</h2>
-          <table className="narrow-table">
-            <thead>
-              <tr>
-                <th>Size</th>
-                <th className="num">Bundles</th>
-                <th className="num">Weight (t)</th>
-                <th className="num">Trucks</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.sizeTotals.map((s) => (
-                <tr key={s.sizeId ?? "none"}>
-                  <td>{toEnglishSize(s.displayName, s.code)}</td>
-                  <td className="num">{formatBundles(s.totalBundles)}</td>
-                  <td className="num">{formatTons(s.totalTons)}</td>
-                  <td className="num">{s.truckCount}</td>
-                </tr>
-              ))}
-              <tr className="total-row">
-                <td>Total</td>
-                <td className="num">{formatBundles(report.totals.totalBundles)}</td>
-                <td className="num">{formatTons(report.totals.totalTons)}</td>
-                <td className="num">{report.totals.truckCount}</td>
-              </tr>
-            </tbody>
-          </table>
-        </>
-      ) : null}
-
-      <h2 className="section-title">
-        {showAllSizes && report.sizeTotals.length > 0 ? "2. Trucks" : "Trucks"}
-      </h2>
-      <table className="wide-table">
+      <h2 className="section-title">Totals by size</h2>
+      <table className="narrow-table">
         <thead>
           <tr>
-            <th style={{ width: "4%" }}>#</th>
-            <th>Completed at</th>
-            <th>Plate</th>
-            <th>Driver</th>
-            {showAllCustomers ? <th>Customer</th> : null}
-            <th>Destination</th>
-            <th>Sales order</th>
+            <th>Size</th>
             <th className="num">Bundles</th>
             <th className="num">Weight (t)</th>
+            <th className="num">Trucks</th>
           </tr>
         </thead>
         <tbody>
-          {report.rows.map((row, index) => (
-            <tr key={row.id}>
-              <td>{index + 1}</td>
-              <td>{formatDateTime(row.closedAt)}</td>
-              <td>{row.plateNumber}</td>
-              <td>{row.driverName}</td>
-              {showAllCustomers ? <td>{row.customerName ?? "-"}</td> : null}
-              <td>{toEnglishCity(row.destinationName)}</td>
-              <td>{row.salesOrderNumber ?? "-"}</td>
-              <td className="num">{formatBundles(row.bundleCount)}</td>
-              <td className="num">{formatTons(row.weightTons)}</td>
+          {report.sizeTotals.map((s) => (
+            <tr key={s.sizeId ?? "none"}>
+              <td>{toEnglishSize(s.displayName, s.code)}</td>
+              <td className="num">{formatBundles(s.totalBundles)}</td>
+              <td className="num">{formatTons(s.totalTons)}</td>
+              <td className="num">{s.truckCount}</td>
             </tr>
           ))}
           <tr className="total-row">
-            <td colSpan={showAllCustomers ? 7 : 6}>Total</td>
+            <td>Total</td>
             <td className="num">{formatBundles(report.totals.totalBundles)}</td>
             <td className="num">{formatTons(report.totals.totalTons)}</td>
+            <td className="num">{report.totals.truckCount}</td>
           </tr>
         </tbody>
       </table>
