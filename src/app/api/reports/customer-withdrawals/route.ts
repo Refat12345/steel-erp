@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
   const parsed = customerWithdrawalsQuerySchema.safeParse({
     from: req.nextUrl.searchParams.get("from"),
     to: req.nextUrl.searchParams.get("to"),
-    customerId: req.nextUrl.searchParams.get("customerId"),
+    customerId: req.nextUrl.searchParams.get("customerId") ?? undefined,
     sizeId: req.nextUrl.searchParams.get("sizeId") ?? undefined,
   });
 
