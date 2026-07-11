@@ -117,6 +117,56 @@ export function getReportPeriodWindow(
   return getOperationalDayWindow(dateStr, cutoffHour);
 }
 
+/** Maximum span for arbitrary date-range reports (inclusive days). */
+export const REPORT_RANGE_MAX_DAYS = 366;
+
+/**
+ * Operational window for an arbitrary date range [fromDate, toDate]
+ * (both inclusive calendar dates), aligned to the cutoff hour:
+ * [fromDate cutoff, toDate+1 cutoff).
+ *
+ * Throws `INVALID_OPERATIONAL_DATE` on malformed dates,
+ * `INVALID_RANGE_ORDER` when from > to, and `RANGE_TOO_LARGE` when the
+ * span exceeds `REPORT_RANGE_MAX_DAYS`.
+ */
+export function getReportRangeWindow(
+  fromStr: string,
+  toStr: string,
+  cutoffHour: number = OPERATIONAL_DAY_CUTOFF_HOUR,
+): OperationalDayWindow {
+  const fromParts = parseOperationalDateInput(fromStr);
+  const toParts = parseOperationalDateInput(toStr);
+
+  const from = new Date(
+    fromParts.year,
+    fromParts.month - 1,
+    fromParts.day,
+    cutoffHour,
+    0,
+    0,
+    0,
+  );
+  const to = new Date(
+    toParts.year,
+    toParts.month - 1,
+    toParts.day + 1,
+    cutoffHour,
+    0,
+    0,
+    0,
+  );
+
+  if (to <= from) {
+    throw new Error("INVALID_RANGE_ORDER");
+  }
+  const spanDays = (to.getTime() - from.getTime()) / (24 * 60 * 60 * 1000);
+  if (spanDays > REPORT_RANGE_MAX_DAYS) {
+    throw new Error("RANGE_TOO_LARGE");
+  }
+
+  return { operationalDate: fromStr, from, to };
+}
+
 /** Local `YYYY-MM-DD` of a Date (used to label report period ranges). */
 export function formatLocalDateInput(date: Date): string {
   const y = date.getFullYear();

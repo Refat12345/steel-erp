@@ -19,6 +19,7 @@ import {
   formatOperationalWindowLabel,
   getOperationalDayWindow,
   getReportPeriodWindow,
+  getReportRangeWindow,
   resolveReportTonnageStatus,
   type ReportPeriod,
   type ReportTonnageStatus,
@@ -839,5 +840,246 @@ export async function getDailyLoadingSummary(
     sizeColumns,
     byCitySize,
     citySizeColumnTotals,
+  };
+}
+
+// ─── Customer Withdrawals by Size ─────────────────────────────────────
+// "How much did customer X withdraw of size Y between date A and date B,
+// in bundles and net weight?" Anchored on `closedAt` (dispatch completion)
+// — only Completed trucks count. Quantities come from internal weigh
+// sessions (`WeighSession.bundleCount` / `weightTons`), the same per-size
+// source used by the daily trucks report.
+
+export interface CustomerWithdrawalsReportParams {
+  fromDate: string;
+  toDate: string;
+  customerId: number;
+  /** Omitted = all sizes. */
+  sizeId?: number;
+}
+
+export interface CustomerWithdrawalTruckRow {
+  id: number;
+  closedAt: string;
+  plateNumber: string;
+  driverName: string;
+  salesOrderNumber: string | null;
+  destinationName: string | null;
+  /** Null when at least one matching session is missing a bundle count. */
+  bundleCount: number | null;
+  weightTons: number;
+}
+
+export interface CustomerWithdrawalSizeTotal {
+  sizeId: number | null;
+  code: string | null;
+  displayName: string;
+  totalBundles: number | null;
+  totalTons: number;
+  truckCount: number;
+}
+
+export interface CustomerWithdrawalsReport {
+  fromDate: string;
+  toDate: string;
+  windowFrom: string;
+  windowTo: string;
+  generatedAt: string;
+  filters: {
+    customerId: number;
+    customerName: string;
+    sizeId?: number;
+    sizeDisplayName?: string;
+  };
+  totals: {
+    truckCount: number;
+    /** Null when any counted session is missing a bundle count. */
+    totalBundles: number | null;
+    totalTons: number;
+  };
+  sizeTotals: CustomerWithdrawalSizeTotal[];
+  rows: CustomerWithdrawalTruckRow[];
+}
+
+export async function getCustomerWithdrawalsReport(
+  params: CustomerWithdrawalsReportParams,
+): Promise<CustomerWithdrawalsReport> {
+  let window;
+  try {
+    window = getReportRangeWindow(params.fromDate, params.toDate);
+  } catch (err) {
+    const code = err instanceof Error ? err.message : "";
+    if (code === "INVALID_RANGE_ORDER") {
+      throw new ServiceError("From date must be on or before To date", "BAD_REQUEST");
+    }
+    if (code === "RANGE_TOO_LARGE") {
+      throw new ServiceError("Date range cannot exceed one year", "BAD_REQUEST");
+    }
+    throw new ServiceError("Invalid date", "BAD_REQUEST");
+  }
+
+  const customer = await prisma.customer.findUnique({
+    where: { id: params.customerId },
+    select: { id: true, fullName: true },
+  });
+  if (!customer) {
+    throw new ServiceError("Customer not found", "NOT_FOUND");
+  }
+
+  let sizeFilterMeta: { sizeId?: number; sizeDisplayName?: string } = {};
+  if (params.sizeId != null) {
+    const size = await prisma.sizeLookup.findUnique({
+      where: { id: params.sizeId },
+      select: { id: true, displayName: true },
+    });
+    if (!size) {
+      throw new ServiceError("Size not found", "NOT_FOUND");
+    }
+    sizeFilterMeta = { sizeId: size.id, sizeDisplayName: size.displayName };
+  }
+
+  const trucks = await prisma.truckOperation.findMany({
+    where: {
+      customerId: params.customerId,
+      status: "Completed",
+      closedAt: { gte: window.from, lt: window.to },
+      ...(params.sizeId != null
+        ? { sessions: { some: { sizeId: params.sizeId } } }
+        : {}),
+    },
+    orderBy: { closedAt: "asc" },
+    select: {
+      id: true,
+      plateNumber: true,
+      driverName: true,
+      salesOrderNumber: true,
+      closedAt: true,
+      destination: { select: { name: true } },
+      sessions: {
+        ...(params.sizeId != null ? { where: { sizeId: params.sizeId } } : {}),
+        select: {
+          sizeId: true,
+          bundleCount: true,
+          weightTons: true,
+          size: { select: { code: true, displayName: true, sortOrder: true } },
+        },
+      },
+    },
+  });
+
+  type SizeAcc = {
+    sizeId: number | null;
+    code: string | null;
+    displayName: string;
+    sortOrder: number;
+    totalBundles: number;
+    anyMissingBundle: boolean;
+    totalTons: number;
+    truckIds: Set<number>;
+  };
+  const sizeMap = new Map<string, SizeAcc>();
+
+  let totalTons = 0;
+  let totalBundles = 0;
+  let anyMissingBundle = false;
+
+  const rows: CustomerWithdrawalTruckRow[] = [];
+
+  for (const truck of trucks) {
+    let truckTons = 0;
+    let truckBundles = 0;
+    let truckMissingBundle = false;
+    let hasSession = false;
+
+    for (const session of truck.sessions) {
+      const weightTons = Number(session.weightTons);
+      if (!Number.isFinite(weightTons)) continue;
+      hasSession = true;
+
+      truckTons += weightTons;
+      if (session.bundleCount == null) {
+        truckMissingBundle = true;
+      } else {
+        truckBundles += session.bundleCount;
+      }
+
+      const key = session.sizeId != null ? `id:${session.sizeId}` : "none";
+      let acc = sizeMap.get(key);
+      if (!acc) {
+        acc = {
+          sizeId: session.sizeId,
+          code: session.size?.code ?? null,
+          displayName: session.size?.displayName ?? "No size",
+          sortOrder: session.size?.sortOrder ?? Number.MAX_SAFE_INTEGER,
+          totalBundles: 0,
+          anyMissingBundle: false,
+          totalTons: 0,
+          truckIds: new Set<number>(),
+        };
+        sizeMap.set(key, acc);
+      }
+      acc.totalTons += weightTons;
+      acc.truckIds.add(truck.id);
+      if (session.bundleCount == null) {
+        acc.anyMissingBundle = true;
+      } else {
+        acc.totalBundles += session.bundleCount;
+      }
+    }
+
+    if (!hasSession) continue;
+
+    totalTons += truckTons;
+    if (truckMissingBundle) {
+      anyMissingBundle = true;
+    } else {
+      totalBundles += truckBundles;
+    }
+
+    rows.push({
+      id: truck.id,
+      // `closedAt` is non-null here — the query requires it in range.
+      closedAt: truck.closedAt!.toISOString(),
+      plateNumber: truck.plateNumber,
+      driverName: truck.driverName,
+      salesOrderNumber: truck.salesOrderNumber,
+      destinationName: truck.destination?.name ?? null,
+      bundleCount: truckMissingBundle ? null : truckBundles,
+      weightTons: round3(truckTons),
+    });
+  }
+
+  const sizeTotals: CustomerWithdrawalSizeTotal[] = Array.from(sizeMap.values())
+    .sort(
+      (a, b) =>
+        a.sortOrder - b.sortOrder || a.displayName.localeCompare(b.displayName),
+    )
+    .map((acc) => ({
+      sizeId: acc.sizeId,
+      code: acc.code,
+      displayName: acc.displayName,
+      totalBundles: acc.anyMissingBundle ? null : acc.totalBundles,
+      totalTons: round3(acc.totalTons),
+      truckCount: acc.truckIds.size,
+    }));
+
+  return {
+    fromDate: params.fromDate,
+    toDate: params.toDate,
+    windowFrom: window.from.toISOString(),
+    windowTo: window.to.toISOString(),
+    generatedAt: new Date().toISOString(),
+    filters: {
+      customerId: customer.id,
+      customerName: customer.fullName,
+      ...sizeFilterMeta,
+    },
+    totals: {
+      truckCount: rows.length,
+      totalBundles: anyMissingBundle ? null : totalBundles,
+      totalTons: round3(totalTons),
+    },
+    sizeTotals,
+    rows,
   };
 }

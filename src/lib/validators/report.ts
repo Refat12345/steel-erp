@@ -51,6 +51,24 @@ export const loadingSummaryQuerySchema = baseReportQuerySchema
 
 export type LoadingSummaryQuery = z.infer<typeof loadingSummaryQuerySchema>;
 
+const dateInputSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format (YYYY-MM-DD)");
+
+export const customerWithdrawalsQuerySchema = z.object({
+  from: dateInputSchema,
+  to: dateInputSchema,
+  customerId: z.coerce.number().int().positive(),
+  sizeId: z.preprocess(
+    (v) => (v === "" || v === null || v === undefined ? undefined : v),
+    z.coerce.number().int().positive().optional(),
+  ),
+});
+
+export type CustomerWithdrawalsQuery = z.infer<
+  typeof customerWithdrawalsQuerySchema
+>;
+
 export const billetBalanceQuerySchema = z.object({
   supplierName: z.string().trim().min(1, "Supplier is required"),
   contractNumber: z
