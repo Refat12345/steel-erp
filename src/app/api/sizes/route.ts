@@ -13,7 +13,9 @@ export async function GET() {
   if (!session) return unauthorized();
   if (
     !hasPermission(session, "salesorder.view") &&
-    !hasPermission(session, "scale.enter_session")
+    !hasPermission(session, "scale.enter_session") &&
+    // Report viewers need the size list for the size filter dropdown.
+    !hasPermission(session, "report.daily_trucks")
   )
     return forbidden();
 
