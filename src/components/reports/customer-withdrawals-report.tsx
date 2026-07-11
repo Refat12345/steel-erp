@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { toast } from "sonner";
@@ -15,6 +16,11 @@ import {
 import { sessionHasPermission } from "@/lib/client-permissions";
 import { formatDateTime } from "@/lib/date-format";
 import { toEnglishCity, toEnglishSize } from "@/lib/en-labels";
+import { BRAND } from "@/lib/brand";
+import {
+  computeA4LandscapePrintFitScale,
+  SCALE_CARD_PRINT_HEIGHT_FUDGE,
+} from "@/lib/scale-card-print-fit";
 import type { CustomerWithdrawalsReport } from "@/lib/services/report.service";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -490,6 +496,228 @@ export function CustomerWithdrawalsReportView() {
           Select the filters and date range, then press &quot;Show report&quot;
         </p>
       )}
+
+      {report ? <CustomerWithdrawalsPrintable report={report} /> : null}
     </div>
+  );
+}
+
+/* Base typography is written OUTSIDE @media print so it also applies while the
+   printable is measured off-screen — measurement must match the real print
+   layout for the scale-to-fit math to be accurate. */
+const PRINT_STYLE = `
+#customer-withdrawals-print {
+  color: #000;
+  font-family: Calibri, Arial, sans-serif;
+  font-size: 10px;
+  line-height: 1.2;
+  background: #fff;
+  transform-origin: top left;
+}
+#customer-withdrawals-print .print-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 2px;
+}
+#customer-withdrawals-print .section-title {
+  color: #2b3f55;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 12px 0 7px 6px;
+}
+#customer-withdrawals-print table {
+  border: 1px solid #c7d1df;
+  border-collapse: collapse;
+  margin-bottom: 11px;
+  table-layout: fixed;
+}
+#customer-withdrawals-print .narrow-table {
+  width: 58%;
+  margin-left: auto;
+  margin-right: auto;
+}
+#customer-withdrawals-print .wide-table {
+  width: 100%;
+}
+#customer-withdrawals-print th, #customer-withdrawals-print td {
+  border: 1px solid #c7d1df;
+  padding: 4px 7px;
+  text-align: left;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+#customer-withdrawals-print th {
+  background: #1f3864;
+  color: #fff;
+  font-weight: 700;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+#customer-withdrawals-print tbody tr:nth-child(even):not(.total-row) td {
+  background: #f1f4fa;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+#customer-withdrawals-print .total-row td {
+  background: #dbe5f3;
+  font-weight: 700;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+#customer-withdrawals-print thead { display: table-header-group; }
+#customer-withdrawals-print tr { break-inside: avoid; }
+#customer-withdrawals-print .num { text-align: right; font-variant-numeric: tabular-nums; }
+#customer-withdrawals-print .headline { font-size: 10px; color: #222; margin: 0 0 4px; }
+#customer-withdrawals-print .pagefoot { text-align: center; font-size: 10px; color: #555; margin-top: 14px; }
+
+@media screen {
+  /* Hidden on screen, except briefly while measuring: rendered off-canvas at
+     the exact landscape printable width so its height matches the printout. */
+  #customer-withdrawals-print { display: none; }
+  #customer-withdrawals-print.is-measuring {
+    display: block;
+    position: fixed;
+    left: -10000px;
+    top: 0;
+    width: 277mm;
+    background: #fff;
+  }
+}
+@media print {
+  /* Landscape to fit the trucks table comfortably. */
+  @page { size: landscape; margin: 10mm; }
+  html, body { background: #fff !important; }
+  /* The printable is portaled to <body>; hide everything else so the
+     report prints from the top and paginates normally (no clipping). */
+  body > *:not(#customer-withdrawals-print) { display: none !important; }
+  #customer-withdrawals-print {
+    display: block;
+    width: 100%;
+  }
+}
+`;
+
+/**
+ * Below this scale the print would become unreadable; instead of shrinking
+ * further we let the report flow naturally onto multiple pages.
+ */
+const MIN_PRINT_FIT_SCALE = 0.6;
+
+function buildHeaderLine(report: CustomerWithdrawalsReport): string {
+  return [
+    `Period: ${report.fromDate} → ${report.toDate}`,
+    `Trucks: ${report.totals.truckCount}`,
+    `Total: ${formatBundles(report.totals.totalBundles)} bundles / ${formatTons(report.totals.totalTons)} t`,
+    `generated ${formatDateTime(report.generatedAt)}`,
+  ].join(" | ");
+}
+
+function CustomerWithdrawalsPrintable({
+  report,
+}: {
+  report: CustomerWithdrawalsReport;
+}) {
+  const printRef = useRef<HTMLDivElement>(null);
+
+  const resetPrintFit = useCallback(() => {
+    const el = printRef.current;
+    if (!el) return;
+    el.classList.remove("is-measuring");
+    el.style.zoom = "";
+    el.style.transform = "";
+  }, []);
+
+  const applyPrintFit = useCallback(() => {
+    const el = printRef.current;
+    if (!el) return;
+
+    resetPrintFit();
+
+    // Render off-canvas at the real print width, then measure true height.
+    el.classList.add("is-measuring");
+    const width = el.scrollWidth;
+    const height = Math.max(el.scrollHeight, el.getBoundingClientRect().height);
+    el.classList.remove("is-measuring");
+
+    const scale = computeA4LandscapePrintFitScale(
+      width,
+      height * SCALE_CARD_PRINT_HEIGHT_FUDGE,
+    );
+
+    // Already fits, or so large that shrinking would hurt readability → leave
+    // it to paginate naturally across multiple pages.
+    if (scale >= 0.999 || scale < MIN_PRINT_FIT_SCALE) return;
+
+    if (typeof CSS !== "undefined" && CSS.supports("zoom", "1")) {
+      el.style.zoom = String(scale);
+      return;
+    }
+    el.style.transform = `scale(${scale})`;
+  }, [resetPrintFit]);
+
+  useEffect(() => {
+    const onBeforePrint = () => applyPrintFit();
+    const onAfterPrint = () => resetPrintFit();
+    window.addEventListener("beforeprint", onBeforePrint);
+    window.addEventListener("afterprint", onAfterPrint);
+    return () => {
+      window.removeEventListener("beforeprint", onBeforePrint);
+      window.removeEventListener("afterprint", onAfterPrint);
+      resetPrintFit();
+    };
+  }, [applyPrintFit, resetPrintFit]);
+
+  const content = (
+    <div id="customer-withdrawals-print" dir="ltr" ref={printRef}>
+      <h1 className="print-title">
+        {BRAND.name} — Customer Withdrawals by Size
+      </h1>
+      <p className="headline">{buildHeaderLine(report)}</p>
+      <p className="headline">
+        Customer: {report.filters.customerName ?? "All customers"}
+        {" | "}
+        Size:{" "}
+        {report.filters.sizeDisplayName
+          ? toEnglishSize(report.filters.sizeDisplayName)
+          : "All sizes"}
+      </p>
+
+      <h2 className="section-title">Totals by size</h2>
+      <table className="narrow-table">
+        <thead>
+          <tr>
+            <th>Size</th>
+            <th className="num">Bundles</th>
+            <th className="num">Weight (t)</th>
+            <th className="num">Trucks</th>
+          </tr>
+        </thead>
+        <tbody>
+          {report.sizeTotals.map((s) => (
+            <tr key={s.sizeId ?? "none"}>
+              <td>{toEnglishSize(s.displayName, s.code)}</td>
+              <td className="num">{formatBundles(s.totalBundles)}</td>
+              <td className="num">{formatTons(s.totalTons)}</td>
+              <td className="num">{s.truckCount}</td>
+            </tr>
+          ))}
+          <tr className="total-row">
+            <td>Total</td>
+            <td className="num">{formatBundles(report.totals.totalBundles)}</td>
+            <td className="num">{formatTons(report.totals.totalTons)}</td>
+            <td className="num">{report.totals.truckCount}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p className="pagefoot">-- 1 of 1 --</p>
+    </div>
+  );
+
+  return (
+    <>
+      <style>{PRINT_STYLE}</style>
+      {typeof document !== "undefined" ? createPortal(content, document.body) : null}
+    </>
   );
 }
