@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { toast } from "sonner";
@@ -99,7 +99,7 @@ export function CustomerWithdrawalsReportView() {
 
   const [fromDate, setFromDate] = useState(() => firstDayOfCurrentMonthInput());
   const [toDate, setToDate] = useState(() => todayInput());
-  const [customerId, setCustomerId] = useState<string>("");
+  const [customerId, setCustomerId] = useState<string>("all");
   const [sizeId, setSizeId] = useState<string>("all");
 
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
@@ -152,22 +152,38 @@ export function CustomerWithdrawalsReportView() {
     };
   }, []);
 
+  /** Lets Select.Value show the label; Base UI renders raw `value` without `items`. */
+  const customerSelectItems = useMemo(
+    () => [
+      { value: "all", label: "All customers" },
+      ...customers.map((c) => ({
+        value: String(c.id),
+        label: `${c.code} — ${c.fullName}`,
+      })),
+    ],
+    [customers],
+  );
+
+  const sizeSelectItems = useMemo(
+    () => [
+      { value: "all", label: "All sizes" },
+      ...sizes.map((s) => ({
+        value: String(s.id),
+        label: toEnglishSize(s.displayName, s.code),
+      })),
+    ],
+    [sizes],
+  );
+
   const fetchReport = useCallback(async () => {
-    if (!customerId) {
-      toast.error("Select a customer");
-      return;
-    }
     if (!fromDate || !toDate) {
       toast.error("Select the date range");
       return;
     }
     setLoadingReport(true);
     try {
-      const params = new URLSearchParams({
-        from: fromDate,
-        to: toDate,
-        customerId,
-      });
+      const params = new URLSearchParams({ from: fromDate, to: toDate });
+      if (customerId !== "all") params.set("customerId", customerId);
       if (sizeId !== "all") params.set("sizeId", sizeId);
       const res = await fetch(
         `/api/reports/customer-withdrawals?${params.toString()}`,
@@ -213,6 +229,7 @@ export function CustomerWithdrawalsReportView() {
   }
 
   const showAllSizes = report != null && report.filters.sizeId == null;
+  const showAllCustomers = report != null && report.filters.customerId == null;
 
   return (
     <div dir="ltr" className="flex-1 p-4 sm:p-6 space-y-6 min-w-0 max-w-full text-left">
@@ -249,14 +266,16 @@ export function CustomerWithdrawalsReportView() {
         <div className="space-y-1.5 min-w-[12rem] flex-1 sm:max-w-xs">
           <label className="text-xs font-medium text-muted-foreground">Customer</label>
           <Select
+            items={customerSelectItems}
             value={customerId}
-            onValueChange={(v) => setCustomerId(v ?? "")}
+            onValueChange={(v) => setCustomerId(v ?? "all")}
             disabled={loadingCustomers}
           >
             <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select a customer" />
+              <SelectValue placeholder="All customers" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="all">All customers</SelectItem>
               {customers.map((c) => (
                 <SelectItem key={c.id} value={String(c.id)}>
                   {c.code} — {c.fullName}
@@ -269,6 +288,7 @@ export function CustomerWithdrawalsReportView() {
         <div className="space-y-1.5 min-w-[10rem]">
           <label className="text-xs font-medium text-muted-foreground">Size</label>
           <Select
+            items={sizeSelectItems}
             value={sizeId}
             onValueChange={(v) => setSizeId(v ?? "all")}
             disabled={loadingSizes}
@@ -342,7 +362,7 @@ export function CustomerWithdrawalsReportView() {
         <>
           <div className="text-sm text-muted-foreground">
             <span className="font-medium text-foreground">
-              {report.filters.customerName}
+              {report.filters.customerName ?? "All customers"}
             </span>
             {report.filters.sizeDisplayName ? (
               <>
@@ -421,13 +441,14 @@ export function CustomerWithdrawalsReportView() {
               </p>
             ) : (
               <div className="rounded-lg border overflow-x-auto">
-                <Table dir="ltr" className="min-w-[720px]">
+                <Table dir="ltr" className={showAllCustomers ? "min-w-[880px]" : "min-w-[720px]"}>
                   <TableHeader>
                     <TableRow>
                       <TableHead>#</TableHead>
                       <TableHead>Completed at</TableHead>
                       <TableHead>Plate</TableHead>
                       <TableHead>Driver</TableHead>
+                      {showAllCustomers ? <TableHead>Customer</TableHead> : null}
                       <TableHead>Destination</TableHead>
                       <TableHead>Sales order</TableHead>
                       <TableHead className="text-right">Bundles</TableHead>
@@ -445,6 +466,9 @@ export function CustomerWithdrawalsReportView() {
                         </TableCell>
                         <TableCell className="font-medium">{row.plateNumber}</TableCell>
                         <TableCell>{row.driverName}</TableCell>
+                        {showAllCustomers ? (
+                          <TableCell>{row.customerName ?? "—"}</TableCell>
+                        ) : null}
                         <TableCell>{toEnglishCity(row.destinationName)}</TableCell>
                         <TableCell>{row.salesOrderNumber ?? "—"}</TableCell>
                         <TableCell className="text-right tabular-nums">
@@ -463,7 +487,7 @@ export function CustomerWithdrawalsReportView() {
         </>
       ) : (
         <p className="text-sm text-muted-foreground py-8 text-center">
-          Select a customer and a date range, then press &quot;Show report&quot;
+          Select the filters and date range, then press &quot;Show report&quot;
         </p>
       )}
     </div>

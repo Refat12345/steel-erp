@@ -853,7 +853,8 @@ export async function getDailyLoadingSummary(
 export interface CustomerWithdrawalsReportParams {
   fromDate: string;
   toDate: string;
-  customerId: number;
+  /** Omitted = all customers. */
+  customerId?: number;
   /** Omitted = all sizes. */
   sizeId?: number;
 }
@@ -863,6 +864,7 @@ export interface CustomerWithdrawalTruckRow {
   closedAt: string;
   plateNumber: string;
   driverName: string;
+  customerName: string | null;
   salesOrderNumber: string | null;
   destinationName: string | null;
   /** Null when at least one matching session is missing a bundle count. */
@@ -886,8 +888,8 @@ export interface CustomerWithdrawalsReport {
   windowTo: string;
   generatedAt: string;
   filters: {
-    customerId: number;
-    customerName: string;
+    customerId?: number;
+    customerName?: string;
     sizeId?: number;
     sizeDisplayName?: string;
   };
@@ -918,12 +920,19 @@ export async function getCustomerWithdrawalsReport(
     throw new ServiceError("Invalid date", "BAD_REQUEST");
   }
 
-  const customer = await prisma.customer.findUnique({
-    where: { id: params.customerId },
-    select: { id: true, fullName: true },
-  });
-  if (!customer) {
-    throw new ServiceError("Customer not found", "NOT_FOUND");
+  let customerFilterMeta: { customerId?: number; customerName?: string } = {};
+  if (params.customerId != null) {
+    const customer = await prisma.customer.findUnique({
+      where: { id: params.customerId },
+      select: { id: true, fullName: true },
+    });
+    if (!customer) {
+      throw new ServiceError("Customer not found", "NOT_FOUND");
+    }
+    customerFilterMeta = {
+      customerId: customer.id,
+      customerName: customer.fullName,
+    };
   }
 
   let sizeFilterMeta: { sizeId?: number; sizeDisplayName?: string } = {};
@@ -940,7 +949,7 @@ export async function getCustomerWithdrawalsReport(
 
   const trucks = await prisma.truckOperation.findMany({
     where: {
-      customerId: params.customerId,
+      ...(params.customerId != null ? { customerId: params.customerId } : {}),
       status: "Completed",
       closedAt: { gte: window.from, lt: window.to },
       ...(params.sizeId != null
@@ -954,6 +963,7 @@ export async function getCustomerWithdrawalsReport(
       driverName: true,
       salesOrderNumber: true,
       closedAt: true,
+      customer: { select: { fullName: true } },
       destination: { select: { name: true } },
       sessions: {
         ...(params.sizeId != null ? { where: { sizeId: params.sizeId } } : {}),
@@ -1042,6 +1052,7 @@ export async function getCustomerWithdrawalsReport(
       closedAt: truck.closedAt!.toISOString(),
       plateNumber: truck.plateNumber,
       driverName: truck.driverName,
+      customerName: truck.customer?.fullName ?? null,
       salesOrderNumber: truck.salesOrderNumber,
       destinationName: truck.destination?.name ?? null,
       bundleCount: truckMissingBundle ? null : truckBundles,
@@ -1070,8 +1081,7 @@ export async function getCustomerWithdrawalsReport(
     windowTo: window.to.toISOString(),
     generatedAt: new Date().toISOString(),
     filters: {
-      customerId: customer.id,
-      customerName: customer.fullName,
+      ...customerFilterMeta,
       ...sizeFilterMeta,
     },
     totals: {

@@ -58,7 +58,10 @@ const dateInputSchema = z
 export const customerWithdrawalsQuerySchema = z.object({
   from: dateInputSchema,
   to: dateInputSchema,
-  customerId: z.coerce.number().int().positive(),
+  customerId: z.preprocess(
+    (v) => (v === "" || v === null || v === undefined ? undefined : v),
+    z.coerce.number().int().positive().optional(),
+  ),
   sizeId: z.preprocess(
     (v) => (v === "" || v === null || v === undefined ? undefined : v),
     z.coerce.number().int().positive().optional(),
