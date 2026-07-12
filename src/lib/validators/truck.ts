@@ -106,6 +106,16 @@ export const weighSessionDeleteSchema = z.object({
   expectedVersion: z.number().int().nonnegative("الإصدار المتوقّع غير صالح"),
 });
 
+// Closing requires the weighbridge-card number issued by the finance-side
+// legacy scale program for this same exit, so both systems share one number.
+export const closeSchema = z.object({
+  externalCardNumber: z
+    .string()
+    .trim()
+    .min(1, "رقم كرت القبان (المالية) مطلوب")
+    .max(30, "رقم كرت القبان طويل جداً"),
+});
+
 export const cancelSchema = z.object({
   reason: z.string().min(1, "سبب الإلغاء مطلوب").max(2000, "السبب طويل جداً"),
 });

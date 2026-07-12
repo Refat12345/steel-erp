@@ -8,7 +8,8 @@ import {
   hasPermission,
   handleServiceError,
 } from "@/lib/api-utils";
-import { withIdempotency } from "@/lib/idempotency";
+import { withIdempotency, readJsonBody } from "@/lib/idempotency";
+import { closeSchema } from "@/lib/validators/truck";
 import { closeOperation } from "@/lib/services/truck.service";
 
 export async function POST(
@@ -23,9 +24,21 @@ export async function POST(
   const truckId = parseInt(id, 10);
   if (isNaN(truckId)) return badRequest("معرّف غير صالح");
 
-  return withIdempotency(req, session.userId, "", async () => {
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return badRequest("بيانات غير صالحة");
+
+  return withIdempotency(req, session.userId, parsed.text, async () => {
+    const validated = closeSchema.safeParse(parsed.json);
+    if (!validated.success) {
+      return badRequest(validated.error.issues[0]?.message || "بيانات غير صالحة");
+    }
+
     try {
-      const truck = await closeOperation(truckId, session.userId);
+      const truck = await closeOperation(
+        truckId,
+        session.userId,
+        validated.data.externalCardNumber,
+      );
       return ok(truck);
     } catch (e) {
       return handleServiceError(e);

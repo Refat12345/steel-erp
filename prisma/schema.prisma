@@ -446,6 +446,12 @@ model TruckOperation {
   cancelReason       String?          @map("cancel_reason")
   closedAt           DateTime?        @map("closed_at")
   closedById         Int?             @map("closed_by_id")
+  /// Weighbridge-card number issued by the finance-side legacy scale program
+  /// for the same truck exit. Typed manually by the operator when closing the
+  /// operation (mandatory at close — enforced in closeOperation) so both
+  /// systems share one card number. Null only for Cancelled operations and
+  /// rows closed before this field existed.
+  externalCardNumber String?          @unique @map("external_card_number")
   /// Timestamp when the loader confirmed loading completion. Null means no
   /// loader has confirmed yet. `enterGross` refuses to run while this is null
   /// — the strictest representation of the "loader must confirm before gross"

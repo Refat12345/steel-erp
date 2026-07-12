@@ -140,6 +140,7 @@ interface TruckDetail {
   notes: string | null;
   cancelReason: string | null;
   closedAt: string | null;
+  externalCardNumber: string | null;
   loadingConfirmedAt: string | null;
   lastReopenedAt: string | null;
   version: number;
@@ -196,6 +197,7 @@ export function ScaleOperationView({
   const [showCorrectGrossDialog, setShowCorrectGrossDialog] = useState(false);
   const [showSessionDialog, setShowSessionDialog] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [showCloseDialog, setShowCloseDialog] = useState(false);
   const [showLoadingCompleteDialog, setShowLoadingCompleteDialog] = useState(false);
   const [showNotesDialog, setShowNotesDialog] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
@@ -408,6 +410,9 @@ export function ScaleOperationView({
           label="وزن المحمّل"
           value={gross != null ? `${gross.toLocaleString("en-US")} كغ` : "—"}
         />
+        {truck.externalCardNumber && (
+          <InfoCard label="رقم كرت القبان (المالية)" value={truck.externalCardNumber} />
+        )}
       </div>
 
       {/* Operational note — surfaced prominently near the top, not buried in
@@ -626,7 +631,7 @@ export function ScaleOperationView({
               <Button
                 variant="default"
                 className="bg-green-600 hover:bg-green-700"
-                onClick={() => doAction(`/api/trucks/${truck.id}/close`, "POST")}
+                onClick={() => setShowCloseDialog(true)}
                 disabled={actionLoading}
               >
                 <CircleCheck className="h-4 w-4 me-1" />
@@ -982,6 +987,12 @@ export function ScaleOperationView({
           if (ok) setShowLoadingCompleteDialog(false);
           return ok;
         }}
+      />
+      <CloseDialog
+        open={showCloseDialog}
+        onOpenChange={setShowCloseDialog}
+        truckId={truck.id}
+        onSuccess={fetchTruck}
       />
       <CancelDialog
         open={showCancelDialog}
@@ -2387,6 +2398,102 @@ function LoadingCompleteDialog({
             {saving ? "جاري التأكيد..." : "تأكيد اكتمال التحميل"}
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Close Dialog ─────────────────────────────────────────────────
+//
+// Closing is refused (client- and server-side) until the operator types the
+// weighbridge-card number issued by the finance-side legacy scale program
+// for this same exit, so both systems always share one card number.
+
+function CloseDialog({
+  open,
+  onOpenChange,
+  truckId,
+  onSuccess,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  truckId: number;
+  onSuccess: () => void;
+}) {
+  const [cardNumber, setCardNumber] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleOpenChange = (v: boolean) => {
+    if (!v) setCardNumber("");
+    onOpenChange(v);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cardNumber.trim()) {
+      toast.error("أدخل رقم كرت القبان (المالية)");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/trucks/${truckId}/close`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": createClientIdempotencyKey(),
+        },
+        body: JSON.stringify({ externalCardNumber: cardNumber.trim() }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error);
+      toast.success("تم إغلاق العملية");
+      setCardNumber("");
+      onOpenChange(false);
+      onSuccess();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "خطأ");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>إغلاق العملية</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="external-card-number">رقم كرت القبان (المالية)</Label>
+            <Input
+              id="external-card-number"
+              value={cardNumber}
+              onChange={(e) => setCardNumber(e.target.value)}
+              placeholder="الرقم الصادر عن برنامج المالية..."
+              maxLength={30}
+              autoFocus
+              dir="ltr"
+              className="text-start font-mono"
+            />
+            <p className="text-xs text-muted-foreground">
+              لا يمكن إغلاق العملية بدون إدخال رقم الكرت الصادر عن برنامج
+              المالية لتوحيد الرقم بين النظامين.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
+              تراجع
+            </Button>
+            <Button
+              type="submit"
+              className="bg-green-600 hover:bg-green-700"
+              disabled={saving || !cardNumber.trim()}
+            >
+              {saving ? "جاري الإغلاق..." : "تأكيد الإغلاق"}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

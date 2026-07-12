@@ -2318,7 +2318,19 @@ export async function enterGross(
 
 // ─── Close Operation (Stage 2 — Final) ────────────────────────────
 
-export async function closeOperation(truckId: number, userId: number) {
+export async function closeOperation(
+  truckId: number,
+  userId: number,
+  externalCardNumber: string,
+) {
+  // The finance-side weighbridge program issues a card number for the same
+  // exit; closing is refused until the operator types it so both systems
+  // always share one card number.
+  const cardNumber = externalCardNumber.trim();
+  if (!cardNumber) {
+    throw new ServiceError("رقم كرت القبان (المالية) مطلوب لإغلاق العملية");
+  }
+
   return withRetry(() =>
     prisma.$transaction(
       async (tx: TxClient) => {
@@ -2347,6 +2359,20 @@ export async function closeOperation(truckId: number, userId: number) {
           throw new ServiceError("يجب إدخال وزن الفارغ والمحمّل قبل الإغلاق");
         }
 
+        // Friendly duplicate check before the unique index fires. Runs inside
+        // the same transaction; a true race still hits the DB unique
+        // constraint, which withRetry surfaces as a P2002 → generic error.
+        const duplicate = await tx.truckOperation.findUnique({
+          where: { externalCardNumber: cardNumber },
+          select: { id: true },
+        });
+        if (duplicate && duplicate.id !== truckId) {
+          throw new ServiceError(
+            `رقم كرت القبان ${cardNumber} مستخدم مسبقاً في العملية #${duplicate.id}`,
+            "CONFLICT",
+          );
+        }
+
         const bridgeNetKg = new Decimal(truck.grossWeightKg).minus(truck.tareWeightKg);
         const internalTotalTons = truck.sessions.reduce(
           (sum, s) => sum.plus(s.weightTons),
@@ -2361,6 +2387,7 @@ export async function closeOperation(truckId: number, userId: number) {
             status: "Completed",
             closedAt: now,
             closedById: userId,
+            externalCardNumber: cardNumber,
           },
         });
 
@@ -2372,6 +2399,7 @@ export async function closeOperation(truckId: number, userId: number) {
           details: {
             from: truck.status,
             to: "Completed",
+            externalCardNumber: cardNumber,
             bridgeNetKg: bridgeNetKg.toNumber(),
             internalTotalTons: internalTotalTons.toNumber(),
             bridgeNetTons: bridgeNetTons.toNumber(),
@@ -2391,7 +2419,12 @@ export async function closeOperation(truckId: number, userId: number) {
         });
 
         logger.info(
-          { truckId, bridgeNetKg: bridgeNetKg.toNumber(), internalTotalTons: internalTotalTons.toNumber() },
+          {
+            truckId,
+            externalCardNumber: cardNumber,
+            bridgeNetKg: bridgeNetKg.toNumber(),
+            internalTotalTons: internalTotalTons.toNumber(),
+          },
           "truck operation closed",
         );
         return updated;
@@ -2545,7 +2578,12 @@ export async function listOperations(
 
   if (filters.status) where.status = filters.status;
   if (filters.plateNumber) {
-    where.plateNumber = { contains: filters.plateNumber, mode: "insensitive" };
+    // One search box on the list screen: matches the plate number OR the
+    // finance-program weighbridge-card number recorded at close.
+    where.OR = [
+      { plateNumber: { contains: filters.plateNumber, mode: "insensitive" } },
+      { externalCardNumber: { contains: filters.plateNumber, mode: "insensitive" } },
+    ];
   }
   if (filters.dateFrom || filters.dateTo) {
     where.createdAt = {

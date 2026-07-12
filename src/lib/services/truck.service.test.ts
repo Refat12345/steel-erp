@@ -86,6 +86,7 @@ import {
   correctGross,
   confirmLoadingComplete,
   enterGross,
+  closeOperation,
   cancelOperation,
   reopenBeforeGross,
   editWeighSession,
@@ -179,6 +180,27 @@ describe("listOperations", () => {
         },
       },
     });
+  });
+
+  it("searches by plate number OR finance weighbridge card number", async () => {
+    mockPrisma.truckOperation.findMany.mockResolvedValue([]);
+    mockPrisma.truckOperation.count.mockResolvedValue(0);
+
+    await listOperations(
+      { plateNumber: "4455" },
+      { page: 1, pageSize: 25 },
+    );
+
+    expect(mockPrisma.truckOperation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          OR: [
+            { plateNumber: { contains: "4455", mode: "insensitive" } },
+            { externalCardNumber: { contains: "4455", mode: "insensitive" } },
+          ],
+        },
+      }),
+    );
   });
 });
 
@@ -1354,6 +1376,108 @@ describe("registerTruck — duplicate active session", () => {
 });
 
 // ─── 10. Cancel session ───────────────────────────────────────
+
+// ─── Close Operation (requires finance card number) ────────────
+
+describe("closeOperation", () => {
+  const secondWeighTruck = {
+    id: 1,
+    status: "SecondWeigh",
+    tareWeightKg: 12_000,
+    grossWeightKg: 25_000,
+    sessions: [{ weightTons: 12.8 }],
+    rounds: [
+      {
+        roundNumber: 1,
+        grade: "FIRST",
+        sizeId: null,
+        startWeightKg: 12_000,
+        endWeightKg: 25_000,
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    mockPrisma.truckOperation.findUnique.mockImplementation(
+      async (args: { where: { id?: number; externalCardNumber?: string } }) => {
+        if (args.where.externalCardNumber != null) return null;
+        if (args.where.id === 1) return secondWeighTruck;
+        return null;
+      },
+    );
+    mockPrisma.truckOperation.update.mockResolvedValue({
+      id: 1,
+      status: "Completed",
+      externalCardNumber: "WB-1001",
+      closedById: 7,
+    });
+  });
+
+  it("refuses to close without a card number (empty / whitespace)", async () => {
+    await expect(closeOperation(1, 7, "")).rejects.toThrow(/رقم كرت القبان/);
+    await expect(closeOperation(1, 7, "   ")).rejects.toThrow(/رقم كرت القبان/);
+    expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
+  });
+
+  it("closes SecondWeigh → Completed, stores trimmed card number, writes audit", async () => {
+    const result = await closeOperation(1, 7, "  WB-1001  ");
+
+    expect(result.status).toBe("Completed");
+    const updateCall = mockPrisma.truckOperation.update.mock.calls[0][0];
+    expect(updateCall.data.status).toBe("Completed");
+    expect(updateCall.data.externalCardNumber).toBe("WB-1001");
+    expect(updateCall.data.closedById).toBe(7);
+    expect(updateCall.data.closedAt).toBeInstanceOf(Date);
+
+    const audit = mockPrisma.auditLog.create.mock.calls[0][0];
+    expect(audit.data.details.from).toBe("SecondWeigh");
+    expect(audit.data.details.to).toBe("Completed");
+    expect(audit.data.details.externalCardNumber).toBe("WB-1001");
+    expect(audit.data.details.bridgeNetKg).toBe(13_000);
+  });
+
+  it("rejects a card number already used by another operation", async () => {
+    mockPrisma.truckOperation.findUnique.mockImplementation(
+      async (args: { where: { id?: number; externalCardNumber?: string } }) => {
+        if (args.where.externalCardNumber === "WB-1001") {
+          return { id: 99 };
+        }
+        if (args.where.id === 1) return secondWeighTruck;
+        return null;
+      },
+    );
+
+    await expect(closeOperation(1, 7, "WB-1001")).rejects.toThrow(
+      /مستخدم مسبقاً في العملية #99/,
+    );
+    expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses close when status is not SecondWeigh", async () => {
+    mockPrisma.truckOperation.findUnique.mockImplementation(
+      async (args: { where: { id?: number; externalCardNumber?: string } }) => {
+        if (args.where.externalCardNumber != null) return null;
+        return { ...secondWeighTruck, status: "LoadingComplete" };
+      },
+    );
+
+    await expect(closeOperation(1, 7, "WB-1001")).rejects.toThrow(ServiceError);
+    expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses close when tare or gross is missing", async () => {
+    mockPrisma.truckOperation.findUnique.mockImplementation(
+      async (args: { where: { id?: number; externalCardNumber?: string } }) => {
+        if (args.where.externalCardNumber != null) return null;
+        return { ...secondWeighTruck, grossWeightKg: null };
+      },
+    );
+
+    await expect(closeOperation(1, 7, "WB-1001")).rejects.toThrow(
+      /وزن الفارغ والمحمّل/,
+    );
+  });
+});
 
 describe("cancelOperation", () => {
   it("transitions to Cancelled, stores reason, and writes session_cancelled audit", async () => {
