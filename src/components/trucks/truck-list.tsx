@@ -59,6 +59,7 @@ interface TruckListItem extends EditableTruck {
   grossTime: string | null;
   createdAt: string;
   closedAt: string | null;
+  externalCardNumber: string | null;
   customer: { id: number; fullName: string; code: string } | null;
   destination: { id: number; name: string; details: string | null } | null;
   creator: { id: number; fullName: string };
@@ -151,7 +152,7 @@ export function TruckList() {
               <Search className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 id="truck-plate-search"
-                placeholder="بحث برقم اللوحة..."
+                placeholder="بحث برقم اللوحة أو رقم الكرت..."
                 className="ps-9"
                 value={plateSearch}
                 onChange={(e) => setPlateSearch(e.target.value)}
@@ -230,10 +231,11 @@ export function TruckList() {
 
       {/* Table */}
       <div className="rounded-lg border overflow-x-auto">
-        <Table className="min-w-[860px]">
+        <Table className="min-w-[920px]">
           <TableHeader>
             <TableRow>
               <TableHead className="w-[60px]">#</TableHead>
+              <TableHead>رقم الكرت</TableHead>
               <TableHead>الزبون</TableHead>
               <TableHead>رقم اللوحة</TableHead>
               <TableHead>السائق</TableHead>
@@ -250,7 +252,7 @@ export function TruckList() {
             {loading
               ? Array.from({ length: 5 }).map((_, i) => (
                   <TableRow key={i}>
-                    {Array.from({ length: 11 }).map((_, j) => (
+                    {Array.from({ length: 12 }).map((_, j) => (
                       <TableCell key={j}>
                         <Skeleton className="h-4 w-full" />
                       </TableCell>
@@ -259,7 +261,7 @@ export function TruckList() {
                 ))
               : data.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
                       لا توجد عمليات
                     </TableCell>
                   </TableRow>
@@ -288,6 +290,9 @@ export function TruckList() {
                       >
                         <TableCell className="font-mono text-xs">
                           {truck.id}
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">
+                          {truck.externalCardNumber ?? "—"}
                         </TableCell>
                         <TableCell className="text-sm">
                           {truck.customer?.fullName ?? "—"}

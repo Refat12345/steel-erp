@@ -54,6 +54,7 @@ interface TruckDetail {
   grossTime: string | null;
   notes: string | null;
   closedAt: string | null;
+  externalCardNumber: string | null;
   createdAt: string;
   loadingConfirmedAt: string | null;
   customer: { id: number; fullName: string; code: string } | null;
@@ -283,10 +284,19 @@ export function ScaleCardPrint({
         </div>
 
         {/* Card Number + Date */}
+        {/* The card number is the finance-program weighbridge-card number
+            (unified across both systems); the internal operation id stays
+            visible for traceability. Legacy operations closed before the
+            unified number existed fall back to the internal id alone. */}
         <div className="flex justify-between items-center mb-3 print:mb-2 text-sm">
           <div>
             <span className="font-bold">رقم الكرت: </span>
-            <span className="font-mono">{truck.id}</span>
+            <span className="font-mono">{truck.externalCardNumber ?? truck.id}</span>
+            {truck.externalCardNumber && (
+              <span className="text-gray-500 text-xs ms-2">
+                (رقم العملية: {truck.id})
+              </span>
+            )}
           </div>
           <div>
             <span className="font-bold">التاريخ: </span>

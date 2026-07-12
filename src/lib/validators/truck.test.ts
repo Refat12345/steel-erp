@@ -6,6 +6,7 @@ import {
   loadingCompleteSchema,
   correctGrossSchema,
   weighSessionDeleteSchema,
+  closeSchema,
 } from "./truck";
 
 describe("truckUpdateSchema", () => {
@@ -119,5 +120,28 @@ describe("correctGrossSchema", () => {
     if (result.success) {
       expect(result.data).not.toHaveProperty("exit");
     }
+  });
+});
+
+describe("closeSchema", () => {
+  it("requires a non-empty external card number", () => {
+    expect(closeSchema.safeParse({}).success).toBe(false);
+    expect(closeSchema.safeParse({ externalCardNumber: "" }).success).toBe(false);
+    expect(closeSchema.safeParse({ externalCardNumber: "   " }).success).toBe(false);
+  });
+
+  it("trims whitespace and accepts a normal card number", () => {
+    const result = closeSchema.safeParse({ externalCardNumber: "  12345  " });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.externalCardNumber).toBe("12345");
+  });
+
+  it("rejects card numbers longer than 30 characters", () => {
+    expect(
+      closeSchema.safeParse({ externalCardNumber: "x".repeat(31) }).success,
+    ).toBe(false);
+    expect(
+      closeSchema.safeParse({ externalCardNumber: "x".repeat(30) }).success,
+    ).toBe(true);
   });
 });
