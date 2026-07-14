@@ -6,6 +6,7 @@ import { AppSidebar } from "@/components/layout/app-sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
 import { BRAND } from "@/lib/brand";
+import { isStockModuleEnabled } from "@/config/feature-flags";
 
 export default async function DashboardLayout({
   children,
@@ -21,7 +22,7 @@ export default async function DashboardLayout({
   return (
     <TooltipProvider>
       <SidebarProvider>
-        <AppSidebar />
+        <AppSidebar stockModuleEnabled={isStockModuleEnabled()} />
         <main className="flex-1 flex flex-col min-h-screen min-w-0 max-w-full overflow-x-hidden">
           <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
             <SidebarTrigger />

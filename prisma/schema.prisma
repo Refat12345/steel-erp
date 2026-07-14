@@ -105,6 +105,48 @@ enum BilletReceiptStatus {
   Cancelled
 }
 
+// ─── Finished-Goods Stock (Warehouse) ─────────────────────────────
+
+// A stock location's operational classification. This is a DISPLAY /
+// grouping attribute — it does NOT redefine the commercial grade.
+// GOVERNORATES is first-grade rebar too; "محافظات" is only a naming/
+// distinction label and carries no destination binding or load restriction.
+enum StockLocationSegment {
+  GENERAL // نخب أول عام
+  GOVERNORATES // نخب أول محافظات — تمييز اسمي فقط
+  ISOLATION // نخب ثاني
+  SHORTBAR // قصائر — بالطن
+}
+
+// Counting unit for a location. Rebar sites count in bundles; shortbar
+// zones count in tons. Stored on both the location and every movement so
+// the ledger is self-describing.
+enum StockUnit {
+  BUNDLE
+  TON
+}
+
+// Work shift of the operational day (08:00 → 08:00 next day).
+// MORNING = 08:00–20:00, EVENING = 20:00–08:00. Stored on PRODUCTION_IN
+// movements so a clerk recording a few minutes past a shift boundary can
+// assign the entry to the shift it actually belongs to.
+enum StockShift {
+  MORNING
+  EVENING
+}
+
+// Movement types in the stock ledger. The current balance of a location is
+// ALWAYS computed as SUM(quantity) over its movements — never stored — so it
+// can never drift (same philosophy as the billet module).
+enum StockMovementType {
+  OPENING_BALANCE // الجرد الافتتاحي عند التفعيل
+  PRODUCTION_IN // دخول إنتاج يدوي
+  TRANSFER_OUT // خروج ترحيل (سالب)
+  TRANSFER_IN // دخول ترحيل (موجب)
+  LOAD_OUT // خصم عند إغلاق الشاحنة (سالب)
+  ADJUSTMENT // تصحيح جرد (± بصلاحية)
+}
+
 // ─── Authentication & Permissions ─────────────────────────────────
 
 model User {
@@ -137,6 +179,7 @@ model User {
   trucksClosed         TruckOperation[]         @relation("TruckCloser")
   trucksLoaded         TruckOperation[]         @relation("TruckLoader")
   bridgeRoundsLoaded   BridgeRound[]            @relation("BridgeRoundLoader")
+  stockMovements       StockMovement[]          @relation("StockMovementCreator")
   idempotencyKeys      IdempotencyKey[]
 
   billetContractsCreated    SupplierContract[]           @relation("BilletContractCreator")
@@ -424,77 +467,183 @@ model SizeLookup {
   weighSessions     WeighSession[]
   truckRequestItems TruckRequestItem[]
   bridgeRounds      BridgeRound[]
+  stockLocations    StockLocation[]
+  stockMovements    StockMovement[]
 
   @@map("size_lookup")
+}
+
+// ─── Finished-Goods Stock (Warehouse) ─────────────────────────────
+//
+// A ledger-based stock module for the finished-goods yard. Balances are
+// NEVER stored — each location's balance is computed from the SUM of its
+// StockMovement rows (mirrors the billet module's "remaining never stored"
+// rule). There is intentionally NO max-capacity concept: the system only
+// tracks what is currently present (bundles for rebar, tons for shortbar).
+
+model StockYard {
+  id       Int     @id @default(autoincrement())
+  code     String  @unique // FRONT | BACK
+  nameAr   String  @map("name_ar")
+  isActive Boolean @default(true) @map("is_active")
+
+  locations StockLocation[]
+
+  @@map("stock_yards")
+}
+
+model StockLocation {
+  id             Int                  @id @default(autoincrement())
+  yardId         Int                  @map("yard_id")
+  /// Stable identifier referenced by movements/reports. Frozen once the
+  /// location has any movement (UI-enforced); the display name stays free.
+  code           String
+  /// Free, editable display label (e.g. «A5 محافظات»).
+  nameAr         String               @map("name_ar")
+  segment        StockLocationSegment
+  unit           StockUnit
+  /// Commercial grade this site holds. FIRST for GENERAL/GOVERNORATES,
+  /// SECOND for ISOLATION, null for SHORTBAR (no grade). Not the same
+  /// concept as `segment` — the "محافظات" distinction lives in `segment`.
+  allowedGrade   SalesOrderGrade?     @map("allowed_grade")
+  /// Indicative size for the site — used for map display and transfer
+  /// suggestions only. The ACTUAL size is derived from current balance;
+  /// this is not a hard constraint.
+  expectedSizeId Int?                 @map("expected_size_id")
+  isActive       Boolean              @default(true) @map("is_active")
+  /// Virtual pass-through site for direct-from-production dispatch (cross-dock).
+  /// Exactly one row is seeded with this flag. It never appears on the live map,
+  /// in pickers, or in the location admin — it exists only so a truck loaded
+  /// straight off the line still leaves a complete ledger trail (a receipt in,
+  /// then a load-out) instead of no movement at all. Its balance stays ~zero.
+  isVirtual      Boolean              @default(false) @map("is_virtual")
+  sortOrder      Int                  @default(0) @map("sort_order")
+  /// Position on the per-yard schematic grid (mirrors the PDF layout).
+  /// Editable from the location admin screen; no drag-and-drop editor in v1.
+  gridRow        Int                  @default(1) @map("grid_row")
+  gridCol        Int                  @default(1) @map("grid_col")
+  gridSpan       Int                  @default(1) @map("grid_span")
+  notes          String?
+  createdAt      DateTime             @default(now()) @map("created_at")
+  updatedAt      DateTime             @updatedAt @map("updated_at")
+
+  yard          StockYard       @relation(fields: [yardId], references: [id])
+  expectedSize  SizeLookup?     @relation(fields: [expectedSizeId], references: [id])
+  movements     StockMovement[]
+  weighSessions WeighSession[]
+
+  @@unique([yardId, code])
+  @@index([segment, isActive])
+  @@map("stock_locations")
+}
+
+model StockMovement {
+  id               Int               @id @default(autoincrement())
+  locationId       Int               @map("location_id")
+  type             StockMovementType
+  /// Rebar size — required for BUNDLE locations, null for SHORTBAR (tons).
+  sizeId           Int?              @map("size_id")
+  /// Commercial grade — set for rebar movements, null for shortbar.
+  grade            SalesOrderGrade?
+  /// Positive = inbound, negative = outbound. Bundles are whole numbers
+  /// stored in this Decimal column; tons use up to 3 decimals.
+  quantity         Decimal           @db.Decimal(12, 3)
+  unit             StockUnit
+  /// Links the two rows of a single transfer (TRANSFER_OUT + TRANSFER_IN).
+  transferGroupId  String?           @map("transfer_group_id")
+  /// Set for LOAD_OUT rows — the internal weigh session that produced it.
+  weighSessionId   Int?              @map("weigh_session_id")
+  /// Set for LOAD_OUT rows — the truck operation that was closed.
+  truckOperationId Int?              @map("truck_operation_id")
+  /// Work shift the entry belongs to — set on PRODUCTION_IN rows only.
+  /// Normally derived from created_at; may point to the *previous* shift when
+  /// the clerk records within the grace window right after a shift boundary.
+  shift            StockShift?
+  reason           String?
+  createdById      Int               @map("created_by_id")
+  createdAt        DateTime          @default(now()) @map("created_at")
+
+  location       StockLocation   @relation(fields: [locationId], references: [id])
+  size           SizeLookup?     @relation(fields: [sizeId], references: [id])
+  weighSession   WeighSession?   @relation(fields: [weighSessionId], references: [id])
+  truckOperation TruckOperation? @relation(fields: [truckOperationId], references: [id])
+  creator        User            @relation("StockMovementCreator", fields: [createdById], references: [id])
+
+  @@index([locationId, sizeId])
+  @@index([truckOperationId])
+  @@index([transferGroupId])
+  @@index([type, createdAt])
+  @@map("stock_movements")
 }
 
 // ─── Truck / Weighbridge ──────────────────────────────────────────
 
 model TruckOperation {
-  id                 Int              @id @default(autoincrement())
-  customerId         Int?             @map("customer_id")
-  destinationId      Int?             @map("destination_id")
-  plateNumber        String           @map("plate_number")
-  driverName         String           @map("driver_name")
-  salesOrderNumber   String?          @map("sales_order_number")
-  status             TruckStatus      @default(Queued)
-  tareWeightKg       Decimal?         @map("tare_weight_kg") @db.Decimal(10, 1)
-  grossWeightKg      Decimal?         @map("gross_weight_kg") @db.Decimal(10, 1)
-  tareTime           DateTime?        @map("tare_time")
-  grossTime          DateTime?        @map("gross_time")
-  notes              String?
-  cancelReason       String?          @map("cancel_reason")
-  closedAt           DateTime?        @map("closed_at")
-  closedById         Int?             @map("closed_by_id")
+  id                   Int              @id @default(autoincrement())
+  customerId           Int?             @map("customer_id")
+  destinationId        Int?             @map("destination_id")
+  plateNumber          String           @map("plate_number")
+  driverName           String           @map("driver_name")
+  salesOrderNumber     String?          @map("sales_order_number")
+  status               TruckStatus      @default(Queued)
+  tareWeightKg         Decimal?         @map("tare_weight_kg") @db.Decimal(10, 1)
+  grossWeightKg        Decimal?         @map("gross_weight_kg") @db.Decimal(10, 1)
+  tareTime             DateTime?        @map("tare_time")
+  grossTime            DateTime?        @map("gross_time")
+  notes                String?
+  cancelReason         String?          @map("cancel_reason")
+  closedAt             DateTime?        @map("closed_at")
+  closedById           Int?             @map("closed_by_id")
   /// Weighbridge-card number issued by the finance-side legacy scale program
   /// for the same truck exit. Typed manually by the operator when closing the
   /// operation (mandatory at close — enforced in closeOperation) so both
   /// systems share one card number. Null only for Cancelled operations and
   /// rows closed before this field existed.
-  externalCardNumber String?          @unique @map("external_card_number")
+  externalCardNumber   String?          @unique @map("external_card_number")
   /// Timestamp when the loader confirmed loading completion. Null means no
   /// loader has confirmed yet. `enterGross` refuses to run while this is null
   /// — the strictest representation of the "loader must confirm before gross"
   /// rule, independent of the state machine.
-  loadingConfirmedAt DateTime?        @map("loading_confirmed_at")
+  loadingConfirmedAt   DateTime?        @map("loading_confirmed_at")
   /// User id of the loader who confirmed loading completion. Set atomically
   /// with `loadingConfirmedAt` inside `confirmLoadingComplete`. Required for
   /// audit / dispute traceability.
-  loaderId           Int?             @map("loader_id")
+  loaderId             Int?             @map("loader_id")
   /// Set when loading is reopened before gross. Internal loading duration
   /// counts from this timestamp (or first session if never reopened).
-  lastReopenedAt     DateTime?        @map("last_reopened_at")
+  lastReopenedAt       DateTime?        @map("last_reopened_at")
   /// Operational grade declared by logistics at registration time.
   /// Used as a temporary display source until a SalesOrder is linked.
   /// Priority rule: salesOrder.grade takes precedence when present.
   /// This field is intentionally named to distinguish it from the
   /// contract-authoritative grade on SalesOrder.
-  operationalGrade   SalesOrderGrade? @map("operational_grade")
+  operationalGrade     SalesOrderGrade? @map("operational_grade")
   /// True when this visit carries only bulk material that is NOT weighed on
   /// the internal scale (scrap / billet tying wire). Derived from the request
   /// items at registration (single scrap/billet-wire size). Such trucks skip
   /// internal weigh sessions entirely: only the external bridge tare + gross
   /// are recorded, and `enterGross` mirrors the round net as one
   /// system-generated `WeighSession` so by-size reports keep working.
-  skipInternalWeighing Boolean        @default(false) @map("skip_internal_weighing")
+  skipInternalWeighing Boolean          @default(false) @map("skip_internal_weighing")
   /// Optimistic-lock counter. Incremented on every correction of tare/gross
   /// so two operators editing the same record simultaneously are detected
   /// instead of silently overwriting each other.
-  version            Int              @default(0)
-  createdAt          DateTime         @default(now()) @map("created_at")
-  updatedAt          DateTime         @updatedAt @map("updated_at")
-  createdById        Int              @map("created_by_id")
+  version              Int              @default(0)
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @updatedAt @map("updated_at")
+  createdById          Int              @map("created_by_id")
 
-  customer     Customer?          @relation("TruckCustomer", fields: [customerId], references: [id])
-  destination  Destination?       @relation(fields: [destinationId], references: [id])
-  salesOrder   SalesOrder?        @relation(fields: [salesOrderNumber], references: [orderNumber])
-  creator      User               @relation("TruckCreator", fields: [createdById], references: [id])
-  closer       User?              @relation("TruckCloser", fields: [closedById], references: [id])
-  loader       User?              @relation("TruckLoader", fields: [loaderId], references: [id])
-  sessions     WeighSession[]
-  photos       TruckPhoto[]
-  requestItems TruckRequestItem[]
-  rounds       BridgeRound[]
+  customer       Customer?          @relation("TruckCustomer", fields: [customerId], references: [id])
+  destination    Destination?       @relation(fields: [destinationId], references: [id])
+  salesOrder     SalesOrder?        @relation(fields: [salesOrderNumber], references: [orderNumber])
+  creator        User               @relation("TruckCreator", fields: [createdById], references: [id])
+  closer         User?              @relation("TruckCloser", fields: [closedById], references: [id])
+  loader         User?              @relation("TruckLoader", fields: [loaderId], references: [id])
+  sessions       WeighSession[]
+  photos         TruckPhoto[]
+  requestItems   TruckRequestItem[]
+  rounds         BridgeRound[]
+  stockMovements StockMovement[]
 
   @@index([customerId])
   @@index([destinationId])
@@ -589,19 +738,30 @@ model WeighSession {
   sizeId           Int?     @map("size_id")
   bundleCount      Int?     @map("bundle_count")
   weightTons       Decimal  @map("weight_tons") @db.Decimal(10, 3)
+  /// Stock source location this weigh was loaded from. Nullable: historical
+  /// sessions (pre-stock-module) and exempt-truck mirror sessions have none.
+  /// Required in the UI for rebar/shortbar loads once the stock module is live.
+  sourceLocationId Int?     @map("source_location_id")
+  /// True when the load came straight off the production line (cross-dock) with
+  /// no yard stop. `sourceLocationId` stays null; at close a paired receipt +
+  /// load-out is written against the virtual location for the ledger trail.
+  fromProduction   Boolean  @default(false) @map("from_production")
   /// Optimistic-lock counter. Incremented on every edit so two operators
   /// editing the same weigh session simultaneously are detected.
   version          Int      @default(0)
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
-  truckOperation TruckOperation @relation(fields: [truckOperationId], references: [id])
-  bridgeRound    BridgeRound?   @relation(fields: [bridgeRoundId], references: [id])
-  size           SizeLookup?    @relation(fields: [sizeId], references: [id])
+  truckOperation TruckOperation  @relation(fields: [truckOperationId], references: [id])
+  bridgeRound    BridgeRound?    @relation(fields: [bridgeRoundId], references: [id])
+  size           SizeLookup?     @relation(fields: [sizeId], references: [id])
+  sourceLocation StockLocation?  @relation(fields: [sourceLocationId], references: [id])
+  stockMovements StockMovement[]
 
   @@unique([truckOperationId, sessionNumber])
   @@index([truckOperationId])
   @@index([bridgeRoundId])
+  @@index([sourceLocationId])
   @@map("weigh_sessions")
 }
 

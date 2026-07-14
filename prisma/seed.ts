@@ -178,6 +178,182 @@ async function main() {
   }
   console.log("  ✓ Destinations seeded");
 
+  // ─── Stock Yards & Locations (Finished-Goods Warehouse) ────────
+  // Baseline layout transcribed from the physical yard maps
+  // (stock front / stock back): 25 first-grade bundle sites across two
+  // yards (Front A1–A6 + B1–B5 = 11; Back A1–A8 + B1–B6 = 14), one
+  // second-grade Isolation site, and two short-bar (ton) zones.
+  //
+  // `expectedSizeId` here is INDICATIVE only (map hint / transfer
+  // suggestion) — the real size of a site is derived from its current
+  // balance. Names are freely editable in the UI; codes are frozen once
+  // a site has movements. GOVERNORATES sites are intentionally NOT seeded:
+  // which sites carry the «محافظات» distinction is a management decision,
+  // set later from the location admin screen (change segment + rename).
+  const sizeRows = await prisma.sizeLookup.findMany({
+    select: { id: true, code: true },
+  });
+  const sizeIdByCode = new Map(sizeRows.map((s) => [s.code, s.id]));
+
+  const stockYards = [
+    { code: "FRONT", nameAr: "الساحة الأمامية" },
+    { code: "BACK", nameAr: "الساحة الخلفية" },
+  ];
+  const yardIdByCode = new Map<string, number>();
+  for (const yard of stockYards) {
+    const row = await prisma.stockYard.upsert({
+      where: { code: yard.code },
+      update: { nameAr: yard.nameAr },
+      create: { code: yard.code, nameAr: yard.nameAr },
+    });
+    yardIdByCode.set(yard.code, row.id);
+  }
+
+  type SeedLocation = {
+    yard: "FRONT" | "BACK";
+    code: string;
+    nameAr: string;
+    segment: "GENERAL" | "GOVERNORATES" | "ISOLATION" | "SHORTBAR";
+    unit: "BUNDLE" | "TON";
+    allowedGrade: "FIRST" | "SECOND" | null;
+    sizeCode: string | null;
+    gridRow: number;
+    gridCol: number;
+    gridSpan?: number;
+  };
+
+  // Helper: a first-grade general bundle site.
+  const gen = (
+    yard: "FRONT" | "BACK",
+    code: string,
+    sizeCode: string,
+    gridRow: number,
+    gridCol: number,
+  ): SeedLocation => ({
+    yard,
+    code,
+    nameAr: code,
+    segment: "GENERAL",
+    unit: "BUNDLE",
+    allowedGrade: "FIRST",
+    sizeCode,
+    gridRow,
+    gridCol,
+  });
+
+  const stockLocations: SeedLocation[] = [
+    // ── Front — row A (top): A6 A5 A4 A3 A2 A1 (left→right on the map) ──
+    gen("FRONT", "A6", "25mm", 1, 1),
+    gen("FRONT", "A5", "14mm", 1, 2),
+    gen("FRONT", "A4", "14mm", 1, 3),
+    gen("FRONT", "A3", "20mm", 1, 4),
+    gen("FRONT", "A2", "12mm", 1, 5),
+    gen("FRONT", "A1", "8mm", 1, 6),
+    // Front — second-grade isolation area
+    {
+      yard: "FRONT",
+      code: "ISO",
+      nameAr: "منطقة العزل (نخب ثاني)",
+      segment: "ISOLATION",
+      unit: "BUNDLE",
+      allowedGrade: "SECOND",
+      sizeCode: null,
+      gridRow: 1,
+      gridCol: 7,
+    },
+    // ── Front — row B: B5 B4 B3 B2 B1 ──
+    gen("FRONT", "B5", "25mm", 2, 1),
+    gen("FRONT", "B4", "18mm", 2, 2),
+    gen("FRONT", "B3", "8mm", 2, 3),
+    gen("FRONT", "B2", "8mm", 2, 4),
+    gen("FRONT", "B1", "8mm", 2, 5),
+    // Front — short-bar zones (tons, no grade)
+    {
+      yard: "FRONT",
+      code: "SB-4-12",
+      nameAr: "قصائر 4–12 م",
+      segment: "SHORTBAR",
+      unit: "TON",
+      allowedGrade: null,
+      sizeCode: "shortbar_4_12m",
+      gridRow: 2,
+      gridCol: 6,
+    },
+    {
+      yard: "FRONT",
+      code: "SB-1-4",
+      nameAr: "قصائر 1–4 م (قرب المصنع)",
+      segment: "SHORTBAR",
+      unit: "TON",
+      allowedGrade: null,
+      sizeCode: "shortbar_1_4m",
+      gridRow: 3,
+      gridCol: 1,
+      gridSpan: 2,
+    },
+    // ── Back — row A: A8 … A1 ──
+    gen("BACK", "A8", "16mm", 1, 1),
+    gen("BACK", "A7", "16mm", 1, 2),
+    gen("BACK", "A6", "18mm", 1, 3),
+    gen("BACK", "A5", "14mm", 1, 4),
+    gen("BACK", "A4", "20mm", 1, 5),
+    gen("BACK", "A3", "8mm", 1, 6),
+    gen("BACK", "A2", "25mm", 1, 7),
+    gen("BACK", "A1", "16mm", 1, 8),
+    // ── Back — row B: B6 … B1 ──
+    gen("BACK", "B6", "25mm", 2, 1),
+    gen("BACK", "B5", "16mm", 2, 2),
+    gen("BACK", "B4", "8mm", 2, 3),
+    gen("BACK", "B3", "16mm", 2, 4),
+    gen("BACK", "B2", "16mm", 2, 5),
+    gen("BACK", "B1", "8mm", 2, 6),
+  ];
+
+  let stockSortOrder = 0;
+  for (const loc of stockLocations) {
+    const yardId = yardIdByCode.get(loc.yard)!;
+    const expectedSizeId = loc.sizeCode ? sizeIdByCode.get(loc.sizeCode) ?? null : null;
+    stockSortOrder += 1;
+    const payload = {
+      nameAr: loc.nameAr,
+      segment: loc.segment,
+      unit: loc.unit,
+      allowedGrade: loc.allowedGrade,
+      expectedSizeId,
+      sortOrder: stockSortOrder,
+      gridRow: loc.gridRow,
+      gridCol: loc.gridCol,
+      gridSpan: loc.gridSpan ?? 1,
+    };
+    await prisma.stockLocation.upsert({
+      where: { yardId_code: { yardId, code: loc.code } },
+      update: payload,
+      create: { yardId, code: loc.code, ...payload },
+    });
+  }
+
+  // Virtual pass-through location for direct-from-production dispatch
+  // (cross-dock). Never shown on the map/pickers/admin — filtered by isVirtual.
+  const virtualYardId = yardIdByCode.get("FRONT")!;
+  await prisma.stockLocation.upsert({
+    where: { yardId_code: { yardId: virtualYardId, code: "__DIRECT__" } },
+    update: { isVirtual: true, isActive: true },
+    create: {
+      yardId: virtualYardId,
+      code: "__DIRECT__",
+      nameAr: "خط الإنتاج (تسليم مباشر)",
+      segment: "GENERAL",
+      unit: "BUNDLE",
+      allowedGrade: null,
+      isVirtual: true,
+      sortOrder: 9999,
+    },
+  });
+
+  console.log(
+    `  ✓ Stock yards (${stockYards.length}) & locations (${stockLocations.length} + 1 virtual) seeded`,
+  );
+
   // ─── System User (non-loginable, for FK references) ──────────
   const systemUser = await prisma.user.upsert({
     where: { username: "system" },

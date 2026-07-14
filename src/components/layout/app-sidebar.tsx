@@ -17,6 +17,11 @@ import {
   LayoutDashboard,
   Boxes,
   PackageCheck,
+  Warehouse,
+  PackagePlus,
+  ScrollText,
+  ArrowLeftRight,
+  ClipboardCheck,
 } from "lucide-react";
 import {
   Sidebar,
@@ -92,6 +97,44 @@ const navItems: {
     permission: "billet.receipt.view",
   },
   {
+    title: "المخزون",
+    url: "/stock",
+    icon: Boxes,
+    permission: "stock.view",
+  },
+  {
+    title: "سجل الحركات",
+    url: "/stock/movements",
+    icon: ScrollText,
+    permission: "stock.movements.view",
+  },
+  {
+    title: "دخول إنتاج",
+    url: "/stock/production-in",
+    icon: PackagePlus,
+    permission: ["stock.production.ton", "stock.production.bundle"],
+  },
+  // "الرصيد الافتتاحي" (/stock/opening-balance) مخفي عمداً — «تصحيح الجرد»
+  // يغطيه. الصفحة والحماية ما زالت موجودة (للأدمن) ويمكن إعادتها هنا.
+  {
+    title: "ترحيل المخزون",
+    url: "/stock/transfer",
+    icon: ArrowLeftRight,
+    permission: "stock.transfer",
+  },
+  {
+    title: "تصحيح الجرد",
+    url: "/stock/adjust",
+    icon: ClipboardCheck,
+    permission: "stock.adjust",
+  },
+  {
+    title: "مواقع المخزون",
+    url: "/stock/locations",
+    icon: Warehouse,
+    permission: "stock.location.manage",
+  },
+  {
     title: "حركة الشاحنات",
     url: "/loaded-trucks",
     icon: Truck,
@@ -123,7 +166,11 @@ const navItems: {
   },
 ];
 
-export function AppSidebar() {
+export function AppSidebar({
+  stockModuleEnabled = false,
+}: {
+  stockModuleEnabled?: boolean;
+}) {
   const { data: session } = useSession();
   const pathname = usePathname();
   const router = useRouter();
@@ -152,6 +199,10 @@ export function AppSidebar() {
   const visibleItems = navItems.filter((item) => {
     if (isNavUrlSuspended(item.url)) return false;
 
+    // Dark-launch: hide every stock entry until the module is released.
+    // Server-driven prop (runtime env), so no rebuild needed to flip it.
+    if (!stockModuleEnabled && item.url.startsWith("/stock")) return false;
+
     // Hardcoded denylist — analytics-restricted roles never see the
     // dashboard or reports entries, even if a permission override has
     // been granted. Real enforcement lives in the server guards/API;
@@ -172,6 +223,19 @@ export function AppSidebar() {
       return item.permission.some((p) => userPermissions.has(p));
     return userPermissions.has(item.permission);
   });
+
+  // Resolve the single active entry as the longest matching URL prefix so a
+  // parent route (e.g. /stock) doesn't stay highlighted on its children
+  // (/stock/movements, /stock/locations, ...).
+  const activeUrl = visibleItems.reduce<string | null>((best, item) => {
+    const matches =
+      item.url === "/"
+        ? pathname === "/"
+        : pathname === item.url || pathname.startsWith(item.url + "/");
+    if (!matches) return best;
+    if (best === null || item.url.length > best.length) return item.url;
+    return best;
+  }, null);
 
   const initials = session.user.name
     .split(" ")
@@ -227,10 +291,7 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu className="gap-0.5" onClick={closeMobileNav}>
               {visibleItems.map((item) => {
-                const isActive =
-                  item.url === "/"
-                    ? pathname === "/"
-                    : pathname.startsWith(item.url);
+                const isActive = item.url === activeUrl;
                 return (
                   <SidebarMenuItem key={item.url} className="relative">
 

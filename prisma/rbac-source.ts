@@ -104,6 +104,43 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
   { code: "billet.receipt.close", displayName: "إغلاق استلام البيلت (وزن فارغ)", module: "purchasing" },
   { code: "billet.receipt.upload", displayName: "رفع مرفقات استلام البيلت", module: "purchasing" },
   { code: "billet.receipt.cancel", displayName: "إلغاء استلام بيلت", module: "purchasing" },
+  // Stock (Finished-Goods Warehouse)
+  { code: "stock.view", displayName: "عرض المخزون وخريطة المستودع", module: "stock" },
+  // Add-on permission on top of `stock.view` (same pattern as
+  // `dashboard.ops.view`): grants access to the full movements ledger
+  // (/stock/movements) — every adjustment, transfer, and truck deduction with
+  // who/when/why. Holders are expected to also hold `stock.view`.
+  {
+    code: "stock.movements.view",
+    displayName: "عرض سجل حركات المخزون",
+    module: "stock",
+  },
+  {
+    code: "stock.location.manage",
+    displayName: "إدارة مواقع المخزون (إضافة/تعديل/إيقاف)",
+    module: "stock",
+  },
+  // Production entry is split across two roles by counting unit: one records
+  // tonnage (مبروم + قصائر), another counts bundles (مبروم). Rebar sites track
+  // both in parallel; short-bar tracks tons only.
+  {
+    code: "stock.production.ton",
+    displayName: "تسجيل دخول إنتاج بالطن",
+    module: "stock",
+  },
+  {
+    code: "stock.production.bundle",
+    displayName: "تسجيل دخول إنتاج بالربطات",
+    module: "stock",
+  },
+  { code: "stock.transfer", displayName: "ترحيل مخزون بين المواقع", module: "stock" },
+  // Opening-balance is superseded by stock.adjust (kept wired, unassigned).
+  {
+    code: "stock.opening_balance",
+    displayName: "إدخال الرصيد الافتتاحي — موقوف حالياً",
+    module: "stock",
+  },
+  { code: "stock.adjust", displayName: "تصحيح جرد المخزون", module: "stock" },
   // Reports
   { code: "reports.view", displayName: "الوصول إلى قسم التقارير", module: "reports" },
   { code: "report.daily_trucks", displayName: "تقرير شاحنات يومي", module: "reports" },
@@ -181,6 +218,10 @@ export const RBAC_ROLE_PERMISSIONS: Readonly<Record<string, ReadonlyArray<string
     // choices are loaded through a receipt-registration-only endpoint.
     "billet.receipt.view",
     "billet.receipt.register",
+    // Stock (dark-launched): `stock.view` is intentionally NOT a default while
+    // STOCK_MODULE_ENABLED is off, so running `rbac:sync` on production never
+    // surfaces the unreleased module. Re-add it here (and to the other roles
+    // below) as part of the stock-module release, not before.
   ],
   scale_operator: [
     "truck.view_approved",
@@ -207,6 +248,9 @@ export const RBAC_ROLE_PERMISSIONS: Readonly<Record<string, ReadonlyArray<string
     "billet.receipt.view",
     "billet.receipt.unload",
     "billet.receipt.upload",
+    // Stock (dark-launched): the loader needs `stock.view` to pick a source
+    // location in the weigh dialog, but only once the module is released. Not
+    // a default while STOCK_MODULE_ENABLED is off — grant at release time.
   ],
   // Read-only "owner / general manager" role. Sees every operational
   // surface (dashboard, contracts, sales orders, trucks queue, finance,
@@ -229,5 +273,9 @@ export const RBAC_ROLE_PERMISSIONS: Readonly<Record<string, ReadonlyArray<string
     // Billet receiving: owner views supplier contracts and inbound receipts.
     "billet.contract.view",
     "billet.receipt.view",
+    // Stock (dark-launched): owner will see the yard map/balances (read-only)
+    // at release. `stock.view` is NOT a default while STOCK_MODULE_ENABLED is
+    // off, and the movements ledger (`stock.movements.view`) is never a
+    // default — grant per user when management decides who audits the ledger.
   ],
 };
