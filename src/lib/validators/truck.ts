@@ -93,12 +93,22 @@ export const weighSessionSchema = z.object({
   sizeId: z.number().int().positive().optional().nullable(),
   bundleCount: z.number().int().min(1).optional().nullable(),
   weightTons: weightTonsSchema,
+  // Stock source location the material was loaded from. Optional at the schema
+  // level for backward compatibility (exempt/mirror sessions), but required in
+  // the loading UI and enforced with bundleCount by the service for bundle sites.
+  sourceLocationId: z.number().int().positive().optional().nullable(),
+  // Loaded straight off the production line (cross-dock): no yard stop, no
+  // source location — the service records a paired receipt + load-out on the
+  // virtual location at close.
+  fromProduction: z.boolean().optional(),
 });
 
 export const weighSessionEditSchema = z.object({
   sizeId: z.number().int().positive().optional().nullable(),
   bundleCount: z.number().int().min(1).optional().nullable(),
   weightTons: weightTonsSchema.optional(),
+  sourceLocationId: z.number().int().positive().optional().nullable(),
+  fromProduction: z.boolean().optional(),
   expectedVersion: z.number().int().nonnegative("الإصدار المتوقّع غير صالح"),
 });
 

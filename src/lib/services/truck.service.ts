@@ -17,6 +17,7 @@ import {
   type WeighSessionSizeAggregate,
 } from "@/lib/weigh-session-aggregate";
 import { requestSizeCodesExemptFromInternalWeighing } from "@/lib/material-kind";
+import { applyLoadOutForClose } from "./stock.service";
 
 type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
@@ -943,6 +944,42 @@ export interface WeighSessionInput {
   sizeId?: number | null;
   bundleCount?: number | null;
   weightTons: number;
+  sourceLocationId?: number | null;
+  /** Loaded directly off the production line — no yard source. */
+  fromProduction?: boolean;
+}
+
+/**
+ * Validate a chosen stock source location for a weigh session and enforce the
+ * bundle-count/size rules. Returns the resolved sourceLocationId to persist.
+ * Shared by enter/edit so both paths behave identically.
+ */
+async function resolveWeighSource(
+  tx: TxClient,
+  sourceLocationId: number | null | undefined,
+  bundleCount: number | null | undefined,
+  sizeId: number | null | undefined,
+): Promise<number | null> {
+  if (sourceLocationId == null) return null;
+  const loc = await tx.stockLocation.findUnique({
+    where: { id: sourceLocationId },
+    select: { id: true, isActive: true, unit: true },
+  });
+  if (!loc) throw new ServiceError("موقع المخزون المصدر غير موجود");
+  if (!loc.isActive) throw new ServiceError("موقع المخزون المصدر موقوف");
+  // Bundle sites must carry a bundle count AND a size so the load-out
+  // deduction at close knows how many bundles of which size left the yard.
+  // Without the size the LOAD_OUT row would carry a null size at a bundle
+  // location and corrupt the per-size balances.
+  if (loc.unit === "BUNDLE") {
+    if (bundleCount == null || bundleCount <= 0) {
+      throw new ServiceError("عدد الربطات مطلوب عند اختيار موقع مخزون بالربطات");
+    }
+    if (sizeId == null) {
+      throw new ServiceError("المقاس مطلوب عند اختيار موقع مخزون بالربطات");
+    }
+  }
+  return loc.id;
 }
 
 export async function enterWeighSession(
@@ -997,6 +1034,13 @@ export async function enterWeighSession(
           if (!size || !size.isActive) throw new ServiceError("القياس غير صالح");
         }
 
+        // Direct-from-production cross-dock has no yard source; the two are
+        // mutually exclusive.
+        const fromProduction = data.fromProduction === true;
+        const sourceLocationId = fromProduction
+          ? null
+          : await resolveWeighSource(tx, data.sourceLocationId, data.bundleCount, data.sizeId);
+
         const lastSession = await tx.weighSession.findFirst({
           where: { truckOperationId: truckId },
           orderBy: { sessionNumber: "desc" },
@@ -1011,6 +1055,8 @@ export async function enterWeighSession(
             sizeId: data.sizeId || null,
             bundleCount: data.bundleCount || null,
             weightTons: data.weightTons,
+            sourceLocationId,
+            fromProduction,
           },
         });
 
@@ -1032,6 +1078,7 @@ export async function enterWeighSession(
             sessionNumber: nextNumber,
             weightTons: data.weightTons,
             sizeId: data.sizeId,
+            sourceLocationId,
           },
         });
 
@@ -1080,6 +1127,31 @@ export async function editWeighSession(
           throw new ServiceError("الوزن يجب أن يكون أكبر من صفر");
         }
 
+        // Post-edit cross-dock flag. When on, the source must be null and no
+        // yard-source validation applies.
+        const effectiveFromProduction =
+          data.fromProduction !== undefined
+            ? data.fromProduction
+            : session.fromProduction;
+
+        // Validate the source/bundle-count/size rules against the POST-edit
+        // state so e.g. clearing the bundle count or size on a bundle source
+        // is rejected.
+        const effectiveSource = effectiveFromProduction
+          ? null
+          : data.sourceLocationId !== undefined
+            ? data.sourceLocationId
+            : session.sourceLocationId;
+        const effectiveBundle =
+          data.bundleCount !== undefined ? data.bundleCount : session.bundleCount;
+        const effectiveSize = data.sizeId !== undefined ? data.sizeId : session.sizeId;
+        const resolvedSource = await resolveWeighSource(
+          tx,
+          effectiveSource,
+          effectiveBundle,
+          effectiveSize,
+        );
+
         // Optimistic lock against two concurrent edits of the same weigh
         // session. Use the "unchecked" variant so we can set the FK scalar
         // `sizeId` directly (updateMany cannot nest relation writes).
@@ -1089,6 +1161,13 @@ export async function editWeighSession(
         if (data.weightTons !== undefined) updateData.weightTons = data.weightTons;
         if (data.sizeId !== undefined) updateData.sizeId = data.sizeId ?? null;
         if (data.bundleCount !== undefined) updateData.bundleCount = data.bundleCount;
+        // Switching a session to/from production keeps source and flag in sync.
+        if (data.fromProduction !== undefined) {
+          updateData.fromProduction = effectiveFromProduction;
+          updateData.sourceLocationId = effectiveFromProduction ? null : resolvedSource;
+        } else if (data.sourceLocationId !== undefined) {
+          updateData.sourceLocationId = resolvedSource;
+        }
 
         const result = await tx.weighSession.updateMany({
           where: { id: sessionId, version: expectedVersion },
@@ -2418,12 +2497,19 @@ export async function closeOperation(
           },
         });
 
+        // Deduct stock for every session loaded from a stock location. Runs in
+        // this same transaction so a rollback undoes the close and the
+        // deduction together. Does not block the close on insufficient stock.
+        const loadOut = await applyLoadOutForClose(tx, truckId, userId);
+
         logger.info(
           {
             truckId,
             externalCardNumber: cardNumber,
             bridgeNetKg: bridgeNetKg.toNumber(),
             internalTotalTons: internalTotalTons.toNumber(),
+            stockDeducted: loadOut.deducted,
+            stockSkipped: loadOut.skipped,
           },
           "truck operation closed",
         );

@@ -29,7 +29,9 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -75,6 +77,16 @@ interface SizeOption {
   code: string;
   displayName: string;
   isBundleType: boolean;
+}
+
+interface SourceLocationOption {
+  locationId: number;
+  code: string;
+  nameAr: string;
+  yardNameAr: string;
+  unit: "BUNDLE" | "TON";
+  totalQuantity: number;
+  lines: { sizeId: number | null; unit: "BUNDLE" | "TON"; quantity: number }[];
 }
 
 interface WeighSessionItem {
@@ -179,9 +191,11 @@ const statusMap: Record<string, { label: string; color: string }> = {
 export function ScaleOperationView({
   truckId,
   discrepancyWarnKg,
+  stockModuleEnabled = false,
 }: {
   truckId: number;
   discrepancyWarnKg: number;
+  stockModuleEnabled?: boolean;
 }) {
   const { data: session } = useSession();
   const searchParams = useSearchParams();
@@ -951,6 +965,7 @@ export function ScaleOperationView({
         currentRoundSessions={currentRoundSessions}
         roundNumber={openRound?.roundNumber ?? 1}
         onSuccess={fetchTruck}
+        stockModuleEnabled={stockModuleEnabled}
       />
       <LoadingCompleteDialog
         open={showLoadingCompleteDialog}
@@ -1550,6 +1565,10 @@ function WeightDialog({
 
 // ─── Session Dialog ────────────────────────────────────────────────
 
+// Sentinel value for material loaded straight off the production line — it
+// never entered the yard, so no stock location applies and nothing is deducted.
+const PRODUCTION_SOURCE = "__production__";
+
 function SessionDialog({
   open,
   onOpenChange,
@@ -1558,6 +1577,7 @@ function SessionDialog({
   currentRoundSessions,
   roundNumber,
   onSuccess,
+  stockModuleEnabled = false,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -1567,17 +1587,118 @@ function SessionDialog({
   currentRoundSessions: WeighSessionItem[];
   roundNumber: number;
   onSuccess: () => void;
+  /** When false the stock module is dark-launched: no source picker, no deduction. */
+  stockModuleEnabled?: boolean;
 }) {
   const [sizeCode, setSizeCode] = useState<string>("");
   const [bundleCount, setBundleCount] = useState("");
   const [weightTons, setWeightTons] = useState("");
+  const [sourceId, setSourceId] = useState<string>("");
+  const [sources, setSources] = useState<SourceLocationOption[]>([]);
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const parsedWeight = parseFloat(weightTons);
   const parsedBundles = bundleCount ? parseInt(bundleCount, 10) : null;
   const selectedSize = sizes.find((s) => s.code === sizeCode);
-  const isValid = !isNaN(parsedWeight) && parsedWeight > 0;
+
+  // Load current stock balances to offer source locations. The internal loader
+  // role holds stock.view, so this succeeds for whoever enters weigh sessions.
+  useEffect(() => {
+    // Dark-launch: skip the stock lookup entirely while the module is hidden
+    // (the endpoint 404s and no source picker is shown).
+    if (!open || !stockModuleEnabled) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/stock/balances");
+        const json = await res.json();
+        if (!cancelled && json.success) {
+          setSources(json.data as SourceLocationOption[]);
+        }
+      } catch {
+        /* picker just stays empty; entry can still proceed if stock is unset */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, stockModuleEnabled]);
+
+  // Source candidates matching the counting unit implied by the chosen size.
+  const neededUnit: "BUNDLE" | "TON" | null = selectedSize
+    ? selectedSize.isBundleType
+      ? "BUNDLE"
+      : "TON"
+    : null;
+
+  // Only locations that actually hold stock matching the chosen size (for
+  // bundles) or any stock (for tons). Empty / other-size locations are hidden
+  // entirely — the loader should never pick a source the system says is empty.
+  const sourceOptions = useMemo(() => {
+    if (!neededUnit) return [];
+    return sources
+      .filter((s) => s.unit === neededUnit)
+      .map((s) => {
+        const qty =
+          neededUnit === "BUNDLE" && selectedSize
+            ? s.lines.find((l) => l.unit === "BUNDLE" && l.sizeId === selectedSize.id)
+                ?.quantity ?? 0
+            : s.totalQuantity;
+        return { loc: s, qty };
+      })
+      .filter((o) => o.qty > 0)
+      .sort((a, b) => b.qty - a.qty);
+  }, [sources, neededUnit, selectedSize]);
+
+  // Group the matching locations by yard (front / back) for a clearer list.
+  const sourceYardGroups = useMemo(() => {
+    const map = new Map<string, typeof sourceOptions>();
+    for (const o of sourceOptions) {
+      const arr = map.get(o.loc.yardNameAr) ?? [];
+      arr.push(o);
+      map.set(o.loc.yardNameAr, arr);
+    }
+    return [...map.entries()].map(([yardNameAr, options]) => ({ yardNameAr, options }));
+  }, [sourceOptions]);
+
+  const isProductionSource = sourceId === PRODUCTION_SOURCE;
+  const selectedSource = isProductionSource
+    ? null
+    : sources.find((s) => String(s.locationId) === sourceId) ?? null;
+  const sourceIsBundle = selectedSource?.unit === "BUNDLE";
+
+  // Base UI's Select shows the raw value in the trigger unless items provided.
+  const sourceSelectItems = useMemo(
+    () => [
+      { value: PRODUCTION_SOURCE, label: "من خط الإنتاج مباشرة" },
+      ...sourceOptions.map((o) => ({
+        value: String(o.loc.locationId),
+        label: `${o.loc.nameAr} — ${o.loc.yardNameAr}`,
+      })),
+    ],
+    [sourceOptions],
+  );
+  const sizeSelectItems = useMemo(
+    () => sizes.map((s) => ({ value: s.code, label: s.displayName })),
+    [sizes],
+  );
+
+  // Bundle count is required for bundle-type sizes. When the stock module is
+  // live this is driven by the chosen source's unit; while dark-launched (no
+  // source picker) it falls back to the size's own type.
+  const bundleRequired = stockModuleEnabled
+    ? sourceIsBundle
+    : !!selectedSize?.isBundleType;
+
+  // With the stock module live the operator must state the source explicitly
+  // (a yard location or the production line). While dark-launched there is no
+  // source field, so the session validates on weight (+ bundles) alone.
+  const isValid =
+    !isNaN(parsedWeight) &&
+    parsedWeight > 0 &&
+    (!stockModuleEnabled || isProductionSource || !!selectedSource) &&
+    (!bundleRequired || (parsedBundles != null && parsedBundles > 0));
 
   const existingSizeCodes = currentRoundSessions
     .map(
@@ -1594,6 +1715,7 @@ function SessionDialog({
     setSizeCode("");
     setBundleCount("");
     setWeightTons("");
+    setSourceId("");
     setConfirming(false);
   };
 
@@ -1604,8 +1726,16 @@ function SessionDialog({
 
   const handleNext = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isValid) {
+    if (isNaN(parsedWeight) || parsedWeight <= 0) {
       toast.error("أدخل وزناً صالحاً");
+      return;
+    }
+    if (stockModuleEnabled && !isProductionSource && !selectedSource) {
+      toast.error("اختر المصدر: موقع مخزون أو خط الإنتاج مباشرة");
+      return;
+    }
+    if (bundleRequired && (parsedBundles == null || parsedBundles <= 0)) {
+      toast.error("عدد الربطات مطلوب");
       return;
     }
     setConfirming(true);
@@ -1620,6 +1750,10 @@ function SessionDialog({
         if (sz) body.sizeId = sz.id;
       }
       if (parsedBundles != null) body.bundleCount = parsedBundles;
+      if (selectedSource) body.sourceLocationId = selectedSource.locationId;
+      // Direct-from-production cross-dock: no yard source; the server writes a
+      // paired receipt + load-out on the virtual location at close.
+      if (isProductionSource) body.fromProduction = true;
 
       const res = await fetch(`/api/trucks/${truckId}/sessions`, {
         method: "POST",
@@ -1654,10 +1788,14 @@ function SessionDialog({
             <div className="space-y-2">
               <Label>القياس</Label>
               <Select
+                items={sizeSelectItems}
                 value={sizeCode}
-                onValueChange={(v) => setSizeCode(v ?? "")}
+                onValueChange={(v) => {
+                  setSizeCode(v ?? "");
+                  setSourceId("");
+                }}
               >
-                <SelectTrigger>
+                <SelectTrigger className="w-full">
                   <SelectValue placeholder="اختر القياس" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1669,9 +1807,72 @@ function SessionDialog({
                 </SelectContent>
               </Select>
             </div>
+            {stockModuleEnabled && (
+            <div className="space-y-2">
+              <Label>المصدر</Label>
+              <Select
+                items={sourceSelectItems}
+                value={sourceId}
+                onValueChange={(v) => setSourceId(v ?? "")}
+                disabled={!selectedSize}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue
+                    placeholder={
+                      selectedSize ? "اختر المصدر" : "اختر القياس أولاً"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={PRODUCTION_SOURCE}>
+                    <span className="flex w-full items-center justify-between gap-3">
+                      <span className="font-medium">من خط الإنتاج مباشرة</span>
+                      <span className="text-xs text-muted-foreground">
+                        بدون خصم من الساحة
+                      </span>
+                    </span>
+                  </SelectItem>
+                  {sourceOptions.length === 0 ? (
+                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                      {selectedSize
+                        ? "لا يوجد رصيد لهذا المقاس في أي موقع"
+                        : "لا توجد مواقع مطابقة"}
+                    </div>
+                  ) : (
+                    sourceYardGroups.map((g) => (
+                      <SelectGroup key={g.yardNameAr}>
+                        <SelectLabel className="font-semibold">
+                          {g.yardNameAr}
+                        </SelectLabel>
+                        {g.options.map((o) => (
+                          <SelectItem
+                            key={o.loc.locationId}
+                            value={String(o.loc.locationId)}
+                          >
+                            <span className="flex w-full items-center justify-between gap-3">
+                              <span>{o.loc.nameAr}</span>
+                              <span
+                                className="text-xs tabular-nums text-muted-foreground"
+                                dir="ltr"
+                              >
+                                {o.qty.toLocaleString("en-US", {
+                                  maximumFractionDigits: 3,
+                                })}{" "}
+                                {o.loc.unit === "TON" ? "طن" : "ربطة"}
+                              </span>
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+            )}
             {selectedSize?.isBundleType && (
             <div className="space-y-2">
-              <Label>عدد الربطات (اختياري)</Label>
+              <Label>عدد الربطات</Label>
               <Input
                 type="number"
                 min="1"
@@ -1719,6 +1920,18 @@ function SessionDialog({
                     {parsedBundles != null ? parsedBundles.toLocaleString("en-US") : "—"}
                   </span>
                 </div>
+                {stockModuleEnabled && (
+                <div>
+                  <span className="text-muted-foreground">المصدر: </span>
+                  <span className="font-medium">
+                    {isProductionSource
+                      ? "خط الإنتاج مباشرة (تُسجَّل بالسجل دون خصم من الساحة)"
+                      : selectedSource
+                        ? `${selectedSource.code} — ${selectedSource.nameAr}`
+                        : "—"}
+                  </span>
+                </div>
+                )}
               </div>
             </div>
             {mixedSizeWarning && (
@@ -1851,10 +2064,11 @@ function EditSessionButton({
               <div className="space-y-2">
                 <Label>القياس</Label>
                 <Select
+                  items={sizes.map((sz) => ({ value: sz.code, label: sz.displayName }))}
                   value={sizeCode}
                   onValueChange={(v) => setSizeCode(v ?? "")}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <SelectValue placeholder="اختر القياس" />
                   </SelectTrigger>
                   <SelectContent>

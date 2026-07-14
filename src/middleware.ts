@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 import { getRoleLandingPage } from "@/lib/rbac-policy";
+import { isStockModuleEnabled } from "@/config/feature-flags";
 
 /**
  * Layer 1 of the 3-layer RBAC defence.
@@ -38,6 +39,36 @@ const ROUTE_PERMISSIONS: RouteRule[] = [
   { pattern: /^\/billet-receipts(\/.*)?$/, permissions: ["billet.receipt.view"] },
 
   { pattern: /^\/finance(\/.*)?$/, permissions: ["payment.view"] },
+
+  // Stock (finished-goods warehouse). Specific setup route before the
+  // wildcard parent. Location setup requires the stricter manage permission;
+  // the map/balances views only need stock.view. API is gated coarsely at
+  // stock.view here — mutation handlers enforce stock.location.manage.
+  { pattern: /^\/stock\/locations(\/.*)?$/, permissions: ["stock.location.manage"] },
+  {
+    pattern: /^\/stock\/production-in$/,
+    permissions: ["stock.production.ton", "stock.production.bundle"],
+  },
+  { pattern: /^\/stock\/opening-balance$/, permissions: ["stock.opening_balance"] },
+  { pattern: /^\/stock\/transfer$/, permissions: ["stock.transfer"] },
+  { pattern: /^\/stock\/adjust$/, permissions: ["stock.adjust"] },
+  // The movements ledger has its own permission (separate from the map).
+  { pattern: /^\/stock\/movements$/, permissions: ["stock.movements.view"] },
+  { pattern: /^\/stock(\/.*)?$/, permissions: ["stock.view"] },
+  // Coarse OR gate: GET (ledger) needs movements.view, POST (production-in)
+  // needs a production permission — the handler enforces the exact one per
+  // method and per counting unit.
+  {
+    pattern: /^\/api\/stock\/movements$/,
+    permissions: ["stock.movements.view", "stock.production.ton", "stock.production.bundle"],
+  },
+  // Today's production feed: visible to production clerks (either unit) so they
+  // can spot duplicate/missing entries even without the full movement-log view.
+  {
+    pattern: /^\/api\/stock\/production-today$/,
+    permissions: ["stock.production.ton", "stock.production.bundle", "stock.movements.view"],
+  },
+  { pattern: /^\/api\/stock(\/.*)?$/, permissions: ["stock.view"] },
 
   { pattern: /^\/admin(\/.*)?$/, permissions: ["user.manage"] },
 
@@ -78,11 +109,26 @@ function isApiPath(pathname: string): boolean {
   return pathname.startsWith("/api/");
 }
 
+function isStockPath(pathname: string): boolean {
+  return pathname === "/stock" || pathname.startsWith("/stock/") || pathname.startsWith("/api/stock");
+}
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   if (isPublicPath(pathname)) {
     return NextResponse.next();
+  }
+
+  // Dark-launch gate: while the stock module is disabled it must be completely
+  // invisible — every stock route behaves as if it does not exist, for all
+  // users (admins included). Evaluated from server env at request time so it
+  // can be flipped with an env change + reload (no rebuild).
+  if (!isStockModuleEnabled() && isStockPath(pathname)) {
+    if (isApiPath(pathname)) {
+      return NextResponse.json({ success: false, error: "غير موجود" }, { status: 404 });
+    }
+    return NextResponse.redirect(new URL("/", req.url));
   }
 
   const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });

@@ -1,5 +1,6 @@
 import { ScaleOperationView } from "@/components/scale/scale-operation-view";
 import { WEIGHBRIDGE_DISCREPANCY_WARN_KG } from "@/lib/weighbridge-discrepancy";
+import { isStockModuleEnabled } from "@/config/feature-flags";
 
 export default async function ScaleOperationPage({
   params,
@@ -21,6 +22,7 @@ export default async function ScaleOperationPage({
     <ScaleOperationView
       truckId={truckId}
       discrepancyWarnKg={WEIGHBRIDGE_DISCREPANCY_WARN_KG}
+      stockModuleEnabled={isStockModuleEnabled()}
     />
   );
 }
