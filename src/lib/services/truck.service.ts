@@ -1524,6 +1524,97 @@ export async function correctCompletedTare(
   );
 }
 
+export async function correctCompletedExternalCardNumber(
+  truckId: number,
+  externalCardNumber: string,
+  reason: string,
+  expectedVersion: number,
+  userId: number,
+) {
+  const cardNumber = externalCardNumber.trim();
+  if (!cardNumber) {
+    throw new ServiceError("رقم كرت القبان (المالية) مطلوب");
+  }
+
+  return withRetry(() =>
+    prisma.$transaction(
+      async (tx: TxClient) => {
+        const locked = await tx.$queryRaw<{ id: number }[]>`
+          SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
+        `;
+        if (locked.length === 0) {
+          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        }
+
+        const truck = await tx.truckOperation.findUnique({
+          where: { id: truckId },
+          select: {
+            id: true,
+            status: true,
+            externalCardNumber: true,
+          },
+        });
+        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        assertCompletedForCorrection(truck.status);
+
+        if (truck.externalCardNumber === cardNumber) {
+          throw new ServiceError("الرقم الجديد مطابق لرقم الكرت الحالي");
+        }
+
+        const duplicate = await tx.truckOperation.findUnique({
+          where: { externalCardNumber: cardNumber },
+          select: { id: true },
+        });
+        if (duplicate && duplicate.id !== truckId) {
+          throw new ServiceError(
+            `رقم كرت القبان ${cardNumber} مستخدم مسبقاً في العملية #${duplicate.id}`,
+            "CONFLICT",
+          );
+        }
+
+        const oldCardNumber = truck.externalCardNumber;
+        const result = await tx.truckOperation.updateMany({
+          where: { id: truckId, version: expectedVersion },
+          data: {
+            externalCardNumber: cardNumber,
+            version: { increment: 1 },
+          },
+        });
+        if (result.count === 0) {
+          throw new ServiceError(
+            "تم تعديل السجل من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
+            "CONFLICT",
+          );
+        }
+
+        await logAudit(tx, {
+          userId,
+          action: "update",
+          entityType: "TruckOperation",
+          entityId: String(truckId),
+          details: {
+            event: "completed_external_card_corrected",
+            oldExternalCardNumber: oldCardNumber,
+            newExternalCardNumber: cardNumber,
+            reason,
+            expectedVersion,
+          },
+        });
+
+        logger.info(
+          { truckId, oldCardNumber, newCardNumber: cardNumber },
+          "completed external card number corrected",
+        );
+        return tx.truckOperation.findUnique({
+          where: { id: truckId },
+          include: DETAIL_INCLUDE,
+        });
+      },
+      { isolationLevel: "Serializable" },
+    ),
+  );
+}
+
 export async function correctCompletedRoundExternal(
   truckId: number,
   roundId: number,
