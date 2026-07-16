@@ -46,6 +46,7 @@ vi.mock("./tx-retry", () => ({
 import {
   correctCompletedRoundGrade,
   correctCompletedTare,
+  correctCompletedExternalCardNumber,
   correctCompletedRoundExternal,
   addCompletedSession,
   editCompletedSession,
@@ -209,6 +210,147 @@ describe("correctCompletedTare", () => {
       where: { bridgeRoundId: 11 },
       data: { weightTons: "16.800", version: { increment: 1 } },
     });
+  });
+});
+
+// ─── Finance card number correction ────────────────────────────
+
+describe("correctCompletedExternalCardNumber", () => {
+  beforeEach(() => {
+    mockPrisma.truckOperation.findUnique.mockImplementation(
+      async (args: { where: { id?: number; externalCardNumber?: string } }) => {
+        if (args.where.externalCardNumber != null) return null;
+        return {
+          id: 1,
+          status: "Completed",
+          externalCardNumber: "WB-1001",
+        };
+      },
+    );
+  });
+
+  it("updates the card number and audits with reason", async () => {
+    await correctCompletedExternalCardNumber(1, "WB-2002", "خطأ رقم كرت", 0, 7);
+
+    expect(mockPrisma.truckOperation.updateMany).toHaveBeenCalledWith({
+      where: { id: 1, version: 0 },
+      data: {
+        externalCardNumber: "WB-2002",
+        version: { increment: 1 },
+      },
+    });
+    const audit = mockPrisma.auditLog.create.mock.calls[0][0];
+    expect(audit.data.userId).toBe(7);
+    expect(audit.data.action).toBe("update");
+    expect(audit.data.entityType).toBe("TruckOperation");
+    expect(audit.data.entityId).toBe("1");
+    expect(audit.data.details.event).toBe("completed_external_card_corrected");
+    expect(audit.data.details.oldExternalCardNumber).toBe("WB-1001");
+    expect(audit.data.details.newExternalCardNumber).toBe("WB-2002");
+    expect(audit.data.details.reason).toBe("خطأ رقم كرت");
+    expect(audit.data.details.expectedVersion).toBe(0);
+  });
+
+  it("trims whitespace before storing the new card number", async () => {
+    await correctCompletedExternalCardNumber(1, "  WB-2002  ", "تصحيح", 3, 7);
+
+    expect(mockPrisma.truckOperation.updateMany).toHaveBeenCalledWith({
+      where: { id: 1, version: 3 },
+      data: {
+        externalCardNumber: "WB-2002",
+        version: { increment: 1 },
+      },
+    });
+    const audit = mockPrisma.auditLog.create.mock.calls[0][0];
+    expect(audit.data.details.newExternalCardNumber).toBe("WB-2002");
+  });
+
+  it("rejects an empty card number", async () => {
+    await expect(
+      correctCompletedExternalCardNumber(1, "   ", "x", 0, 7),
+    ).rejects.toThrow(/رقم كرت القبان/);
+    await expect(
+      correctCompletedExternalCardNumber(1, "", "x", 0, 7),
+    ).rejects.toThrow(/رقم كرت القبان/);
+    expect(mockPrisma.truckOperation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the new number matches the current one (including after trim)", async () => {
+    await expect(
+      correctCompletedExternalCardNumber(1, "WB-1001", "x", 0, 7),
+    ).rejects.toThrow(/مطابق/);
+    await expect(
+      correctCompletedExternalCardNumber(1, "  WB-1001  ", "x", 0, 7),
+    ).rejects.toThrow(/مطابق/);
+    expect(mockPrisma.truckOperation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a card number already used by another truck", async () => {
+    mockPrisma.truckOperation.findUnique.mockImplementation(
+      async (args: { where: { id?: number; externalCardNumber?: string } }) => {
+        if (args.where.externalCardNumber === "WB-9999") {
+          return { id: 99 };
+        }
+        return {
+          id: 1,
+          status: "Completed",
+          externalCardNumber: "WB-1001",
+        };
+      },
+    );
+    await expect(
+      correctCompletedExternalCardNumber(1, "WB-9999", "x", 0, 7),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      correctCompletedExternalCardNumber(1, "WB-9999", "x", 0, 7),
+    ).rejects.toThrow(/مستخدم مسبقاً في العملية #99/);
+    expect(mockPrisma.truckOperation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("allows the lookup hit when the duplicate row is the same truck", async () => {
+    // Race-friendly path: unique lookup returns this truck itself.
+    mockPrisma.truckOperation.findUnique.mockImplementation(
+      async (args: { where: { id?: number; externalCardNumber?: string } }) => {
+        if (args.where.externalCardNumber === "WB-2002") {
+          return { id: 1 };
+        }
+        return {
+          id: 1,
+          status: "Completed",
+          externalCardNumber: "WB-1001",
+        };
+      },
+    );
+    await correctCompletedExternalCardNumber(1, "WB-2002", "تصحيح", 0, 7);
+    expect(mockPrisma.truckOperation.updateMany).toHaveBeenCalled();
+  });
+
+  it("raises a conflict when the truck version moved", async () => {
+    mockPrisma.truckOperation.updateMany.mockResolvedValue({ count: 0 });
+    await expect(
+      correctCompletedExternalCardNumber(1, "WB-2002", "x", 0, 7),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the truck is not Completed", async () => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValue({
+      id: 1,
+      status: "OnScale",
+      externalCardNumber: "WB-1001",
+    });
+    await expect(
+      correctCompletedExternalCardNumber(1, "WB-2002", "x", 0, 7),
+    ).rejects.toThrow(/المكتملة/);
+    expect(mockPrisma.truckOperation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the truck does not exist", async () => {
+    mockPrisma.$queryRaw.mockResolvedValue([]);
+    await expect(
+      correctCompletedExternalCardNumber(1, "WB-2002", "x", 0, 7),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(mockPrisma.truckOperation.updateMany).not.toHaveBeenCalled();
   });
 });
 

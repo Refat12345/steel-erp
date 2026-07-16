@@ -88,6 +88,19 @@ describe("formatAuditDetails", () => {
     expect(out).toContain("وزنة الخروج النهائي: لا");
   });
 
+  it("describes admin correction of the finance weighbridge card number", () => {
+    const out = formatAuditDetails("update", {
+      event: "completed_external_card_corrected",
+      oldExternalCardNumber: "WB-1001",
+      newExternalCardNumber: "WB-2002",
+      reason: "خطأ إدخال عند الإغلاق",
+    });
+    expect(out).toContain("تصحيح إداري: رقم كرت القبان لشاحنة مكتملة");
+    expect(out).toContain("رقم كرت القبان السابق: WB-1001");
+    expect(out).toContain("رقم كرت القبان الجديد: WB-2002");
+    expect(out).toContain("السبب: خطأ إدخال عند الإغلاق");
+  });
+
   it("translates grade enum values to Arabic labels", () => {
     const out = formatAuditDetails("update", { grade: "SECOND" });
     expect(out).toContain("النخب: نخب ثاني");

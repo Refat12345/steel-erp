@@ -7,6 +7,7 @@ import {
   correctGrossSchema,
   weighSessionDeleteSchema,
   closeSchema,
+  completedExternalCardCorrectionSchema,
 } from "./truck";
 
 describe("truckUpdateSchema", () => {
@@ -142,6 +143,63 @@ describe("closeSchema", () => {
     ).toBe(false);
     expect(
       closeSchema.safeParse({ externalCardNumber: "x".repeat(30) }).success,
+    ).toBe(true);
+  });
+});
+
+describe("completedExternalCardCorrectionSchema", () => {
+  it("requires a non-empty card number, reason, and version", () => {
+    expect(completedExternalCardCorrectionSchema.safeParse({}).success).toBe(false);
+    expect(
+      completedExternalCardCorrectionSchema.safeParse({
+        externalCardNumber: "   ",
+        reason: "تصحيح",
+        expectedVersion: 0,
+      }).success,
+    ).toBe(false);
+    expect(
+      completedExternalCardCorrectionSchema.safeParse({
+        externalCardNumber: "WB-1",
+        reason: "",
+        expectedVersion: 0,
+      }).success,
+    ).toBe(false);
+    expect(
+      completedExternalCardCorrectionSchema.safeParse({
+        externalCardNumber: "WB-1",
+        reason: "تصحيح",
+        expectedVersion: -1,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("trims the card number and accepts a valid payload", () => {
+    const result = completedExternalCardCorrectionSchema.safeParse({
+      externalCardNumber: "  WB-42  ",
+      reason: "خطأ إدخال عند الإغلاق",
+      expectedVersion: 2,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.externalCardNumber).toBe("WB-42");
+      expect(result.data.expectedVersion).toBe(2);
+    }
+  });
+
+  it("rejects card numbers longer than 30 characters", () => {
+    expect(
+      completedExternalCardCorrectionSchema.safeParse({
+        externalCardNumber: "x".repeat(31),
+        reason: "تصحيح",
+        expectedVersion: 0,
+      }).success,
+    ).toBe(false);
+    expect(
+      completedExternalCardCorrectionSchema.safeParse({
+        externalCardNumber: "x".repeat(30),
+        reason: "تصحيح",
+        expectedVersion: 0,
+      }).success,
     ).toBe(true);
   });
 });

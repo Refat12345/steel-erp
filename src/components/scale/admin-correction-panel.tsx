@@ -68,12 +68,14 @@ interface TruckLite {
   version: number;
   skipInternalWeighing: boolean;
   tareWeightKg: string | null;
+  externalCardNumber: string | null;
   rounds: RoundLite[];
   sessions: SessionLite[];
 }
 
 type DialogState =
   | { kind: "tare" }
+  | { kind: "card" }
   | { kind: "grade"; round: RoundLite }
   | { kind: "external"; round: RoundLite }
   | { kind: "addSession"; round: RoundLite }
@@ -95,6 +97,7 @@ export function AdminCorrectionPanel({
   const [dialog, setDialog] = useState<DialogState>(null);
   const [reason, setReason] = useState("");
   const [weight, setWeight] = useState("");
+  const [cardNumber, setCardNumber] = useState("");
   const [grade, setGrade] = useState<string>(GRADE_NONE);
   const [sizeId, setSizeId] = useState<string>(GRADE_NONE);
   const [bundleCount, setBundleCount] = useState("");
@@ -107,6 +110,7 @@ export function AdminCorrectionPanel({
     setDialog(null);
     setReason("");
     setWeight("");
+    setCardNumber("");
     setGrade(GRADE_NONE);
     setSizeId(GRADE_NONE);
     setBundleCount("");
@@ -117,6 +121,11 @@ export function AdminCorrectionPanel({
     close();
     setWeight(truck.tareWeightKg ?? "");
     setDialog({ kind: "tare" });
+  };
+  const openCard = () => {
+    close();
+    setCardNumber(truck.externalCardNumber ?? "");
+    setDialog({ kind: "card" });
   };
   const openGrade = (round: RoundLite) => {
     close();
@@ -184,6 +193,12 @@ export function AdminCorrectionPanel({
           reason: r,
           expectedVersion: truck.version,
         });
+      case "card":
+        return submit(`${base}/external-card`, "PATCH", {
+          externalCardNumber: cardNumber.trim(),
+          reason: r,
+          expectedVersion: truck.version,
+        });
       case "grade":
         return submit(`${base}/grade`, "PATCH", {
           roundId: dialog.round.id,
@@ -241,7 +256,7 @@ export function AdminCorrectionPanel({
           مكتوباً ويُسجَّل في سجل التدقيق. الحالة تبقى «مكتملة».
         </p>
 
-        {/* Visit-level tare */}
+        {/* Visit-level fields */}
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background/60 p-2">
           <div className="text-sm">
             <span className="text-muted-foreground">وزن الفارغ: </span>
@@ -252,6 +267,19 @@ export function AdminCorrectionPanel({
           <Button size="sm" variant="outline" onClick={openTare}>
             <Pencil className="h-3.5 w-3.5 me-1" />
             تصحيح وزن الفارغ
+          </Button>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background/60 p-2">
+          <div className="text-sm">
+            <span className="text-muted-foreground">رقم كرت القبان (المالية): </span>
+            <span className="font-mono font-medium">
+              {truck.externalCardNumber ?? "—"}
+            </span>
+          </div>
+          <Button size="sm" variant="outline" onClick={openCard}>
+            <Pencil className="h-3.5 w-3.5 me-1" />
+            تصحيح رقم الكرت
           </Button>
         </div>
 
@@ -364,6 +392,7 @@ export function AdminCorrectionPanel({
           <DialogHeader>
             <DialogTitle>
               {dialog?.kind === "tare" && "تصحيح وزن الفارغ"}
+              {dialog?.kind === "card" && "تصحيح رقم كرت القبان (المالية)"}
               {dialog?.kind === "grade" && "تصحيح نخب الدورة"}
               {dialog?.kind === "external" && "تصحيح الوزن الخارجي للدورة"}
               {dialog?.kind === "addSession" && "إضافة وزنة داخلية"}
@@ -388,6 +417,18 @@ export function AdminCorrectionPanel({
                     تغيير وزن الفارغ يعيد حساب صافي الدورة الأولى.
                   </p>
                 )}
+              </div>
+            )}
+
+            {dialog?.kind === "card" && (
+              <div className="space-y-1.5">
+                <Label>رقم كرت القبان (المالية)</Label>
+                <Input
+                  value={cardNumber}
+                  onChange={(e) => setCardNumber(e.target.value)}
+                  placeholder="أدخل الرقم الجديد"
+                  maxLength={30}
+                />
               </div>
             )}
 
@@ -475,7 +516,11 @@ export function AdminCorrectionPanel({
             </Button>
             <Button
               onClick={handleSubmit}
-              disabled={submitting || !reasonValid}
+              disabled={
+                submitting ||
+                !reasonValid ||
+                (dialog?.kind === "card" && cardNumber.trim().length === 0)
+              }
               variant={dialog?.kind === "deleteSession" ? "destructive" : "default"}
             >
               {dialog?.kind === "deleteSession" ? "حذف" : "حفظ"}

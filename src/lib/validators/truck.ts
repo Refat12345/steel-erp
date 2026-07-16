@@ -151,6 +151,16 @@ export const completedTareCorrectionSchema = z.object({
   expectedVersion: z.number().int().nonnegative("الإصدار المتوقّع غير صالح"),
 });
 
+export const completedExternalCardCorrectionSchema = z.object({
+  externalCardNumber: z
+    .string()
+    .trim()
+    .min(1, "رقم كرت القبان (المالية) مطلوب")
+    .max(30, "رقم كرت القبان طويل جداً"),
+  reason: correctionReasonSchema,
+  expectedVersion: z.number().int().nonnegative("الإصدار المتوقّع غير صالح"),
+});
+
 export const completedExternalCorrectionSchema = z.object({
   roundId: z.number().int().positive("الدورة غير صالحة"),
   weightKg: weightKgSchema,
