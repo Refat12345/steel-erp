@@ -5,6 +5,7 @@ import type {
   BilletContractCreateInput,
   BilletContractUpdateInput,
   PriorWithdrawalInput,
+  ContractAdjustmentInput,
 } from "@/lib/validators/billet-contract";
 import type { PaginationParams, PaginatedResult } from "@/lib/api-utils";
 import { ServiceError } from "./errors";
@@ -89,6 +90,21 @@ async function generateContractNumber(tx: TxClient): Promise<string> {
 async function generatePriorWithdrawalNumber(tx: TxClient): Promise<string> {
   const yy = String(new Date().getFullYear()).slice(-2);
   const prefix = `PW-${yy}-`;
+  const existing = await tx.billetReceipt.findMany({
+    where: { receiptNumber: { startsWith: prefix } },
+    select: { receiptNumber: true },
+  });
+  let maxSeq = 0;
+  for (const receipt of existing) {
+    const seq = parseInt(receipt.receiptNumber.slice(prefix.length), 10);
+    if (Number.isFinite(seq) && seq > maxSeq) maxSeq = seq;
+  }
+  return `${prefix}${String(maxSeq + 1).padStart(4, "0")}`;
+}
+
+async function generateAdjustmentNumber(tx: TxClient): Promise<string> {
+  const yy = String(new Date().getFullYear()).slice(-2);
+  const prefix = `ADJ-${yy}-`;
   const existing = await tx.billetReceipt.findMany({
     where: { receiptNumber: { startsWith: prefix } },
     select: { receiptNumber: true },
@@ -203,7 +219,7 @@ export interface ContractWithBalance {
 async function getCompletedUsage(db: ContractUsageClient, contractNumber: string) {
   const completedReceipts = await db.billetReceipt.findMany({
     where: { supplierContractNumber: contractNumber, status: "Completed" },
-    select: { netWeightKg: true, pieceLines: true },
+    select: { netWeightKg: true, isAdjustment: true, pieceLines: true },
   });
 
   let receivedWeight = new Decimal(0);
@@ -211,7 +227,9 @@ async function getCompletedUsage(db: ContractUsageClient, contractNumber: string
   for (const r of completedReceipts) {
     if (r.netWeightKg != null) receivedWeight = receivedWeight.plus(r.netWeightKg);
     for (const line of r.pieceLines) {
-      const accepted = Math.max(0, (line.countedPieces ?? 0) - line.rejectedPieces);
+      // Adjustment rows carry signed piece deltas — never clamp them.
+      const raw = (line.countedPieces ?? 0) - line.rejectedPieces;
+      const accepted = r.isAdjustment ? raw : Math.max(0, raw);
       acceptedByLength.set(
         line.billetLengthM,
         (acceptedByLength.get(line.billetLengthM) ?? 0) + accepted,
@@ -256,7 +274,8 @@ export async function getContractWithBalance(
   });
 
   const recentReceipts = await prisma.billetReceipt.findMany({
-    where: { supplierContractNumber: contractNumber },
+    // Balance adjustments affect the totals above but are never listed.
+    where: { supplierContractNumber: contractNumber, isAdjustment: false },
     orderBy: { createdAt: "desc" },
     take: 100,
     select: {
@@ -528,6 +547,115 @@ export async function recordPriorWithdrawal(
   return receipt;
 }
 
+/**
+ * Signed balance correction on a supplier contract. Weight and piece deltas
+ * may be positive (add to received) or negative (remove from received).
+ * Recorded as a Completed receipt row so the derived balance stays
+ * source-of-truth; existing receipts are never mutated.
+ */
+export async function recordContractAdjustment(
+  contractNumber: string,
+  data: ContractAdjustmentInput,
+  userId: number,
+) {
+  const lengths = data.pieceLines.map((line) => line.billetLengthM);
+  if (new Set(lengths).size !== lengths.length) {
+    throw new ServiceError("لا يمكن تكرار نفس الطول");
+  }
+  if (data.netWeightKg === 0 && data.pieceLines.length === 0) {
+    throw new ServiceError("أدخل وزناً أو عدد قطع للتسوية");
+  }
+
+  const receipt = await withRetry(() =>
+    prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`
+          SELECT contract_number FROM supplier_contracts
+          WHERE contract_number = ${contractNumber} FOR UPDATE
+        `;
+
+        const contract = await tx.supplierContract.findUnique({
+          where: { contractNumber },
+          include: { pieceLines: true },
+        });
+        if (!contract) throw new ServiceError("العقد غير موجود", "NOT_FOUND");
+        if (contract.status !== "Active") {
+          throw new ServiceError("لا يمكن تسجيل تسوية على عقد غير فعّال");
+        }
+
+        const contractLines = new Map(
+          contract.pieceLines.map((line) => [line.billetLengthM, line]),
+        );
+        for (const line of data.pieceLines) {
+          if (!contractLines.has(line.billetLengthM)) {
+            throw new ServiceError(
+              `الطول ${line.billetLengthM}م غير موجود في عقد المورّد`,
+            );
+          }
+        }
+
+        const netWeight = new Decimal(data.netWeightKg);
+
+        const receiptNumber = await generateAdjustmentNumber(tx);
+        const now = new Date();
+        const created = await tx.billetReceipt.create({
+          data: {
+            receiptNumber,
+            supplierContractNumber: contractNumber,
+            driverName: "تسوية رصيد",
+            plateNumber: "تسوية",
+            declaredWeightKg: netWeight.toFixed(3),
+            status: "Completed",
+            netWeightKg: netWeight.toFixed(1),
+            notes: data.notes.trim(),
+            isAdjustment: true,
+            createdById: userId,
+            closedById: userId,
+            closedAt: now,
+            pieceLines: {
+              create: data.pieceLines.map((line) => ({
+                billetLengthM: line.billetLengthM,
+                expectedPieces: line.pieces,
+                countedPieces: line.pieces,
+                rejectedPieces: 0,
+              })),
+            },
+          },
+          include: { pieceLines: { orderBy: { billetLengthM: "asc" } } },
+        });
+
+        await logAudit(tx, {
+          userId,
+          action: "create",
+          entityType: "BilletReceipt",
+          entityId: String(created.id),
+          details: {
+            event: "contract_adjustment_recorded",
+            receiptNumber,
+            supplierContractNumber: contractNumber,
+            netWeightKg: netWeight.toNumber(),
+            pieceLines: data.pieceLines,
+            notes: data.notes.trim(),
+          },
+        });
+
+        return created;
+      },
+      { isolationLevel: "Serializable" },
+    ),
+  );
+
+  logger.info(
+    {
+      contractNumber,
+      receiptId: receipt.id,
+      receiptNumber: receipt.receiptNumber,
+    },
+    "billet contract adjustment recorded",
+  );
+  return receipt;
+}
+
 export async function addContractAttachment(
   contractNumber: string,
   fileInfo: { filePath: string; fileName: string; fileSize: number },
@@ -735,6 +863,7 @@ export async function getBilletBalanceReport(params: {
       where: {
         supplierContractNumber: contract.contractNumber,
         status: "Completed",
+        isAdjustment: false,
       },
     });
 
@@ -763,9 +892,11 @@ export async function getBilletBalanceReport(params: {
 
   const contractNumbers = contracts.map((c) => c.contractNumber);
   const receipts = await prisma.billetReceipt.findMany({
+    // Balance adjustments are folded into the totals but never listed.
     where: {
       supplierContractNumber: { in: contractNumbers },
       status: "Completed",
+      isAdjustment: false,
     },
     orderBy: [{ closedAt: "desc" }, { createdAt: "desc" }],
     include: { pieceLines: true },

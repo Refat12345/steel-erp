@@ -1,5 +1,9 @@
 import { prisma } from "@/lib/db";
-import type { SalesOrderGrade, TruckStatus } from "@prisma/client";
+import type {
+  BilletReceiptStatus,
+  SalesOrderGrade,
+  TruckStatus,
+} from "@prisma/client";
 import {
   GRADE_LABELS,
   getDisplayGrade,
@@ -26,6 +30,29 @@ import {
 } from "@/lib/operational-day";
 import { computeTruckTimings } from "@/lib/truck-timing";
 import { ServiceError } from "./errors";
+import { clampEventWindow } from "./settings.service";
+import type { OperationalDayWindow } from "@/lib/operational-day";
+
+/**
+ * Raise a report window's lower bound to the analytics start date so no
+ * report can surface events from before the configured start. When the
+ * requested window lies entirely before the start, `from` is capped at
+ * `to` (an empty range) so queries return zero rows instead of inverting.
+ */
+async function clampReportWindow(window: OperationalDayWindow): Promise<{
+  window: OperationalDayWindow;
+  analyticsStartDate: string | null;
+  windowClamped: boolean;
+}> {
+  const clamp = await clampEventWindow(window.from, window.to);
+  let from = clamp.from ?? window.from;
+  if (from > window.to) from = window.to;
+  return {
+    window: from > window.from ? { ...window, from } : window,
+    analyticsStartDate: clamp.analyticsStartDate,
+    windowClamped: clamp.clamped,
+  };
+}
 
 const TRUCK_STATUS_LABELS: Record<TruckStatus, string> = {
   Queued: "بالطابور",
@@ -153,6 +180,10 @@ export interface DailyTrucksReport {
   windowTo: string;
   windowLabelAr: string;
   cutoffHour: number;
+  /** Configured analytics start date (YYYY-MM-DD) or null when unset. */
+  analyticsStartDate: string | null;
+  /** True when the requested window was narrowed by the analytics start. */
+  windowClamped: boolean;
   filters: {
     customerId?: number;
     customerName?: string;
@@ -206,6 +237,8 @@ export async function getDailyTrucksReport(
   } catch {
     throw new ServiceError("تاريخ يوم التشغيل غير صالح", "BAD_REQUEST");
   }
+  const clampMeta = await clampReportWindow(window);
+  window = clampMeta.window;
 
   let customerFilter: { customerId?: number; customerName?: string } = {};
   if (params.customerId != null) {
@@ -481,6 +514,8 @@ export async function getDailyTrucksReport(
     windowTo: window.to.toISOString(),
     windowLabelAr: formatOperationalWindowLabel(window),
     cutoffHour: OPERATIONAL_DAY_CUTOFF_HOUR,
+    analyticsStartDate: clampMeta.analyticsStartDate,
+    windowClamped: clampMeta.windowClamped,
     filters: { ...customerFilter, ...productFilterMeta },
     summary,
     sizeTotals,
@@ -547,6 +582,8 @@ export interface DailyLoadingSummary {
   windowLabelAr: string;
   cutoffHour: number;
   generatedAt: string;
+  analyticsStartDate: string | null;
+  windowClamped: boolean;
   filters: {
     customerId?: number;
     customerName?: string;
@@ -584,6 +621,10 @@ export async function getDailyLoadingSummary(
   } catch {
     throw new ServiceError("تاريخ يوم التشغيل غير صالح", "BAD_REQUEST");
   }
+  // Weekly/monthly windows can straddle the analytics start — the clamp
+  // shifts periodStartDate too, so the header reflects the real range.
+  const clampMeta = await clampReportWindow(window);
+  window = clampMeta.window;
   const periodStartDate = formatLocalDateInput(window.from);
   const periodEndDate = formatLocalDateInput(
     new Date(window.to.getTime() - 24 * 60 * 60 * 1000),
@@ -829,6 +870,8 @@ export async function getDailyLoadingSummary(
     windowLabelAr: formatOperationalWindowLabel(window),
     cutoffHour: OPERATIONAL_DAY_CUTOFF_HOUR,
     generatedAt: new Date().toISOString(),
+    analyticsStartDate: clampMeta.analyticsStartDate,
+    windowClamped: clampMeta.windowClamped,
     filters: { ...customerFilter, ...productFilterMeta },
     totals: {
       truckCount,
@@ -882,11 +925,14 @@ export interface CustomerWithdrawalSizeTotal {
 }
 
 export interface CustomerWithdrawalsReport {
+  /** Effective from date — already raised to the analytics start when clamped. */
   fromDate: string;
   toDate: string;
   windowFrom: string;
   windowTo: string;
   generatedAt: string;
+  analyticsStartDate: string | null;
+  windowClamped: boolean;
   filters: {
     customerId?: number;
     customerName?: string;
@@ -919,6 +965,12 @@ export async function getCustomerWithdrawalsReport(
     }
     throw new ServiceError("Invalid date", "BAD_REQUEST");
   }
+  const clampMeta = await clampReportWindow(window);
+  window = clampMeta.window;
+  // Keep the printed header truthful: show the range actually queried.
+  const effectiveFromDate = clampMeta.windowClamped
+    ? formatLocalDateInput(window.from)
+    : params.fromDate;
 
   let customerFilterMeta: { customerId?: number; customerName?: string } = {};
   if (params.customerId != null) {
@@ -1075,11 +1127,13 @@ export async function getCustomerWithdrawalsReport(
     }));
 
   return {
-    fromDate: params.fromDate,
+    fromDate: effectiveFromDate,
     toDate: params.toDate,
     windowFrom: window.from.toISOString(),
     windowTo: window.to.toISOString(),
     generatedAt: new Date().toISOString(),
+    analyticsStartDate: clampMeta.analyticsStartDate,
+    windowClamped: clampMeta.windowClamped,
     filters: {
       ...customerFilterMeta,
       ...sizeFilterMeta,
@@ -1092,4 +1146,505 @@ export async function getCustomerWithdrawalsReport(
     sizeTotals,
     rows,
   };
+}
+
+// ─── Daily Billet Receiving Report ───────────────────────────────────────────
+
+const BILLET_TONNAGE_NOTE: Record<ReportTonnageStatus, string | null> = {
+  included: null,
+  excluded_late_close: "Completed after the operational day ended",
+  excluded_cancelled: null,
+  excluded_open: "Not completed yet",
+};
+
+function resolveBilletReportTonnageStatus(params: {
+  status: BilletReceiptStatus;
+  closedAt: Date | null;
+  window: { to: Date };
+}): ReportTonnageStatus {
+  const { status, closedAt, window } = params;
+  if (status === "Cancelled") return "excluded_cancelled";
+  if (status !== "Completed") return "excluded_open";
+  if (!closedAt || closedAt >= window.to) return "excluded_late_close";
+  return "included";
+}
+
+function buildBilletNote(
+  tonnageStatus: ReportTonnageStatus,
+  cancelReason: string | null,
+): string | null {
+  if (tonnageStatus === "excluded_cancelled" && cancelReason?.trim()) {
+    return cancelReason.trim();
+  }
+  return BILLET_TONNAGE_NOTE[tonnageStatus];
+}
+
+function kgToTons(kg: unknown): number | null {
+  if (kg == null) return null;
+  const n = Number(kg);
+  if (!Number.isFinite(n)) return null;
+  return round3(n / 1000);
+}
+
+export interface DailyBilletReportParams {
+  operationalDate: string;
+  supplierName?: string;
+  contractNumber?: string;
+}
+
+export interface DailyBilletReceiptRow {
+  id: number;
+  receiptNumber: string;
+  plateNumber: string;
+  driverName: string;
+  supplierName: string;
+  contractNumber: string;
+  status: BilletReceiptStatus;
+  createdAt: string;
+  closedAt: string | null;
+  netTons: number | null;
+  tonnageStatus: ReportTonnageStatus;
+  note: string | null;
+  isPriorWithdrawal: boolean;
+  acceptedByLength: Record<string, number>;
+}
+
+export interface DailyBilletLengthTotal {
+  billetLengthM: number;
+  acceptedPieces: number;
+  receiptCount: number;
+  sharePct: number;
+}
+
+export interface DailyBilletGroupRow {
+  loads: number;
+  tons: number;
+  sharePct: number;
+}
+
+export interface DailyBilletBySupplierRow extends DailyBilletGroupRow {
+  supplierName: string;
+  /** Cumulative remaining weight across contracts shown for this supplier (t). */
+  remainingTons: number;
+  contractedTons: number;
+  receivedToDateTons: number;
+}
+
+export interface DailyBilletByContractRow extends DailyBilletGroupRow {
+  contractNumber: string;
+  supplierName: string;
+  /** Full contract contracted weight (t). */
+  contractedTons: number;
+  /** All-time completed received weight (t). */
+  receivedToDateTons: number;
+  /** contracted − received to date (t). Negative = overshot. */
+  remainingTons: number;
+}
+
+export interface DailyBilletReportSummary {
+  registered: number;
+  completed: number;
+  cancelled: number;
+  open: number;
+  /** Net tons from receipts completed within the operational day. */
+  totalNetTons: number;
+  totalAcceptedPieces: number;
+  /** Included (tonnage-counting) receipt count. */
+  includedLoads: number;
+  /** Sum of remaining tons for contracts shown in this report. */
+  totalRemainingTons: number;
+}
+
+export interface DailyBilletReport {
+  operationalDate: string;
+  windowFrom: string;
+  windowTo: string;
+  windowLabel: string;
+  cutoffHour: number;
+  generatedAt: string;
+  analyticsStartDate: string | null;
+  windowClamped: boolean;
+  filters: {
+    supplierName?: string;
+    contractNumber?: string;
+  };
+  summary: DailyBilletReportSummary;
+  bySupplier: DailyBilletBySupplierRow[];
+  byContract: DailyBilletByContractRow[];
+  lengthTotals: DailyBilletLengthTotal[];
+  lengthColumns: number[];
+  rows: DailyBilletReceiptRow[];
+}
+
+export async function getDailyBilletReport(
+  params: DailyBilletReportParams,
+): Promise<DailyBilletReport> {
+  let window;
+  try {
+    window = getOperationalDayWindow(params.operationalDate);
+  } catch {
+    throw new ServiceError("Invalid operational date", "BAD_REQUEST");
+  }
+  const clampMeta = await clampReportWindow(window);
+  window = clampMeta.window;
+
+  const supplierName = params.supplierName?.trim() || undefined;
+  const contractNumber = params.contractNumber?.trim() || undefined;
+
+  if (contractNumber) {
+    const contract = await prisma.supplierContract.findUnique({
+      where: { contractNumber },
+      select: { contractNumber: true, supplierName: true },
+    });
+    if (!contract) {
+      throw new ServiceError("Contract not found", "NOT_FOUND");
+    }
+    if (
+      supplierName &&
+      contract.supplierName.toLowerCase() !== supplierName.toLowerCase()
+    ) {
+      throw new ServiceError(
+        "Contract does not belong to the selected supplier",
+        "BAD_REQUEST",
+      );
+    }
+  }
+
+  const receipts = await prisma.billetReceipt.findMany({
+    where: {
+      createdAt: { gte: window.from, lt: window.to },
+      // Balance adjustments affect contract balances only — never daily rows.
+      isAdjustment: false,
+      ...(contractNumber
+        ? { supplierContractNumber: contractNumber }
+        : supplierName
+          ? {
+              contract: {
+                supplierName: { equals: supplierName, mode: "insensitive" },
+              },
+            }
+          : {}),
+    },
+    orderBy: { createdAt: "asc" },
+    include: {
+      contract: { select: { contractNumber: true, supplierName: true } },
+      pieceLines: { orderBy: { billetLengthM: "asc" } },
+    },
+  });
+
+  let completed = 0;
+  let cancelled = 0;
+  let open = 0;
+  let totalNetTons = 0;
+  let totalAcceptedPieces = 0;
+  let includedLoads = 0;
+
+  const lengthMap = new Map<
+    number,
+    { acceptedPieces: number; receiptIds: Set<number> }
+  >();
+  const lengthColumnsSet = new Set<number>();
+  const supplierMap = new Map<
+    string,
+    { loads: number; tons: number }
+  >();
+  const contractMap = new Map<
+    string,
+    { supplierName: string; loads: number; tons: number }
+  >();
+
+  const rows: DailyBilletReceiptRow[] = receipts.map((receipt) => {
+    const tonnageStatus = resolveBilletReportTonnageStatus({
+      status: receipt.status,
+      closedAt: receipt.closedAt,
+      window,
+    });
+
+    if (receipt.status === "Cancelled") cancelled += 1;
+    else if (receipt.status === "Completed") completed += 1;
+    else open += 1;
+
+    const acceptedByLength: Record<string, number> = {};
+    for (const line of receipt.pieceLines) {
+      lengthColumnsSet.add(line.billetLengthM);
+      const accepted = Math.max(
+        0,
+        (line.countedPieces ?? 0) - line.rejectedPieces,
+      );
+      if (accepted > 0) {
+        acceptedByLength[String(line.billetLengthM)] = accepted;
+      }
+    }
+
+    const netTons =
+      tonnageStatus === "included" ? kgToTons(receipt.netWeightKg) : null;
+
+    if (tonnageStatus === "included") {
+      includedLoads += 1;
+      const tons = netTons ?? 0;
+      if (netTons != null) totalNetTons = round3(totalNetTons + netTons);
+
+      const supplierAcc = supplierMap.get(receipt.contract.supplierName) ?? {
+        loads: 0,
+        tons: 0,
+      };
+      supplierAcc.loads += 1;
+      supplierAcc.tons = round3(supplierAcc.tons + tons);
+      supplierMap.set(receipt.contract.supplierName, supplierAcc);
+
+      const contractAcc = contractMap.get(receipt.contract.contractNumber) ?? {
+        supplierName: receipt.contract.supplierName,
+        loads: 0,
+        tons: 0,
+      };
+      contractAcc.loads += 1;
+      contractAcc.tons = round3(contractAcc.tons + tons);
+      contractMap.set(receipt.contract.contractNumber, contractAcc);
+
+      for (const [lenKey, accepted] of Object.entries(acceptedByLength)) {
+        const len = Number(lenKey);
+        totalAcceptedPieces += accepted;
+        const acc = lengthMap.get(len) ?? {
+          acceptedPieces: 0,
+          receiptIds: new Set<number>(),
+        };
+        acc.acceptedPieces += accepted;
+        acc.receiptIds.add(receipt.id);
+        lengthMap.set(len, acc);
+      }
+    }
+
+    return {
+      id: receipt.id,
+      receiptNumber: receipt.receiptNumber,
+      plateNumber: receipt.plateNumber,
+      driverName: receipt.driverName,
+      supplierName: receipt.contract.supplierName,
+      contractNumber: receipt.contract.contractNumber,
+      status: receipt.status,
+      createdAt: receipt.createdAt.toISOString(),
+      closedAt: receipt.closedAt?.toISOString() ?? null,
+      netTons,
+      tonnageStatus,
+      note: buildBilletNote(tonnageStatus, receipt.cancelReason),
+      isPriorWithdrawal: receipt.isPriorWithdrawal,
+      acceptedByLength,
+    };
+  });
+
+  const shareOfTons = (tons: number): number =>
+    totalNetTons > 0 ? round3((tons / totalNetTons) * 1000) / 10 : 0;
+  const shareOfPieces = (pieces: number): number =>
+    totalAcceptedPieces > 0
+      ? round3((pieces / totalAcceptedPieces) * 1000) / 10
+      : 0;
+
+  // Seed contracts for balance display:
+  // - specific contract → that contract even with 0 loads today
+  // - supplier + all contracts → every contract of that supplier
+  if (contractNumber && !contractMap.has(contractNumber)) {
+    const filtered = await prisma.supplierContract.findUnique({
+      where: { contractNumber },
+      select: { contractNumber: true, supplierName: true },
+    });
+    if (filtered) {
+      contractMap.set(filtered.contractNumber, {
+        supplierName: filtered.supplierName,
+        loads: 0,
+        tons: 0,
+      });
+      if (!supplierMap.has(filtered.supplierName)) {
+        supplierMap.set(filtered.supplierName, { loads: 0, tons: 0 });
+      }
+    }
+  } else if (supplierName && !contractNumber) {
+    const supplierContracts = await prisma.supplierContract.findMany({
+      where: { supplierName: { equals: supplierName, mode: "insensitive" } },
+      select: { contractNumber: true, supplierName: true },
+      orderBy: { contractNumber: "asc" },
+    });
+    for (const c of supplierContracts) {
+      if (!contractMap.has(c.contractNumber)) {
+        contractMap.set(c.contractNumber, {
+          supplierName: c.supplierName,
+          loads: 0,
+          tons: 0,
+        });
+      }
+      if (!supplierMap.has(c.supplierName)) {
+        supplierMap.set(c.supplierName, { loads: 0, tons: 0 });
+      }
+    }
+  }
+
+  // Remaining: when a supplier and/or a specific contract is selected.
+  const showBalance = Boolean(supplierName || contractNumber);
+  const balanceByContract = showBalance
+    ? await loadContractWeightBalances([...contractMap.keys()])
+    : new Map<
+        string,
+        {
+          contractedTons: number;
+          receivedToDateTons: number;
+          remainingTons: number;
+        }
+      >();
+
+  const lengthColumns = [...lengthColumnsSet].sort((a, b) => a - b);
+  const lengthTotals: DailyBilletLengthTotal[] = [...lengthMap.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([billetLengthM, acc]) => ({
+      billetLengthM,
+      acceptedPieces: acc.acceptedPieces,
+      receiptCount: acc.receiptIds.size,
+      sharePct: shareOfPieces(acc.acceptedPieces),
+    }));
+
+  const byContract: DailyBilletByContractRow[] = [...contractMap.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([number, acc]) => {
+      const bal = balanceByContract.get(number);
+      return {
+        contractNumber: number,
+        supplierName: acc.supplierName,
+        loads: acc.loads,
+        tons: acc.tons,
+        sharePct: shareOfTons(acc.tons),
+        contractedTons: bal?.contractedTons ?? 0,
+        receivedToDateTons: bal?.receivedToDateTons ?? 0,
+        remainingTons: bal?.remainingTons ?? 0,
+      };
+    });
+
+  const remainingBySupplier = new Map<
+    string,
+    { remainingTons: number; contractedTons: number; receivedToDateTons: number }
+  >();
+  for (const row of byContract) {
+    const acc = remainingBySupplier.get(row.supplierName) ?? {
+      remainingTons: 0,
+      contractedTons: 0,
+      receivedToDateTons: 0,
+    };
+    acc.remainingTons = round3(acc.remainingTons + row.remainingTons);
+    acc.contractedTons = round3(acc.contractedTons + row.contractedTons);
+    acc.receivedToDateTons = round3(
+      acc.receivedToDateTons + row.receivedToDateTons,
+    );
+    remainingBySupplier.set(row.supplierName, acc);
+  }
+
+  const bySupplier: DailyBilletBySupplierRow[] = [...supplierMap.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, acc]) => {
+      const bal = remainingBySupplier.get(name);
+      return {
+        supplierName: name,
+        loads: acc.loads,
+        tons: acc.tons,
+        sharePct: shareOfTons(acc.tons),
+        remainingTons: bal?.remainingTons ?? 0,
+        contractedTons: bal?.contractedTons ?? 0,
+        receivedToDateTons: bal?.receivedToDateTons ?? 0,
+      };
+    });
+
+  const totalRemainingTons = round3(
+    byContract.reduce((sum, row) => sum + row.remainingTons, 0),
+  );
+
+  return {
+    operationalDate: params.operationalDate,
+    windowFrom: window.from.toISOString(),
+    windowTo: window.to.toISOString(),
+    windowLabel: formatOperationalWindowLabel(window),
+    cutoffHour: OPERATIONAL_DAY_CUTOFF_HOUR,
+    generatedAt: new Date().toISOString(),
+    analyticsStartDate: clampMeta.analyticsStartDate,
+    windowClamped: clampMeta.windowClamped,
+    filters: {
+      ...(supplierName ? { supplierName } : {}),
+      ...(contractNumber ? { contractNumber } : {}),
+    },
+    summary: {
+      registered: receipts.length,
+      completed,
+      cancelled,
+      open,
+      totalNetTons,
+      totalAcceptedPieces,
+      includedLoads,
+      totalRemainingTons,
+    },
+    bySupplier,
+    byContract,
+    lengthTotals,
+    lengthColumns,
+    rows,
+  };
+}
+
+/** Cumulative contract weight balances (all completed receipts), in tons. */
+async function loadContractWeightBalances(
+  contractNumbers: string[],
+): Promise<
+  Map<
+    string,
+    {
+      contractedTons: number;
+      receivedToDateTons: number;
+      remainingTons: number;
+    }
+  >
+> {
+  const result = new Map<
+    string,
+    {
+      contractedTons: number;
+      receivedToDateTons: number;
+      remainingTons: number;
+    }
+  >();
+  if (contractNumbers.length === 0) return result;
+
+  const [contracts, completedReceipts] = await Promise.all([
+    prisma.supplierContract.findMany({
+      where: { contractNumber: { in: contractNumbers } },
+      select: { contractNumber: true, contractedWeightKg: true },
+    }),
+    prisma.billetReceipt.findMany({
+      where: {
+        supplierContractNumber: { in: contractNumbers },
+        status: "Completed",
+      },
+      select: { supplierContractNumber: true, netWeightKg: true },
+    }),
+  ]);
+
+  const receivedKg = new Map<string, number>();
+  for (const receipt of completedReceipts) {
+    if (receipt.netWeightKg == null) continue;
+    const kg = Number(receipt.netWeightKg);
+    if (!Number.isFinite(kg)) continue;
+    receivedKg.set(
+      receipt.supplierContractNumber,
+      (receivedKg.get(receipt.supplierContractNumber) ?? 0) + kg,
+    );
+  }
+
+  for (const contract of contracts) {
+    const contractedKg = Number(contract.contractedWeightKg);
+    const received = receivedKg.get(contract.contractNumber) ?? 0;
+    const contractedTons = Number.isFinite(contractedKg)
+      ? round3(contractedKg / 1000)
+      : 0;
+    const receivedToDateTons = round3(received / 1000);
+    result.set(contract.contractNumber, {
+      contractedTons,
+      receivedToDateTons,
+      remainingTons: round3(contractedTons - receivedToDateTons),
+    });
+  }
+
+  return result;
 }

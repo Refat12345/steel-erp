@@ -75,12 +75,27 @@ vi.mock("@/lib/logger", () => ({
 vi.mock("./tx-retry", () => ({
   withRetry: (fn: () => Promise<unknown>) => fn(),
 }));
+// Analytics-start clamp: passthrough by default (no start date configured).
+// Individual tests override to exercise the clamped path.
+const mockClampEventWindow = vi.hoisted(() =>
+  vi.fn(async (from?: Date, to?: Date) => ({
+    from,
+    to,
+    clamped: false,
+    analyticsStartDate: null as string | null,
+  })),
+);
+vi.mock("./settings.service", () => ({
+  clampEventWindow: mockClampEventWindow,
+  getAnalyticsStartDateValue: vi.fn(async () => null),
+}));
 
 import {
   registerTruck,
   updateTruckBeforeWeigh,
   updateTruckNotes,
   listOperations,
+  listLoadedTrucks,
   enterTare,
   correctTare,
   correctGross,
@@ -198,6 +213,132 @@ describe("listOperations", () => {
             { plateNumber: { contains: "4455", mode: "insensitive" } },
             { externalCardNumber: { contains: "4455", mode: "insensitive" } },
           ],
+        },
+      }),
+    );
+  });
+
+  it("floors createdAt at the analytics start even with no date filter", async () => {
+    mockPrisma.truckOperation.findMany.mockResolvedValue([]);
+    mockPrisma.truckOperation.count.mockResolvedValue(0);
+    const analyticsStart = new Date(2026, 5, 1, 8, 0, 0, 0);
+    mockClampEventWindow.mockResolvedValueOnce({
+      from: analyticsStart,
+      to: undefined,
+      clamped: false,
+      analyticsStartDate: "2026-06-01",
+    });
+
+    await listOperations({}, { page: 1, pageSize: 25 });
+
+    expect(mockClampEventWindow).toHaveBeenCalledWith(undefined, undefined);
+    expect(mockPrisma.truckOperation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { createdAt: { gte: analyticsStart } },
+      }),
+    );
+  });
+
+  it("raises an explicit dateFrom that reaches before the analytics start", async () => {
+    mockPrisma.truckOperation.findMany.mockResolvedValue([]);
+    mockPrisma.truckOperation.count.mockResolvedValue(0);
+    const requestedFrom = new Date(2026, 0, 1, 8, 0, 0, 0);
+    const requestedTo = new Date(2026, 6, 1, 8, 0, 0, 0);
+    const analyticsStart = new Date(2026, 5, 1, 8, 0, 0, 0);
+    mockClampEventWindow.mockResolvedValueOnce({
+      from: analyticsStart,
+      to: requestedTo,
+      clamped: true,
+      analyticsStartDate: "2026-06-01",
+    });
+
+    await listOperations(
+      { dateFrom: requestedFrom, dateTo: requestedTo },
+      { page: 1, pageSize: 25 },
+    );
+
+    // The service must forward the caller's filters to the clamp…
+    expect(mockClampEventWindow).toHaveBeenCalledWith(requestedFrom, requestedTo);
+    // …and build the query from the clamped window, not the raw filters.
+    expect(mockPrisma.truckOperation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { createdAt: { gte: analyticsStart, lt: requestedTo } },
+      }),
+    );
+    expect(mockPrisma.truckOperation.count).toHaveBeenCalledWith({
+      where: { createdAt: { gte: analyticsStart, lt: requestedTo } },
+    });
+  });
+});
+
+// ─── List Loaded Trucks (owner view) ───────────────────────────────
+
+describe("listLoadedTrucks analytics-start clamping", () => {
+  beforeEach(() => {
+    mockPrisma.truckOperation.findMany.mockResolvedValue([]);
+    mockPrisma.truckOperation.count.mockResolvedValue(0);
+  });
+
+  it("floors createdAt at the analytics start when no date filter is sent", async () => {
+    const analyticsStart = new Date(2026, 5, 1, 8, 0, 0, 0);
+    mockClampEventWindow.mockResolvedValueOnce({
+      from: analyticsStart,
+      to: undefined,
+      clamped: false,
+      analyticsStartDate: "2026-06-01",
+    });
+
+    await listLoadedTrucks({}, { page: 1, pageSize: 25 });
+
+    expect(mockClampEventWindow).toHaveBeenCalledWith(undefined, undefined);
+    expect(mockPrisma.truckOperation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          status: { not: "Cancelled" },
+          createdAt: { gte: analyticsStart },
+        },
+      }),
+    );
+  });
+
+  it("raises an explicit dateFrom that reaches before the analytics start", async () => {
+    const requestedTo = new Date(2026, 6, 1, 8, 0, 0, 0);
+    const analyticsStart = new Date(2026, 5, 1, 8, 0, 0, 0);
+    mockClampEventWindow.mockResolvedValueOnce({
+      from: analyticsStart,
+      to: requestedTo,
+      clamped: true,
+      analyticsStartDate: "2026-06-01",
+    });
+
+    await listLoadedTrucks(
+      { dateFrom: new Date(2026, 0, 1, 8, 0, 0, 0), dateTo: requestedTo },
+      { page: 1, pageSize: 25 },
+    );
+
+    expect(mockPrisma.truckOperation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          status: { not: "Cancelled" },
+          createdAt: { gte: analyticsStart, lt: requestedTo },
+        },
+      }),
+    );
+  });
+
+  it("keeps a post-start window untouched", async () => {
+    const window = getOperationalDayWindow("2026-06-10");
+
+    await listLoadedTrucks(
+      { dateFrom: window.from, dateTo: window.to },
+      { page: 1, pageSize: 25 },
+    );
+
+    expect(mockPrisma.truckOperation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          status: { not: "Cancelled" },
+          createdAt: { gte: window.from, lt: window.to },
         },
       }),
     );

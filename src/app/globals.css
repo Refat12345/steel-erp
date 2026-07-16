@@ -426,4 +426,9 @@ html, body {
   .dark .row-interactive:hover {
     background-color: oklch(0.615 0.175 222 / 8%);
   }
+
+  /* ── Factory Pulse progress ring ── */
+  .erp-pulse-ring {
+    transition: stroke-dashoffset 1s ease-out;
+  }
 }

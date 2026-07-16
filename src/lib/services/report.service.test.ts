@@ -3,11 +3,32 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockPrisma = vi.hoisted(() => ({
   customer: { findUnique: vi.fn() },
   truckOperation: { findMany: vi.fn() },
+  billetReceipt: { findMany: vi.fn() },
+  supplierContract: { findUnique: vi.fn(), findMany: vi.fn() },
 }));
 
 vi.mock("@/lib/db", () => ({ prisma: mockPrisma }));
+// Analytics-start clamp: passthrough by default (no start date configured).
+// Individual tests override to exercise the clamped path.
+const mockClampEventWindow = vi.hoisted(() =>
+  vi.fn(async (from?: Date, to?: Date) => ({
+    from,
+    to,
+    clamped: false,
+    analyticsStartDate: null as string | null,
+  })),
+);
+vi.mock("./settings.service", () => ({
+  clampEventWindow: mockClampEventWindow,
+  getAnalyticsStartDateValue: vi.fn(async () => null),
+}));
 
-import { getDailyTrucksReport, getDailyLoadingSummary } from "./report.service";
+import {
+  getDailyTrucksReport,
+  getDailyLoadingSummary,
+  getCustomerWithdrawalsReport,
+  getDailyBilletReport,
+} from "./report.service";
 import { ServiceError } from "./errors";
 
 beforeEach(() => {
@@ -38,6 +59,35 @@ describe("getDailyTrucksReport", () => {
         }),
       }),
     );
+  });
+
+  it("clamps the window to the analytics start and flags the report", async () => {
+    mockPrisma.truckOperation.findMany.mockResolvedValue([]);
+    // Requested day 2026-05-23 lies before the configured start 2026-06-01.
+    const analyticsStart = new Date(2026, 5, 1, 8, 0, 0, 0);
+    mockClampEventWindow.mockResolvedValueOnce({
+      from: analyticsStart,
+      to: new Date(2026, 4, 24, 8, 0, 0, 0),
+      clamped: true,
+      analyticsStartDate: "2026-06-01",
+    });
+
+    const report = await getDailyTrucksReport({ operationalDate: "2026-05-23" });
+
+    // Fully-excluded window collapses to an empty range capped at window.to.
+    expect(mockPrisma.truckOperation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          createdAt: {
+            gte: new Date(2026, 4, 24, 8, 0, 0, 0),
+            lt: new Date(2026, 4, 24, 8, 0, 0, 0),
+          },
+        }),
+      }),
+    );
+    expect(report.windowClamped).toBe(true);
+    expect(report.analyticsStartDate).toBe("2026-06-01");
+    expect(report.rows).toHaveLength(0);
   });
 
   it("sums tonnage only for included completed trucks", async () => {
@@ -626,6 +676,39 @@ describe("getDailyLoadingSummary", () => {
     expect(allReport.totals.totalBridgeTons).toBe(33);
   });
 
+  it("clamps a monthly window straddling the analytics start and shifts the printed period start", async () => {
+    mockPrisma.truckOperation.findMany.mockResolvedValue([]);
+    // Monthly window for 2026-06-20 = [Jun 1 08:00, Jul 1 08:00); the
+    // configured start 2026-06-05 cuts into it.
+    const analyticsStart = new Date(2026, 5, 5, 8, 0, 0, 0);
+    mockClampEventWindow.mockResolvedValueOnce({
+      from: analyticsStart,
+      to: new Date(2026, 6, 1, 8, 0, 0, 0),
+      clamped: true,
+      analyticsStartDate: "2026-06-05",
+    });
+
+    const report = await getDailyLoadingSummary({
+      operationalDate: "2026-06-20",
+      period: "monthly",
+    });
+
+    expect(mockPrisma.truckOperation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          createdAt: {
+            gte: analyticsStart,
+            lt: new Date(2026, 6, 1, 8, 0, 0, 0),
+          },
+        }),
+      }),
+    );
+    // The printed header must reflect the range actually queried.
+    expect(report.periodStartDate).toBe("2026-06-05");
+    expect(report.windowClamped).toBe(true);
+    expect(report.analyticsStartDate).toBe("2026-06-05");
+  });
+
   it("combines shortbar rounds under SHORTBAR product filter", async () => {
     mockPrisma.truckOperation.findMany.mockResolvedValue([
       {
@@ -669,5 +752,468 @@ describe("getDailyLoadingSummary", () => {
     expect(report.totals.truckCount).toBe(1);
     expect(report.totals.totalBridgeTons).toBe(10);
     expect(report.totals.totalInternalTons).toBe(9);
+  });
+});
+
+describe("getCustomerWithdrawalsReport analytics-start clamping", () => {
+  beforeEach(() => {
+    mockPrisma.truckOperation.findMany.mockResolvedValue([]);
+  });
+
+  it("raises the range floor and prints the effective from date", async () => {
+    // Requested 2026-05-01 → 2026-06-10; configured start 2026-06-01.
+    const analyticsStart = new Date(2026, 5, 1, 8, 0, 0, 0);
+    mockClampEventWindow.mockResolvedValueOnce({
+      from: analyticsStart,
+      to: new Date(2026, 5, 11, 8, 0, 0, 0),
+      clamped: true,
+      analyticsStartDate: "2026-06-01",
+    });
+
+    const report = await getCustomerWithdrawalsReport({
+      fromDate: "2026-05-01",
+      toDate: "2026-06-10",
+    });
+
+    expect(mockPrisma.truckOperation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: "Completed",
+          closedAt: {
+            gte: analyticsStart,
+            lt: new Date(2026, 5, 11, 8, 0, 0, 0),
+          },
+        }),
+      }),
+    );
+    // Header shows the range actually queried, not the requested one.
+    expect(report.fromDate).toBe("2026-06-01");
+    expect(report.toDate).toBe("2026-06-10");
+    expect(report.windowClamped).toBe(true);
+    expect(report.analyticsStartDate).toBe("2026-06-01");
+  });
+
+  it("collapses a fully pre-start range to an empty window instead of inverting", async () => {
+    // Requested 2026-05-01 → 2026-05-10, entirely before the 2026-06-01 start.
+    mockClampEventWindow.mockResolvedValueOnce({
+      from: new Date(2026, 5, 1, 8, 0, 0, 0),
+      to: new Date(2026, 4, 11, 8, 0, 0, 0),
+      clamped: true,
+      analyticsStartDate: "2026-06-01",
+    });
+
+    const report = await getCustomerWithdrawalsReport({
+      fromDate: "2026-05-01",
+      toDate: "2026-05-10",
+    });
+
+    // from is capped at to → gte === lt → zero rows, never an inverted range.
+    expect(mockPrisma.truckOperation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          closedAt: {
+            gte: new Date(2026, 4, 11, 8, 0, 0, 0),
+            lt: new Date(2026, 4, 11, 8, 0, 0, 0),
+          },
+        }),
+      }),
+    );
+    expect(report.rows).toHaveLength(0);
+    expect(report.totals.truckCount).toBe(0);
+    expect(report.windowClamped).toBe(true);
+  });
+
+  it("leaves a fully post-start range untouched", async () => {
+    const report = await getCustomerWithdrawalsReport({
+      fromDate: "2026-06-05",
+      toDate: "2026-06-10",
+    });
+
+    expect(mockPrisma.truckOperation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          closedAt: {
+            gte: new Date(2026, 5, 5, 8, 0, 0, 0),
+            lt: new Date(2026, 5, 11, 8, 0, 0, 0),
+          },
+        }),
+      }),
+    );
+    expect(report.fromDate).toBe("2026-06-05");
+    expect(report.windowClamped).toBe(false);
+  });
+});
+
+describe("getDailyBilletReport analytics-start clamping", () => {
+  beforeEach(() => {
+    mockPrisma.billetReceipt.findMany.mockResolvedValue([]);
+  });
+
+  it("collapses a fully pre-start day to an empty window and flags the report", async () => {
+    // Requested day 2026-05-23 lies before the configured start 2026-06-01.
+    mockClampEventWindow.mockResolvedValueOnce({
+      from: new Date(2026, 5, 1, 8, 0, 0, 0),
+      to: new Date(2026, 4, 24, 8, 0, 0, 0),
+      clamped: true,
+      analyticsStartDate: "2026-06-01",
+    });
+
+    const report = await getDailyBilletReport({ operationalDate: "2026-05-23" });
+
+    expect(mockPrisma.billetReceipt.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          createdAt: {
+            gte: new Date(2026, 4, 24, 8, 0, 0, 0),
+            lt: new Date(2026, 4, 24, 8, 0, 0, 0),
+          },
+        }),
+      }),
+    );
+    expect(report.rows).toHaveLength(0);
+    expect(report.windowClamped).toBe(true);
+    expect(report.analyticsStartDate).toBe("2026-06-01");
+  });
+
+  it("queries the normal operational window for a post-start day", async () => {
+    const report = await getDailyBilletReport({ operationalDate: "2026-06-06" });
+
+    expect(mockPrisma.billetReceipt.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          createdAt: {
+            gte: new Date(2026, 5, 6, 8, 0, 0, 0),
+            lt: new Date(2026, 5, 7, 8, 0, 0, 0),
+          },
+        }),
+      }),
+    );
+    expect(report.windowClamped).toBe(false);
+  });
+});
+
+describe("getDailyBilletReport", () => {
+  beforeEach(() => {
+    mockPrisma.billetReceipt.findMany.mockResolvedValue([]);
+    mockPrisma.supplierContract.findUnique.mockResolvedValue(null);
+    mockPrisma.supplierContract.findMany.mockResolvedValue([]);
+  });
+
+  function makeReceipt(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 1,
+      receiptNumber: "R-26-0001",
+      plateNumber: "1234",
+      driverName: "Driver",
+      status: "Completed",
+      createdAt: new Date(2026, 5, 6, 10, 0, 0),
+      closedAt: new Date(2026, 5, 6, 12, 0, 0),
+      netWeightKg: 25000,
+      declaredWeightKg: 26000,
+      cancelReason: null,
+      isPriorWithdrawal: false,
+      isAdjustment: false,
+      contract: { contractNumber: "P-26-001", supplierName: "asda" },
+      pieceLines: [
+        {
+          billetLengthM: 12,
+          countedPieces: 100,
+          rejectedPieces: 5,
+          expectedPieces: 100,
+        },
+        {
+          billetLengthM: 6,
+          countedPieces: 40,
+          rejectedPieces: 0,
+          expectedPieces: 40,
+        },
+      ],
+      ...overrides,
+    };
+  }
+
+  it("rejects an invalid operational date", async () => {
+    await expect(
+      getDailyBilletReport({ operationalDate: "not-a-date" }),
+    ).rejects.toBeInstanceOf(ServiceError);
+  });
+
+  it("excludes adjustments and filters by operational day", async () => {
+    await getDailyBilletReport({ operationalDate: "2026-06-06" });
+
+    expect(mockPrisma.billetReceipt.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          isAdjustment: false,
+          createdAt: {
+            gte: new Date(2026, 5, 6, 8, 0, 0, 0),
+            lt: new Date(2026, 5, 7, 8, 0, 0, 0),
+          },
+        }),
+      }),
+    );
+  });
+
+  it("sums net tons and pieces only for receipts completed within the day", async () => {
+    mockPrisma.billetReceipt.findMany.mockResolvedValue([
+      makeReceipt({ id: 1 }),
+      makeReceipt({
+        id: 2,
+        receiptNumber: "R-26-0002",
+        status: "Loaded",
+        closedAt: null,
+        netWeightKg: null,
+        pieceLines: [
+          {
+            billetLengthM: 12,
+            countedPieces: null,
+            rejectedPieces: 0,
+            expectedPieces: 50,
+          },
+        ],
+      }),
+      makeReceipt({
+        id: 3,
+        receiptNumber: "R-26-0003",
+        status: "Cancelled",
+        cancelReason: "wrong plate",
+        netWeightKg: 10000,
+        pieceLines: [],
+      }),
+      makeReceipt({
+        id: 4,
+        receiptNumber: "R-26-0004",
+        // Closed after operational day end (08:00 next day)
+        closedAt: new Date(2026, 5, 7, 9, 0, 0),
+        netWeightKg: 8000,
+      }),
+    ]);
+
+    const report = await getDailyBilletReport({ operationalDate: "2026-06-06" });
+
+    expect(report.summary.registered).toBe(4);
+    expect(report.summary.completed).toBe(2);
+    expect(report.summary.cancelled).toBe(1);
+    expect(report.summary.open).toBe(1);
+    expect(report.summary.includedLoads).toBe(1);
+    expect(report.summary.totalNetTons).toBe(25);
+    // accepted = (100-5) + 40 = 135
+    expect(report.summary.totalAcceptedPieces).toBe(135);
+    expect(report.summary.totalRemainingTons).toBe(0);
+
+    expect(report.bySupplier).toEqual([
+      expect.objectContaining({
+        supplierName: "asda",
+        loads: 1,
+        tons: 25,
+        sharePct: 100,
+        remainingTons: 0,
+      }),
+    ]);
+    expect(report.byContract).toEqual([
+      expect.objectContaining({
+        contractNumber: "P-26-001",
+        tons: 25,
+        remainingTons: 0,
+      }),
+    ]);
+    expect(report.lengthTotals).toEqual([
+      expect.objectContaining({
+        billetLengthM: 6,
+        acceptedPieces: 40,
+        receiptCount: 1,
+      }),
+      expect.objectContaining({
+        billetLengthM: 12,
+        acceptedPieces: 95,
+        receiptCount: 1,
+      }),
+    ]);
+
+    const included = report.rows.find((r) => r.id === 1);
+    const open = report.rows.find((r) => r.id === 2);
+    const cancelled = report.rows.find((r) => r.id === 3);
+    const late = report.rows.find((r) => r.id === 4);
+    expect(included?.tonnageStatus).toBe("included");
+    expect(included?.netTons).toBe(25);
+    expect(open?.tonnageStatus).toBe("excluded_open");
+    expect(open?.netTons).toBeNull();
+    expect(cancelled?.tonnageStatus).toBe("excluded_cancelled");
+    expect(cancelled?.note).toBe("wrong plate");
+    expect(late?.tonnageStatus).toBe("excluded_late_close");
+    expect(late?.netTons).toBeNull();
+
+    // No supplier/contract filter → no balance lookups
+    expect(mockPrisma.supplierContract.findMany).not.toHaveBeenCalled();
+  });
+
+  it("filters by supplier name", async () => {
+    await getDailyBilletReport({
+      operationalDate: "2026-06-06",
+      supplierName: "asda",
+    });
+
+    expect(mockPrisma.billetReceipt.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          contract: {
+            supplierName: { equals: "asda", mode: "insensitive" },
+          },
+        }),
+      }),
+    );
+  });
+
+  it("filters by contract and rejects supplier mismatch", async () => {
+    mockPrisma.supplierContract.findUnique.mockResolvedValue({
+      contractNumber: "P-26-001",
+      supplierName: "asda",
+    });
+
+    await expect(
+      getDailyBilletReport({
+        operationalDate: "2026-06-06",
+        supplierName: "other",
+        contractNumber: "P-26-001",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("throws NOT_FOUND for a missing contract filter", async () => {
+    mockPrisma.supplierContract.findUnique.mockResolvedValue(null);
+
+    await expect(
+      getDailyBilletReport({
+        operationalDate: "2026-06-06",
+        contractNumber: "P-26-999",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("loads remaining for all supplier contracts when supplier is selected", async () => {
+    mockPrisma.billetReceipt.findMany
+      .mockResolvedValueOnce([makeReceipt()]) // day receipts
+      .mockResolvedValueOnce([
+        // cumulative completed for balance
+        {
+          supplierContractNumber: "P-26-001",
+          netWeightKg: 25000,
+        },
+        {
+          supplierContractNumber: "P-26-002",
+          netWeightKg: 10000,
+        },
+      ]);
+    mockPrisma.supplierContract.findMany
+      .mockResolvedValueOnce([
+        // seed all contracts for supplier
+        { contractNumber: "P-26-001", supplierName: "asda" },
+        { contractNumber: "P-26-002", supplierName: "asda" },
+      ])
+      .mockResolvedValueOnce([
+        // balance contracted weights
+        { contractNumber: "P-26-001", contractedWeightKg: 100000 },
+        { contractNumber: "P-26-002", contractedWeightKg: 50000 },
+      ]);
+
+    const report = await getDailyBilletReport({
+      operationalDate: "2026-06-06",
+      supplierName: "asda",
+    });
+
+    expect(report.filters.supplierName).toBe("asda");
+    expect(report.byContract).toHaveLength(2);
+
+    const c1 = report.byContract.find((c) => c.contractNumber === "P-26-001");
+    const c2 = report.byContract.find((c) => c.contractNumber === "P-26-002");
+    expect(c1).toMatchObject({
+      loads: 1,
+      tons: 25,
+      contractedTons: 100,
+      receivedToDateTons: 25,
+      remainingTons: 75,
+    });
+    expect(c2).toMatchObject({
+      loads: 0,
+      tons: 0,
+      contractedTons: 50,
+      receivedToDateTons: 10,
+      remainingTons: 40,
+    });
+    expect(report.bySupplier[0]).toMatchObject({
+      supplierName: "asda",
+      tons: 25,
+      remainingTons: 115,
+      contractedTons: 150,
+      receivedToDateTons: 35,
+    });
+    expect(report.summary.totalRemainingTons).toBe(115);
+  });
+
+  it("loads remaining only for the selected contract", async () => {
+    mockPrisma.supplierContract.findUnique.mockResolvedValue({
+      contractNumber: "P-26-001",
+      supplierName: "asda",
+    });
+    mockPrisma.billetReceipt.findMany
+      .mockResolvedValueOnce([makeReceipt()])
+      .mockResolvedValueOnce([
+        { supplierContractNumber: "P-26-001", netWeightKg: 40000 },
+      ]);
+    mockPrisma.supplierContract.findMany.mockResolvedValueOnce([
+      { contractNumber: "P-26-001", contractedWeightKg: 100000 },
+    ]);
+
+    const report = await getDailyBilletReport({
+      operationalDate: "2026-06-06",
+      contractNumber: "P-26-001",
+    });
+
+    expect(report.filters.contractNumber).toBe("P-26-001");
+    expect(report.byContract).toHaveLength(1);
+    expect(report.byContract[0]).toMatchObject({
+      contractNumber: "P-26-001",
+      tons: 25,
+      contractedTons: 100,
+      receivedToDateTons: 40,
+      remainingTons: 60,
+    });
+    expect(report.summary.totalRemainingTons).toBe(60);
+    // Should not seed all supplier contracts when a specific contract is set
+    expect(mockPrisma.supplierContract.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("still shows remaining for a filtered contract with no loads today", async () => {
+    mockPrisma.supplierContract.findUnique.mockResolvedValue({
+      contractNumber: "P-26-001",
+      supplierName: "asda",
+    });
+    mockPrisma.billetReceipt.findMany
+      .mockResolvedValueOnce([]) // no day receipts
+      .mockResolvedValueOnce([
+        { supplierContractNumber: "P-26-001", netWeightKg: 20000 },
+      ]);
+    mockPrisma.supplierContract.findMany.mockResolvedValueOnce([
+      { contractNumber: "P-26-001", contractedWeightKg: 80000 },
+    ]);
+
+    const report = await getDailyBilletReport({
+      operationalDate: "2026-06-06",
+      contractNumber: "P-26-001",
+    });
+
+    expect(report.summary.includedLoads).toBe(0);
+    expect(report.summary.totalNetTons).toBe(0);
+    expect(report.byContract).toEqual([
+      expect.objectContaining({
+        contractNumber: "P-26-001",
+        loads: 0,
+        tons: 0,
+        contractedTons: 80,
+        receivedToDateTons: 20,
+        remainingTons: 60,
+      }),
+    ]);
+    expect(report.summary.totalRemainingTons).toBe(60);
   });
 });

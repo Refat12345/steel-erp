@@ -9,7 +9,11 @@
  * (cities keep their Arabic name; sizes get a best-effort transliteration).
  */
 
-import type { SalesOrderGrade, TruckStatus } from "@prisma/client";
+import type {
+  BilletReceiptStatus,
+  SalesOrderGrade,
+  TruckStatus,
+} from "@prisma/client";
 import type { ReportProductFilter } from "@/lib/material-kind";
 
 const CITY_EN: Record<string, string> = {
@@ -91,6 +95,16 @@ export const TRUCK_STATUS_EN: Record<TruckStatus, string> = {
   OnScale: "On scale",
   LoadingComplete: "Loading complete",
   SecondWeigh: "Loaded weigh",
+  Completed: "Completed",
+  Cancelled: "Cancelled",
+};
+
+/** English billet receipt status labels. */
+export const BILLET_RECEIPT_STATUS_EN: Record<BilletReceiptStatus, string> = {
+  Registered: "Registered",
+  Loaded: "Loaded",
+  Unloading: "Unloading",
+  AwaitingExit: "Awaiting exit",
   Completed: "Completed",
   Cancelled: "Cancelled",
 };

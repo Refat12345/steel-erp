@@ -37,7 +37,13 @@ import { formatDate } from "@/lib/date-format";
 import {
   defaultOperationalDateInput,
   getOperationalDayWindow,
+  getReportPeriodWindow,
+  OPERATIONAL_DAY_CUTOFF_HOUR,
 } from "@/lib/operational-day";
+import {
+  DASHBOARD_STATS_CACHE_TAG,
+  getAnalyticsStartDateValue,
+} from "@/lib/services/settings.service";
 import type { TruckStatus, SalesOrderGrade } from "@prisma/client";
 
 // ─── Period & Time Helpers ─────────────────────────────────────────────
@@ -53,13 +59,17 @@ function periodStart(period: DashboardPeriod, now: Date = new Date()): Date {
   const today = operationalDayStart(now);
   if (period === "today") return today;
   if (period === "week") {
-    const d = new Date(today);
-    d.setDate(d.getDate() - 6);
-    return d;
+    // Levant calendar week: Saturday 08:00 → next Saturday 08:00
+    // (same convention as weekly reports). "هذا الأسبوع" = current week
+    // from its Saturday, not a rolling last-7-days window.
+    return getReportPeriodWindow(operationalDateKey(now), "weekly").from;
   }
-  const d = new Date(today);
-  d.setDate(d.getDate() - 29);
-  return d;
+  // Calendar month: 1st of the current operational month at the 08:00 cutoff
+  // (not a rolling 30-day window — "هذا الشهر" means the month itself).
+  const key = operationalDateKey(now);
+  const year = Number(key.slice(0, 4));
+  const month = Number(key.slice(5, 7));
+  return new Date(year, month - 1, 1, OPERATIONAL_DAY_CUTOFF_HOUR, 0, 0, 0);
 }
 
 function operationalDateKey(date: Date): string {
@@ -176,6 +186,18 @@ function dayLabel(d: Date): string {
   return formatDate(d);
 }
 
+function computeTrend(current: number, previous: number): KpiTrend {
+  if (previous <= 0) {
+    // No baseline: a jump from 0 has no meaningful percentage.
+    return { pct: null, direction: current > 0 ? "up" : "flat" };
+  }
+  const pct = Math.round(((current - previous) / previous) * 1000) / 10;
+  return {
+    pct,
+    direction: pct > 0 ? "up" : pct < 0 ? "down" : "flat",
+  };
+}
+
 // ─── Types: Owner Tier ────────────────────────────────────────────────
 
 export interface OwnerKpis {
@@ -185,11 +207,78 @@ export interface OwnerKpis {
   servedDestinations: number;
 }
 
-export interface DailyActivityPoint {
-  date: string;
+/** Trend of one KPI vs the equivalent slice of the previous period.
+ *  `pct` is null when the previous value was 0 (no meaningful ratio). */
+export interface KpiTrend {
+  pct: number | null;
+  direction: "up" | "down" | "flat";
+}
+
+export interface OwnerTrends {
+  completedTrucks: KpiTrend;
+  totalTons: KpiTrend;
+  servedCustomers: KpiTrend;
+  servedDestinations: KpiTrend;
+}
+
+/** Live floor snapshot for the hero banner — answers "what is happening
+ *  inside the plant right now?" without any historical comparison. */
+export interface FactoryLiveFloor {
+  /** Every non-terminal truck currently inside the plant. */
+  activeNow: number;
+  /** Trucks still waiting for their turn (Queued + Approved). */
+  queuedNow: number;
+  /** Trucks on the internal weighbridge (OnScale). */
+  loadingNow: number;
+  /** Tare done, not yet loading — external weighbridge / FirstWeigh. */
+  tareNow: number;
+  /** Soft alerts: trucks idle past their status threshold. */
+  stuckNow: number;
+  /** Longest-dwell active truck (null when the floor is empty). */
+  longestDwell: {
+    plateNumber: string;
+    statusLabel: string;
+    minutesSince: number;
+  } | null;
+}
+
+/** Hero-banner payload: today's running total + live floor snapshot.
+ *  `bestDay` is the record BEFORE today, so a broken record stays visibly
+ *  "broken" for the rest of the day instead of the target silently moving
+ *  to today's own total. */
+export interface FactoryPulse {
+  todayTons: number;
+  todayTrucks: number;
+  bestDay: { date: string; label: string; tons: number } | null;
+  /** todayTons as % of the record (may exceed 100). Null without a record. */
+  pctOfRecord: number | null;
+  recordBroken: boolean;
+  liveFloor: FactoryLiveFloor;
+}
+
+export interface RecentDelivery {
+  id: number;
+  plateNumber: string;
+  tons: number;
+  customerName: string | null;
+  closedAt: string;
+}
+
+export type ActivityGranularity = "hour" | "day";
+
+export interface ActivityPoint {
+  /** Bucket key: operational date (YYYY-MM-DD) or hour label (HH:00). */
+  key: string;
   label: string;
   trucks: number;
   tons: number;
+}
+
+/** Period-driven activity series: hourly buckets for "today"
+ *  (cutoff-ordered 08:00 → 07:00), daily buckets for week/month. */
+export interface ActivitySeries {
+  granularity: ActivityGranularity;
+  points: ActivityPoint[];
 }
 
 export interface NamedTotal {
@@ -213,8 +302,14 @@ export interface GradeTotal {
 
 export interface OwnerStats {
   period: DashboardPeriod;
+  /** Configured analytics start (YYYY-MM-DD) — null when the dashboard
+   *  computes over the full history. Surfaced so the UI can disclose it. */
+  analyticsStartDate: string | null;
   kpis: OwnerKpis;
-  activity14d: DailyActivityPoint[];
+  trends: OwnerTrends;
+  pulse: FactoryPulse;
+  recentDeliveries: RecentDelivery[];
+  activity: ActivitySeries;
   topCustomers: NamedTotal[];
   topDestinations: NamedTotal[];
   tonsByKind: KindTotal[];
@@ -270,19 +365,127 @@ export interface OpsStats {
   stuckTrucks: StuckTruckItem[];
 }
 
+// ─── Best-Day Record (all-time) ───────────────────────────────────────
+
+/** Scan completed history and return the highest-tonnage operational day
+ *  strictly BEFORE `todayKey` (today competes against the record, it is
+ *  never its own baseline). Cached for 5 minutes per operational day —
+ *  the record only changes once a day at the cutoff. */
+async function computeBestDayBefore(
+  todayKey: string,
+  analyticsStart: Date | null,
+): Promise<{ date: string; tons: number } | null> {
+  const completed = await prisma.truckOperation.findMany({
+    where: {
+      status: "Completed",
+      closedAt: analyticsStart
+        ? { not: null, gte: analyticsStart }
+        : { not: null },
+    },
+    select: {
+      grossWeightKg: true,
+      tareWeightKg: true,
+      closedAt: true,
+    },
+  });
+
+  const dayTons = new Map<string, number>();
+  for (const t of completed) {
+    if (!t.closedAt) continue;
+    const key = operationalDateKey(new Date(t.closedAt));
+    if (key >= todayKey) continue;
+    dayTons.set(
+      key,
+      (dayTons.get(key) ?? 0) + netTonnage(t.grossWeightKg, t.tareWeightKg),
+    );
+  }
+
+  let best: { date: string; tons: number } | null = null;
+  for (const [date, tons] of dayTons) {
+    if (!best || tons > best.tons) best = { date, tons };
+  }
+  return best
+    ? { date: best.date, tons: Math.round(best.tons * 1000) / 1000 }
+    : null;
+}
+
+const BEST_DAY_CACHE_TTL_SECONDS = 300;
+
+function getBestDayCached(todayKey: string, analyticsStartValue: string | null) {
+  return unstable_cache(
+    () =>
+      computeBestDayBefore(todayKey, analyticsStartInstant(analyticsStartValue)),
+    ["operations-dashboard-best-day", todayKey, analyticsStartValue ?? "-"],
+    {
+      revalidate: BEST_DAY_CACHE_TTL_SECONDS,
+      tags: [DASHBOARD_STATS_CACHE_TAG],
+    },
+  )();
+}
+
+/** Parse the stored YYYY-MM-DD into the 08:00 cutoff instant. Malformed
+ *  values degrade to "no filter" — analytics must never crash on config. */
+function analyticsStartInstant(value: string | null): Date | null {
+  if (!value) return null;
+  try {
+    return getOperationalDayWindow(value).from;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Owner Tier Builder ───────────────────────────────────────────────
 
 async function buildOwnerStats(period: DashboardPeriod): Promise<OwnerStats> {
   const now = new Date();
-  const from = periodStart(period, now);
-  const fourteenStart = new Date(operationalDayStart(now));
-  fourteenStart.setDate(fourteenStart.getDate() - 13);
-  const thirtyStart = new Date(operationalDayStart(now));
-  thirtyStart.setDate(thirtyStart.getDate() - 29);
 
-  // All completed trucks in [from, now) and in [fourteenStart, now) and in [thirtyStart, now)
-  // are fetched in a single Promise.all batch alongside their joined entities.
-  const [completedInPeriod, completed14d, completed30d] = await Promise.all([
+  // Admin-configured analytics start: everything closed before this
+  // instant is invisible to the dashboard (kept intact in DB/reports).
+  const analyticsStartValue = await getAnalyticsStartDateValue();
+  const analyticsStart = analyticsStartInstant(analyticsStartValue);
+  const clampToStart = (d: Date): Date =>
+    analyticsStart && d < analyticsStart ? analyticsStart : d;
+
+  const rawFrom = periodStart(period, now);
+  const from = clampToStart(rawFrom);
+
+  // Previous-period window for trend arrows. Elapsed-equivalent slice:
+  // "today at 11:00" vs "yesterday up to 11:00"; for calendar week/month,
+  // mirror into the previous calendar unit from its true start (Saturday /
+  // 1st) — never a roll-back of a possibly-clamped `from`.
+  let prevFrom: Date;
+  let prevTo: Date;
+  if (period === "month") {
+    prevFrom = new Date(rawFrom);
+    prevFrom.setMonth(prevFrom.getMonth() - 1);
+    prevTo = new Date(prevFrom.getTime() + (now.getTime() - rawFrom.getTime()));
+  } else if (period === "week") {
+    prevFrom = new Date(rawFrom);
+    prevFrom.setDate(prevFrom.getDate() - 7);
+    prevTo = new Date(prevFrom.getTime() + (now.getTime() - rawFrom.getTime()));
+  } else {
+    prevFrom = new Date(from);
+    prevFrom.setDate(prevFrom.getDate() - 1);
+    prevTo = new Date(prevFrom.getTime() + (now.getTime() - from.getTime()));
+  }
+
+  // A trend arrow is only honest when the whole comparison window lies
+  // inside the trusted range — otherwise it compares against the excluded
+  // (test/rollout) era and produces fantasy percentages.
+  const prevWindowClean = !analyticsStart || prevFrom >= analyticsStart;
+
+  const currentOpDay = operationalDateKey(now);
+
+  // One period-scoped dataset drives every owner-tier widget (KPIs,
+  // activity series, top customers/destinations, kind & grade mixes) so
+  // the whole dashboard answers to the same today/week/month filter.
+  const [
+    completedInPeriod,
+    prevPeriod,
+    recentCompleted,
+    bestDay,
+    activeFloor,
+  ] = await Promise.all([
     prisma.truckOperation.findMany({
       where: {
         status: "Completed",
@@ -303,36 +506,59 @@ async function buildOwnerStats(period: DashboardPeriod): Promise<OwnerStats> {
             endWeightKg: true,
           },
         },
-      },
-    }),
-    prisma.truckOperation.findMany({
-      where: {
-        status: "Completed",
-        closedAt: { gte: fourteenStart },
-      },
-      select: {
-        grossWeightKg: true,
-        tareWeightKg: true,
-        closedAt: true,
-      },
-    }),
-    prisma.truckOperation.findMany({
-      where: {
-        status: "Completed",
-        closedAt: { gte: thirtyStart },
-      },
-      select: {
-        id: true,
-        customerId: true,
-        destinationId: true,
-        grossWeightKg: true,
-        tareWeightKg: true,
         sessions: {
           select: {
             weightTons: true,
             size: { select: { code: true } },
           },
         },
+      },
+    }),
+    prisma.truckOperation.findMany({
+      where: {
+        status: "Completed",
+        closedAt: { gte: prevFrom, lt: prevTo },
+      },
+      select: {
+        customerId: true,
+        destinationId: true,
+        grossWeightKg: true,
+        tareWeightKg: true,
+      },
+    }),
+    // Live-ticker feed: last completed trucks, newest first.
+    prisma.truckOperation.findMany({
+      where: {
+        status: "Completed",
+        closedAt: analyticsStart
+          ? { not: null, gte: analyticsStart }
+          : { not: null },
+      },
+      orderBy: { closedAt: "desc" },
+      take: 10,
+      select: {
+        id: true,
+        plateNumber: true,
+        grossWeightKg: true,
+        tareWeightKg: true,
+        closedAt: true,
+        customer: { select: { fullName: true } },
+      },
+    }),
+    getBestDayCached(currentOpDay, analyticsStartValue),
+    // Live floor: every truck currently mid-flight inside the plant.
+    // Registration is floored at the analytics start — stale pre-rollout
+    // trucks abandoned in an active status must not inflate live counters.
+    prisma.truckOperation.findMany({
+      where: {
+        status: { in: ACTIVE_STATUSES },
+        ...(analyticsStart ? { createdAt: { gte: analyticsStart } } : {}),
+      },
+      select: {
+        plateNumber: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
       },
     }),
   ]);
@@ -353,38 +579,176 @@ async function buildOwnerStats(period: DashboardPeriod): Promise<OwnerStats> {
     servedDestinations: destinations.size,
   };
 
-  // ── 14-day activity ────────────────────────────────────────────────
-  const dayMap = new Map<string, { trucks: number; tons: number }>();
-  for (let i = 0; i < 14; i++) {
-    const d = new Date(fourteenStart);
-    d.setDate(d.getDate() + i);
-    const key = operationalDateKey(d);
-    dayMap.set(key, { trucks: 0, tons: 0 });
+  // ── Trends vs the equivalent slice of the previous period ──────────
+  const prevCustomers = new Set<number>();
+  const prevDestinations = new Set<number>();
+  let prevTons = 0;
+  for (const t of prevPeriod) {
+    prevTons += netTonnage(t.grossWeightKg, t.tareWeightKg);
+    if (t.customerId != null) prevCustomers.add(t.customerId);
+    if (t.destinationId != null) prevDestinations.add(t.destinationId);
   }
-  for (const t of completed14d) {
-    if (!t.closedAt) continue;
-    const key = operationalDateKey(new Date(t.closedAt));
-    const slot = dayMap.get(key);
-    if (!slot) continue;
-    slot.trucks += 1;
-    slot.tons += netTonnage(t.grossWeightKg, t.tareWeightKg);
+  const NO_TREND: KpiTrend = { pct: null, direction: "flat" };
+  const trends: OwnerTrends = prevWindowClean
+    ? {
+        completedTrucks: computeTrend(kpis.completedTrucks, prevPeriod.length),
+        totalTons: computeTrend(kpis.totalTons, prevTons),
+        servedCustomers: computeTrend(kpis.servedCustomers, prevCustomers.size),
+        servedDestinations: computeTrend(
+          kpis.servedDestinations,
+          prevDestinations.size,
+        ),
+      }
+    : {
+        // Comparison window overlaps the excluded era → no arrows at all.
+        completedTrucks: NO_TREND,
+        totalTons: NO_TREND,
+        servedCustomers: NO_TREND,
+        servedDestinations: NO_TREND,
+      };
+
+  // ── Factory pulse (today vs all-time record) ────────────────────────
+  // Every period window starts at or before today's cutoff, so today's
+  // slice can always be derived from the period dataset without an
+  // extra query.
+  const todayStart = operationalDayStart(now);
+  let todayTons = 0;
+  let todayTrucks = 0;
+  for (const t of completedInPeriod) {
+    if (!t.closedAt || new Date(t.closedAt) < todayStart) continue;
+    todayTons += netTonnage(t.grossWeightKg, t.tareWeightKg);
+    todayTrucks += 1;
   }
-  const activity14d: DailyActivityPoint[] = Array.from(dayMap.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, v]) => ({
-      date,
-      label: dayLabel(getOperationalDayWindow(date).from),
-      trucks: v.trucks,
-      tons: Math.round(v.tons * 1000) / 1000,
+  todayTons = Math.round(todayTons * 1000) / 1000;
+
+  // ── Live floor snapshot (hero "الآن في المصنع") ─────────────────────
+  let queuedNow = 0;
+  let loadingNow = 0;
+  let tareNow = 0;
+  let stuckNow = 0;
+  let longestDwell: FactoryLiveFloor["longestDwell"] = null;
+  for (const t of activeFloor) {
+    if (t.status === "Queued" || t.status === "Approved") queuedNow += 1;
+    // OnScale = internal weighbridge during loading sessions.
+    if (t.status === "OnScale") loadingNow += 1;
+    // FirstWeigh = tare recorded on the external weighbridge, not yet loading.
+    if (t.status === "FirstWeigh") tareNow += 1;
+    const ref = t.updatedAt ?? t.createdAt;
+    const minutesSince = Math.round(
+      Math.max(0, now.getTime() - new Date(ref).getTime()) / 60000,
+    );
+    const threshold = STUCK_THRESHOLDS_MIN[t.status];
+    if (threshold != null && minutesSince >= threshold) stuckNow += 1;
+    if (!longestDwell || minutesSince > longestDwell.minutesSince) {
+      longestDwell = {
+        plateNumber: t.plateNumber,
+        statusLabel: STATUS_LABELS[t.status],
+        minutesSince,
+      };
+    }
+  }
+  const liveFloor: FactoryLiveFloor = {
+    activeNow: activeFloor.length,
+    queuedNow,
+    loadingNow,
+    tareNow,
+    stuckNow,
+    longestDwell,
+  };
+
+  const pulse: FactoryPulse = {
+    todayTons,
+    todayTrucks,
+    bestDay: bestDay
+      ? {
+          date: bestDay.date,
+          label: dayLabel(getOperationalDayWindow(bestDay.date).from),
+          tons: bestDay.tons,
+        }
+      : null,
+    pctOfRecord:
+      bestDay && bestDay.tons > 0
+        ? Math.round((todayTons / bestDay.tons) * 1000) / 10
+        : null,
+    recordBroken: bestDay !== null && bestDay.tons > 0 && todayTons > bestDay.tons,
+    liveFloor,
+  };
+
+  const recentDeliveries: RecentDelivery[] = recentCompleted
+    .filter((t) => t.closedAt != null)
+    .map((t) => ({
+      id: t.id,
+      plateNumber: t.plateNumber,
+      tons: Math.round(netTonnage(t.grossWeightKg, t.tareWeightKg) * 1000) / 1000,
+      customerName: t.customer?.fullName ?? null,
+      closedAt: new Date(t.closedAt as Date).toISOString(),
     }));
 
-  // ── Top customers / destinations (30d by tonnage) ──────────────────
+  // ── Activity series (period-driven) ─────────────────────────────────
+  // "today" → 24 hourly buckets ordered from the 08:00 cutoff;
+  // week/month → one bucket per operational day.
+  let activity: ActivitySeries;
+  if (period === "today") {
+    const hourMap = new Map<number, { trucks: number; tons: number }>();
+    for (let i = 0; i < 24; i++) {
+      hourMap.set((OPERATIONAL_DAY_CUTOFF_HOUR + i) % 24, { trucks: 0, tons: 0 });
+    }
+    for (const t of completedInPeriod) {
+      if (!t.closedAt) continue;
+      const slot = hourMap.get(new Date(t.closedAt).getHours());
+      if (!slot) continue;
+      slot.trucks += 1;
+      slot.tons += netTonnage(t.grossWeightKg, t.tareWeightKg);
+    }
+    activity = {
+      granularity: "hour",
+      points: Array.from(hourMap.entries()).map(([hour, v]) => ({
+        key: String(hour),
+        label: `${String(hour).padStart(2, "0")}:00`,
+        trucks: v.trucks,
+        tons: Math.round(v.tons * 1000) / 1000,
+      })),
+    };
+  } else {
+    // `from` is already clamped to the analytics start, so when the
+    // period window crosses the start the series simply begins there —
+    // no misleading zero-days from the excluded era. Walk day-by-day
+    // until today so calendar-month windows (1st → today) size correctly.
+    const dayMap = new Map<string, { trucks: number; tons: number }>();
+    for (
+      let d = new Date(from);
+      operationalDateKey(d) <= currentOpDay && dayMap.size < 62;
+      d.setDate(d.getDate() + 1)
+    ) {
+      dayMap.set(operationalDateKey(d), { trucks: 0, tons: 0 });
+    }
+    for (const t of completedInPeriod) {
+      if (!t.closedAt) continue;
+      const slot = dayMap.get(operationalDateKey(new Date(t.closedAt)));
+      if (!slot) continue;
+      slot.trucks += 1;
+      slot.tons += netTonnage(t.grossWeightKg, t.tareWeightKg);
+    }
+    activity = {
+      granularity: "day",
+      points: Array.from(dayMap.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, v]) => ({
+          key: date,
+          label: dayLabel(getOperationalDayWindow(date).from),
+          trucks: v.trucks,
+          tons: Math.round(v.tons * 1000) / 1000,
+        })),
+    };
+  }
+
+  // ── Top customers / destinations / kinds (selected period) ─────────
   const custTons = new Map<number, number>();
   const destTons = new Map<number, number>();
   const kindTons = new Map<MaterialKind, number>();
   const gradeTons = new Map<SalesOrderGrade, number>();
 
-  for (const t of completed30d) {
+  for (const t of completedInPeriod) {
     const net = netTonnage(t.grossWeightKg, t.tareWeightKg);
     if (t.customerId != null) {
       custTons.set(t.customerId, (custTons.get(t.customerId) ?? 0) + net);
@@ -486,8 +850,12 @@ async function buildOwnerStats(period: DashboardPeriod): Promise<OwnerStats> {
 
   return {
     period,
+    analyticsStartDate: analyticsStartValue,
     kpis,
-    activity14d,
+    trends,
+    pulse,
+    recentDeliveries,
+    activity,
     topCustomers,
     topDestinations,
     tonsByKind,
@@ -499,19 +867,46 @@ async function buildOwnerStats(period: DashboardPeriod): Promise<OwnerStats> {
 
 async function buildOpsStats(): Promise<OpsStats> {
   const now = new Date();
+
+  // Same analytics-start clamp as the owner tier: 30-day averages and the
+  // cancellation ratio must not mix in the excluded (pre-rollout) era.
+  const analyticsStart = analyticsStartInstant(
+    await getAnalyticsStartDateValue(),
+  );
   const thirtyStart = new Date(operationalDayStart(now));
   thirtyStart.setDate(thirtyStart.getDate() - 29);
+  if (analyticsStart && thirtyStart < analyticsStart) {
+    thirtyStart.setTime(analyticsStart.getTime());
+  }
 
   const [statusGroups, activeTrucks, completed30d, cancelled30d] =
     await Promise.all([
-      // Status breakdown across ALL trucks (small table, full scan is fine).
+      // Status breakdown, floored at the analytics start everywhere:
+      // terminal statuses by their end timestamps, active ones by
+      // registration — stale pre-rollout trucks abandoned mid-flight
+      // must not appear in the pie.
       prisma.truckOperation.groupBy({
         by: ["status"],
+        where: analyticsStart
+          ? {
+              OR: [
+                {
+                  status: { in: ACTIVE_STATUSES },
+                  createdAt: { gte: analyticsStart },
+                },
+                { status: "Completed", closedAt: { gte: analyticsStart } },
+                { status: "Cancelled", updatedAt: { gte: analyticsStart } },
+              ],
+            }
+          : {},
         _count: { status: true },
       }),
-      // Live snapshot of every truck currently mid-flight.
+      // Live snapshot of every truck currently mid-flight (same floor).
       prisma.truckOperation.findMany({
-        where: { status: { in: ACTIVE_STATUSES } },
+        where: {
+          status: { in: ACTIVE_STATUSES },
+          ...(analyticsStart ? { createdAt: { gte: analyticsStart } } : {}),
+        },
         select: {
           id: true,
           plateNumber: true,
@@ -662,13 +1057,18 @@ export async function getOwnerStatsCached(
 ): Promise<OwnerStats> {
   return unstable_cache(
     () => buildOwnerStats(period),
-    ["operations-dashboard-owner", period],
-    { revalidate: OWNER_CACHE_TTL_SECONDS },
+    // v6: live-floor counters floored at the analytics start.
+    ["operations-dashboard-owner-v6", period],
+    {
+      revalidate: OWNER_CACHE_TTL_SECONDS,
+      tags: [DASHBOARD_STATS_CACHE_TAG],
+    },
   )();
 }
 
 export async function getOpsStatsCached(): Promise<OpsStats> {
   return unstable_cache(() => buildOpsStats(), ["operations-dashboard-ops"], {
     revalidate: OPS_CACHE_TTL_SECONDS,
+    tags: [DASHBOARD_STATS_CACHE_TAG],
   })();
 }

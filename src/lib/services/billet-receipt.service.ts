@@ -16,6 +16,7 @@ import {
   validateGrossWeight,
   validateTareWeight,
 } from "@/lib/weight-bounds";
+import { clampEventWindow } from "./settings.service";
 
 type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
@@ -64,7 +65,7 @@ async function getCompletedContractUsage(
       status: "Completed",
       ...(excludeReceiptId !== undefined && { id: { not: excludeReceiptId } }),
     },
-    select: { netWeightKg: true, pieceLines: true },
+    select: { netWeightKg: true, isAdjustment: true, pieceLines: true },
   });
 
   let receivedWeight = new Decimal(0);
@@ -74,7 +75,9 @@ async function getCompletedContractUsage(
       receivedWeight = receivedWeight.plus(receipt.netWeightKg);
     }
     for (const line of receipt.pieceLines) {
-      const accepted = Math.max(0, (line.countedPieces ?? 0) - line.rejectedPieces);
+      // Adjustment rows carry signed piece deltas — never clamp them.
+      const raw = (line.countedPieces ?? 0) - line.rejectedPieces;
+      const accepted = receipt.isAdjustment ? raw : Math.max(0, raw);
       acceptedByLength.set(
         line.billetLengthM,
         (acceptedByLength.get(line.billetLengthM) ?? 0) + accepted,
@@ -908,7 +911,8 @@ export async function listReceipts(
   filters: ReceiptListFilters,
   pagination: PaginationParams,
 ): Promise<PaginatedResult<ReceiptListItem>> {
-  const where: Prisma.BilletReceiptWhereInput = {};
+  // Balance adjustments affect contract totals but are never listed.
+  const where: Prisma.BilletReceiptWhereInput = { isAdjustment: false };
   if (filters.status) where.status = filters.status;
   if (filters.plateNumber) {
     where.plateNumber = { contains: filters.plateNumber, mode: "insensitive" };
@@ -916,10 +920,11 @@ export async function listReceipts(
   if (filters.supplierContractNumber) {
     where.supplierContractNumber = filters.supplierContractNumber;
   }
-  if (filters.dateFrom || filters.dateTo) {
+  const window = await clampEventWindow(filters.dateFrom, filters.dateTo);
+  if (window.from || window.to) {
     where.createdAt = {
-      ...(filters.dateFrom ? { gte: filters.dateFrom } : {}),
-      ...(filters.dateTo ? { lt: filters.dateTo } : {}),
+      ...(window.from ? { gte: window.from } : {}),
+      ...(window.to ? { lt: window.to } : {}),
     };
   }
 

@@ -22,6 +22,7 @@ import {
   ScrollText,
   ArrowLeftRight,
   ClipboardCheck,
+  Settings,
 } from "lucide-react";
 import {
   Sidebar,
@@ -163,6 +164,12 @@ const navItems: {
     url: "/admin/audit-log",
     icon: ClipboardList,
     permission: "user.manage",
+  },
+  {
+    title: "الإعدادات",
+    url: "/admin/settings",
+    icon: Settings,
+    permission: "settings.edit",
   },
 ];
 

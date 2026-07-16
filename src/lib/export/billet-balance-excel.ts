@@ -21,16 +21,11 @@ function buildSummarySheet(report: BilletBalanceReport): XLSX.WorkSheet {
     ["Remaining weight (kg)", kg(report.totals.remainingWeightKg)],
     ["Completed receipts", report.totals.completedReceiptCount],
     [],
-    ["Length (m)", "Contracted pcs", "Received pcs", "Remaining pcs"],
-    ...report.pieceTotals.map((row) => [
-      row.billetLengthM,
-      row.contractedPieces,
-      row.acceptedPieces,
-      row.remainingPieces,
-    ]),
+    ["Length (m)", "Received pcs"],
+    ...report.pieceTotals.map((row) => [row.billetLengthM, row.acceptedPieces]),
   ];
   const sheet = XLSX.utils.aoa_to_sheet(rows);
-  sheet["!cols"] = [{ wch: 28 }, { wch: 24 }, { wch: 16 }, { wch: 16 }];
+  sheet["!cols"] = [{ wch: 28 }, { wch: 16 }];
   return sheet;
 }
 

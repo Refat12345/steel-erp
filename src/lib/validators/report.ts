@@ -82,3 +82,19 @@ export const billetBalanceQuerySchema = z.object({
 });
 
 export type BilletBalanceQuery = z.infer<typeof billetBalanceQuerySchema>;
+
+export const dailyBilletReportQuerySchema = z.object({
+  date: dateInputSchema,
+  supplierName: z
+    .preprocess(
+      (v) => (v === "" || v === null || v === undefined ? undefined : v),
+      z.string().trim().min(1).optional(),
+    ),
+  contractNumber: z
+    .preprocess(
+      (v) => (v === "" || v === null || v === undefined ? undefined : v),
+      z.string().trim().min(1).optional(),
+    ),
+});
+
+export type DailyBilletReportQuery = z.infer<typeof dailyBilletReportQuerySchema>;

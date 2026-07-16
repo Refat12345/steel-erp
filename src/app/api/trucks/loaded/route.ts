@@ -13,6 +13,7 @@ import {
   type OperationalDayWindow,
 } from "@/lib/operational-day";
 import { listLoadedTrucks } from "@/lib/services/truck.service";
+import { getAnalyticsStartDateValue } from "@/lib/services/settings.service";
 
 export async function GET(req: NextRequest) {
   const session = await getApiSession();
@@ -34,15 +35,18 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const result = await listLoadedTrucks(
-      {
-        customer: customer || undefined,
-        dateFrom: window?.from,
-        dateTo: window?.to,
-      },
-      pagination,
-    );
-    return NextResponse.json({ success: true, ...result });
+    const [result, analyticsStartDate] = await Promise.all([
+      listLoadedTrucks(
+        {
+          customer: customer || undefined,
+          dateFrom: window?.from,
+          dateTo: window?.to,
+        },
+        pagination,
+      ),
+      getAnalyticsStartDateValue(),
+    ]);
+    return NextResponse.json({ success: true, ...result, analyticsStartDate });
   } catch (e) {
     return handleServiceError(e);
   }

@@ -81,6 +81,7 @@ export function BilletReceiptList() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [analyticsStartDate, setAnalyticsStartDate] = useState<string | null>(null);
   const pageSize = 25;
 
   const todayOperationalDate = defaultOperationalDateInput();
@@ -100,6 +101,7 @@ export function BilletReceiptList() {
       if (json.success) {
         setReceipts(json.data);
         setTotal(json.total);
+        setAnalyticsStartDate(json.analyticsStartDate ?? null);
       }
     } catch {
       toast.error("خطأ في جلب سجلات الاستلام");
@@ -176,6 +178,7 @@ export function BilletReceiptList() {
                 type="date"
                 className="w-[10.5rem] shrink-0"
                 value={operationalDate}
+                min={analyticsStartDate ?? undefined}
                 onChange={(e) => setOperationalDate(e.target.value)}
               />
               <Button

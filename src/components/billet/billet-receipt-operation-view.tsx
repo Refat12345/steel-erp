@@ -93,6 +93,7 @@ interface ReceiptDetail {
   netWeightKg: string | null;
   isPriorWithdrawal: boolean;
   priorWithdrawalDate: string | null;
+  isAdjustment: boolean;
   bundleCount: number | null;
   notes: string | null;
   cancelReason: string | null;
@@ -672,6 +673,9 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
               {receipt.isPriorWithdrawal && (
                 <Badge variant="secondary">سحب سابق</Badge>
               )}
+              {receipt.isAdjustment && (
+                <Badge variant="outline">تسوية رصيد</Badge>
+              )}
             </div>
             <p className="text-xs text-muted-foreground mt-0.5 truncate">
               {receipt.plateNumber} — {receipt.driverName}
@@ -725,18 +729,28 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
             </div>
             <div>
               <span className="text-muted-foreground">
-                {receipt.isPriorWithdrawal ? "النوع:" : "رقم اللوحة:"}
+                {receipt.isPriorWithdrawal || receipt.isAdjustment
+                  ? "النوع:"
+                  : "رقم اللوحة:"}
               </span>{" "}
               <span className="font-medium">
-                {receipt.isPriorWithdrawal ? "سحب سابق قبل النظام" : receipt.plateNumber}
+                {receipt.isPriorWithdrawal
+                  ? "سحب سابق قبل النظام"
+                  : receipt.isAdjustment
+                    ? "تسوية رصيد العقد"
+                    : receipt.plateNumber}
               </span>
             </div>
             <div>
               <span className="text-muted-foreground">
-                {receipt.isPriorWithdrawal ? "المرجع:" : "السائق:"}
+                {receipt.isPriorWithdrawal || receipt.isAdjustment
+                  ? "المرجع:"
+                  : "السائق:"}
               </span>{" "}
               {receipt.driverName}
-              {!receipt.isPriorWithdrawal && receipt.driverNationalId
+              {!receipt.isPriorWithdrawal &&
+              !receipt.isAdjustment &&
+              receipt.driverNationalId
                 ? ` — ${receipt.driverNationalId}`
                 : ""}
             </div>
@@ -1059,17 +1073,21 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2 text-emerald-600">
-              {receipt.isPriorWithdrawal ? (
+              {receipt.isPriorWithdrawal || receipt.isAdjustment ? (
                 <History className="h-4 w-4" />
               ) : (
                 <CheckCircle2 className="h-4 w-4" />
               )}
-              {receipt.isPriorWithdrawal ? "سحب سابق مسجّل" : "اكتمل الاستلام"}
+              {receipt.isPriorWithdrawal
+                ? "سحب سابق مسجّل"
+                : receipt.isAdjustment
+                  ? "تسوية رصيد مسجّلة"
+                  : "اكتمل الاستلام"}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-center">
-              {!receipt.isPriorWithdrawal && (
+              {!receipt.isPriorWithdrawal && !receipt.isAdjustment && (
                 <>
                   <div className="rounded-lg border p-3">
                     <p className="text-xs text-muted-foreground">المحمّل</p>
@@ -1089,9 +1107,11 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                 <p className="text-xs text-muted-foreground">الصافي</p>
                 <p className="font-bold tabular-nums">{formatKg(receipt.netWeightKg)}</p>
               </div>
-              {receipt.isPriorWithdrawal ? (
+              {receipt.isPriorWithdrawal || receipt.isAdjustment ? (
                 <div className="rounded-lg border p-3">
-                  <p className="text-xs text-muted-foreground">تاريخ السحب</p>
+                  <p className="text-xs text-muted-foreground">
+                    {receipt.isPriorWithdrawal ? "تاريخ السحب" : "تاريخ التسجيل"}
+                  </p>
                   <p className="font-bold" dir="ltr">
                     {formatDate(receipt.priorWithdrawalDate || receipt.createdAt)}
                   </p>

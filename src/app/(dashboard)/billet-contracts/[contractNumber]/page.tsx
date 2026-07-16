@@ -184,6 +184,12 @@ export default function BilletContractDetailPage({
   const [priorPieces, setPriorPieces] = useState<Record<number, string>>({});
   const [priorSaving, setPriorSaving] = useState(false);
 
+  const [adjustDialogOpen, setAdjustDialogOpen] = useState(false);
+  const [adjustWeightKg, setAdjustWeightKg] = useState("");
+  const [adjustNotes, setAdjustNotes] = useState("");
+  const [adjustPieces, setAdjustPieces] = useState<Record<number, string>>({});
+  const [adjustSaving, setAdjustSaving] = useState(false);
+
   const [uploading, setUploading] = useState(false);
   const [openingAttachmentId, setOpeningAttachmentId] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -257,6 +263,14 @@ export default function BilletContractDetailPage({
     setPriorNotes("سحب سابق قبل تشغيل النظام");
     setPriorPieces(seed);
     setPriorDialogOpen(true);
+  };
+
+  const openAdjustmentDialog = () => {
+    if (!data) return;
+    setAdjustWeightKg("");
+    setAdjustNotes("");
+    setAdjustPieces({});
+    setAdjustDialogOpen(true);
   };
 
   const saveContractDetails = async () => {
@@ -367,6 +381,7 @@ export default function BilletContractDetailPage({
       return;
     }
 
+    // Piece counts are optional — a prior withdrawal may be weight-only.
     const lines = data.pieceBalances
       .map((balance) => ({
         billetLengthM: balance.billetLengthM,
@@ -374,10 +389,6 @@ export default function BilletContractDetailPage({
       }))
       .filter((line) => line.acceptedPieces > 0);
 
-    if (lines.length === 0) {
-      toast.error("أدخل عدد القطع لطول واحد على الأقل");
-      return;
-    }
     for (const line of lines) {
       if (!Number.isInteger(line.acceptedPieces)) {
         toast.error(`عدد قطع طول ${line.billetLengthM}م يجب أن يكون عدداً صحيحاً`);
@@ -415,6 +426,64 @@ export default function BilletContractDetailPage({
       toast.error("خطأ في تسجيل السحب السابق");
     } finally {
       setPriorSaving(false);
+    }
+  };
+
+  const submitAdjustment = async () => {
+    if (!data) return;
+    const weight = adjustWeightKg.trim() === "" ? 0 : Number(adjustWeightKg);
+    if (!Number.isFinite(weight)) {
+      toast.error("الوزن غير صالح");
+      return;
+    }
+    if (!adjustNotes.trim()) {
+      toast.error("سبب التسوية مطلوب");
+      return;
+    }
+
+    const lines: { billetLengthM: number; pieces: number }[] = [];
+    for (const balance of data.pieceBalances) {
+      const raw = (adjustPieces[balance.billetLengthM] ?? "").trim();
+      if (raw === "" || raw === "-") continue;
+      const pieces = Number(raw);
+      if (!Number.isInteger(pieces)) {
+        toast.error(`عدد قطع طول ${balance.billetLengthM}م يجب أن يكون عدداً صحيحاً`);
+        return;
+      }
+      if (pieces !== 0) lines.push({ billetLengthM: balance.billetLengthM, pieces });
+    }
+
+    if (weight === 0 && lines.length === 0) {
+      toast.error("أدخل وزناً أو عدد قطع للتسوية");
+      return;
+    }
+
+    setAdjustSaving(true);
+    try {
+      const res = await fetch(
+        `/api/billet-contracts/${encodeURIComponent(contractNumber)}/adjustment`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            netWeightKg: weight,
+            notes: adjustNotes.trim(),
+            pieceLines: lines,
+          }),
+        },
+      );
+      const json = await res.json();
+      if (!json.success) {
+        toast.error(json.error);
+        return;
+      }
+      toast.success("تم تسجيل التسوية على رصيد العقد");
+      setAdjustDialogOpen(false);
+      fetchContract();
+    } catch {
+      toast.error("خطأ في تسجيل التسوية");
+    } finally {
+      setAdjustSaving(false);
     }
   };
 
@@ -525,14 +594,24 @@ export default function BilletContractDetailPage({
           data.contract.status === "Active" && (
           <div className="flex flex-wrap gap-2 pr-10">
             {canRecordPriorWithdrawal && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={openPriorWithdrawalDialog}
-              >
-                <History className="h-4 w-4" />
-                سحب سابق
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={openPriorWithdrawalDialog}
+                >
+                  <History className="h-4 w-4" />
+                  سحب سابق
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={openAdjustmentDialog}
+                >
+                  <Scale className="h-4 w-4" />
+                  تسوية رصيد
+                </Button>
+              </>
             )}
             {canChangeStatus && (
               <>
@@ -978,7 +1057,7 @@ export default function BilletContractDetailPage({
             </div>
 
             <div className="space-y-2">
-              <Label>القطع المقبولة حسب الطول *</Label>
+              <Label>القطع المقبولة حسب الطول (اختياري)</Label>
               <div className="rounded-lg border overflow-x-auto">
                 <Table className="min-w-[420px]">
                   <TableHeader>
@@ -1045,6 +1124,98 @@ export default function BilletContractDetailPage({
             <Button onClick={submitPriorWithdrawal} disabled={priorSaving}>
               {priorSaving && <Loader2 className="animate-spin" />}
               تسجيل وخصم
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Adjustment Dialog */}
+      <Dialog open={adjustDialogOpen} onOpenChange={setAdjustDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>تسوية رصيد العقد</DialogTitle>
+            <DialogDescription>
+              أدخل قيماً موجبة لزيادة المستلم أو سالبة لإنقاصه — الوزن والقطع
+              اختياريان لكن يجب إدخال أحدهما على الأقل.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="adjustWeightKg">تعديل الوزن الصافي (كغ)</Label>
+              <Input
+                id="adjustWeightKg"
+                type="number"
+                step="0.001"
+                inputMode="decimal"
+                value={adjustWeightKg}
+                onChange={(e) => setAdjustWeightKg(e.target.value)}
+                placeholder="مثال: 1500 أو -1500"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>تعديل القطع حسب الطول (+ / −)</Label>
+              <div className="rounded-lg border overflow-x-auto">
+                <Table className="min-w-[420px]">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-start">الطول</TableHead>
+                      <TableHead className="text-center">المستلم الحالي</TableHead>
+                      <TableHead className="text-center">تعديل القطع</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.pieceBalances.map((balance) => (
+                      <TableRow key={balance.billetLengthM}>
+                        <TableCell className="text-start font-medium">
+                          {balance.billetLengthM}م
+                        </TableCell>
+                        <TableCell className="text-center tabular-nums">
+                          {balance.acceptedPieces}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Input
+                            type="number"
+                            value={adjustPieces[balance.billetLengthM] ?? ""}
+                            onChange={(e) =>
+                              setAdjustPieces((prev) => ({
+                                ...prev,
+                                [balance.billetLengthM]: e.target.value,
+                              }))
+                            }
+                            className="h-8 text-center"
+                            placeholder="0"
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="adjustNotes">سبب التسوية *</Label>
+              <Textarea
+                id="adjustNotes"
+                value={adjustNotes}
+                onChange={(e) => setAdjustNotes(e.target.value)}
+                rows={3}
+                placeholder="مثال: تصحيح وزن استلام مسجّل بالخطأ"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setAdjustDialogOpen(false)}
+              disabled={adjustSaving}
+            >
+              إلغاء
+            </Button>
+            <Button onClick={submitAdjustment} disabled={adjustSaving}>
+              {adjustSaving && <Loader2 className="animate-spin" />}
+              تسجيل التسوية
             </Button>
           </DialogFooter>
         </DialogContent>

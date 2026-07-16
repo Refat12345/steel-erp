@@ -99,11 +99,23 @@ function SummaryCard({
   );
 }
 
-export function CustomerWithdrawalsReportView() {
+export function CustomerWithdrawalsReportView({
+  analyticsStartDate,
+}: {
+  /** Lower bound for the date pickers (YYYY-MM-DD) or null when unset. */
+  analyticsStartDate: string | null;
+}) {
   const { data: session, status } = useSession();
   const canView = sessionHasPermission(session, "report.daily_trucks");
 
-  const [fromDate, setFromDate] = useState(() => firstDayOfCurrentMonthInput());
+  // Default range start: 1st of the month, raised to the analytics start
+  // when the month began inside the excluded era.
+  const [fromDate, setFromDate] = useState(() => {
+    const monthStart = firstDayOfCurrentMonthInput();
+    return analyticsStartDate && analyticsStartDate > monthStart
+      ? analyticsStartDate
+      : monthStart;
+  });
   const [toDate, setToDate] = useState(() => todayInput());
   const [customerId, setCustomerId] = useState<string>("all");
   const [sizeId, setSizeId] = useState<string>("all");
@@ -321,6 +333,7 @@ export function CustomerWithdrawalsReportView() {
           <Input
             type="date"
             value={fromDate}
+            min={analyticsStartDate ?? undefined}
             onChange={(e) => setFromDate(e.target.value)}
             className="w-full min-w-[10rem]"
           />
@@ -334,6 +347,7 @@ export function CustomerWithdrawalsReportView() {
           <Input
             type="date"
             value={toDate}
+            min={analyticsStartDate ?? undefined}
             onChange={(e) => setToDate(e.target.value)}
             className="w-full min-w-[10rem]"
           />

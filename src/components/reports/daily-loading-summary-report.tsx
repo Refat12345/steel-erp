@@ -413,6 +413,7 @@ export function DailyLoadingSummaryView() {
           <Input
             type="date"
             value={operationalDate}
+            min={report?.analyticsStartDate ?? undefined}
             onChange={(e) => setOperationalDate(e.target.value)}
             className="w-full min-w-[10rem]"
           />

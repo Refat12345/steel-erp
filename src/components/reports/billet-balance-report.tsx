@@ -271,20 +271,14 @@ function BilletBalancePrintable({ report }: { report: BilletBalanceReport }) {
         <thead>
           <tr>
             <th>Length</th>
-            <th className="num">Contracted</th>
             <th className="num">Received</th>
-            <th className="num">Remaining</th>
           </tr>
         </thead>
         <tbody>
           {report.pieceTotals.map((row) => (
             <tr key={row.billetLengthM}>
               <td>{row.billetLengthM}m</td>
-              <td className="num">{row.contractedPieces}</td>
               <td className="num">{row.acceptedPieces}</td>
-              <td className={`num ${row.remainingPieces < 0 ? "negative" : ""}`}>
-                {formatRemainingPieces(row.remainingPieces)}
-              </td>
             </tr>
           ))}
         </tbody>
@@ -609,13 +603,11 @@ export function BilletBalanceReportView() {
             </CardHeader>
             <CardContent className="p-0 sm:p-0">
               <div className="overflow-x-auto">
-                <Table dir="ltr" className="min-w-[420px]">
+                <Table dir="ltr" className="min-w-[240px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead>Length</TableHead>
-                      <TableHead className="text-right">Contracted</TableHead>
                       <TableHead className="text-right">Received</TableHead>
-                      <TableHead className="text-right">Remaining</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -623,17 +615,7 @@ export function BilletBalanceReportView() {
                       <TableRow key={row.billetLengthM}>
                         <TableCell className="font-medium">{row.billetLengthM}m</TableCell>
                         <TableCell className="font-mono tabular-nums text-right">
-                          {row.contractedPieces}
-                        </TableCell>
-                        <TableCell className="font-mono tabular-nums text-right">
                           {row.acceptedPieces}
-                        </TableCell>
-                        <TableCell
-                          className={`font-mono tabular-nums text-right ${
-                            row.remainingPieces < 0 ? "text-destructive font-semibold" : ""
-                          }`}
-                        >
-                          {formatRemainingPieces(row.remainingPieces)}
                         </TableCell>
                       </TableRow>
                     ))}
