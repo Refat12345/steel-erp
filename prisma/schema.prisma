@@ -918,6 +918,10 @@ model BilletReceipt {
   isPriorWithdrawal   Boolean   @default(false) @map("is_prior_withdrawal")
   priorWithdrawalDate DateTime? @map("prior_withdrawal_date") @db.Date
 
+  /// A signed balance correction (weight and/or pieces may be negative).
+  /// Aggregations must NOT clamp piece deltas of adjustment rows to zero.
+  isAdjustment Boolean @default(false) @map("is_adjustment")
+
   version     Int       @default(0)
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
@@ -935,6 +939,7 @@ model BilletReceipt {
   @@index([plateNumber])
   @@index([status])
   @@index([isPriorWithdrawal])
+  @@index([isAdjustment])
   @@index([createdAt])
   @@map("billet_receipts")
 }
@@ -971,4 +976,16 @@ model BilletReceiptAttachment {
 
   @@index([billetReceiptId])
   @@map("billet_receipt_attachments")
+}
+
+/// Admin-tunable operational settings, one row per key. Values are stored
+/// as strings and parsed by the owning service (e.g. `analytics_start_date`
+/// holds a YYYY-MM-DD operational date). Who/when history lives in AuditLog —
+/// every write goes through a transaction with `logAudit`.
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
 }

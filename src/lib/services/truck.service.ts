@@ -18,6 +18,7 @@ import {
 } from "@/lib/weigh-session-aggregate";
 import { requestSizeCodesExemptFromInternalWeighing } from "@/lib/material-kind";
 import { applyLoadOutForClose } from "./stock.service";
+import { clampEventWindow } from "./settings.service";
 
 type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
@@ -2671,10 +2672,13 @@ export async function listOperations(
       { externalCardNumber: { contains: filters.plateNumber, mode: "insensitive" } },
     ];
   }
-  if (filters.dateFrom || filters.dateTo) {
+  // Analytics-start floor: events before the configured start date are
+  // invisible in lists even when the caller sends no date filter at all.
+  const window = await clampEventWindow(filters.dateFrom, filters.dateTo);
+  if (window.from || window.to) {
     where.createdAt = {
-      ...(filters.dateFrom ? { gte: filters.dateFrom } : {}),
-      ...(filters.dateTo ? { lt: filters.dateTo } : {}),
+      ...(window.from ? { gte: window.from } : {}),
+      ...(window.to ? { lt: window.to } : {}),
     };
   }
 
@@ -2739,10 +2743,11 @@ export async function listLoadedTrucks(
       fullName: { contains: filters.customer, mode: "insensitive" },
     };
   }
-  if (filters.dateFrom || filters.dateTo) {
+  const window = await clampEventWindow(filters.dateFrom, filters.dateTo);
+  if (window.from || window.to) {
     where.createdAt = {
-      ...(filters.dateFrom ? { gte: filters.dateFrom } : {}),
-      ...(filters.dateTo ? { lt: filters.dateTo } : {}),
+      ...(window.from ? { gte: window.from } : {}),
+      ...(window.to ? { lt: window.to } : {}),
     };
   }
 

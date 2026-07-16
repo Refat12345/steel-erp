@@ -99,9 +99,8 @@ export const priorWithdrawalSchema = z
       .trim()
       .min(1, "ملاحظة السحب السابق مطلوبة")
       .max(2000, "الملاحظة طويلة جداً"),
-    pieceLines: z
-      .array(priorWithdrawalLineSchema)
-      .min(1, "أضف عدد القطع لطول واحد على الأقل"),
+    /// Piece counts are optional — a prior withdrawal may be weight-only.
+    pieceLines: z.array(priorWithdrawalLineSchema).default([]),
   })
   .superRefine((data, ctx) => {
     const lengths = data.pieceLines.map((l) => l.billetLengthM);
@@ -114,7 +113,52 @@ export const priorWithdrawalSchema = z
     }
   });
 
+export const contractAdjustmentLineSchema = z.object({
+  billetLengthM: z
+    .number({ message: "طول البيلت مطلوب" })
+    .int("طول البيلت يجب أن يكون عدداً صحيحاً")
+    .positive("طول البيلت يجب أن يكون أكبر من صفر"),
+  /// Signed delta: positive adds to received pieces, negative removes.
+  pieces: z
+    .number({ message: "عدد القطع مطلوب" })
+    .int("عدد القطع يجب أن يكون عدداً صحيحاً")
+    .refine((v) => v !== 0, "عدد القطع لا يمكن أن يكون صفراً"),
+});
+
+export const contractAdjustmentSchema = z
+  .object({
+    /// Signed delta in kg: positive adds to received weight, negative removes.
+    netWeightKg: z
+      .number({ message: "الوزن مطلوب" })
+      .finite("الوزن غير صالح")
+      .default(0),
+    notes: z
+      .string()
+      .trim()
+      .min(1, "سبب التسوية مطلوب")
+      .max(2000, "الملاحظة طويلة جداً"),
+    pieceLines: z.array(contractAdjustmentLineSchema).default([]),
+  })
+  .superRefine((data, ctx) => {
+    const lengths = data.pieceLines.map((l) => l.billetLengthM);
+    if (new Set(lengths).size !== lengths.length) {
+      ctx.addIssue({
+        code: "custom",
+        message: "لا يمكن تكرار نفس الطول",
+        path: ["pieceLines"],
+      });
+    }
+    if (data.netWeightKg === 0 && data.pieceLines.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: "أدخل وزناً أو عدد قطع للتسوية",
+        path: ["netWeightKg"],
+      });
+    }
+  });
+
 export type BilletContractCreateInput = z.infer<typeof billetContractCreateSchema>;
 export type BilletContractUpdateInput = z.infer<typeof billetContractUpdateSchema>;
 export type ContractPieceLineInput = z.infer<typeof contractPieceLineSchema>;
 export type PriorWithdrawalInput = z.infer<typeof priorWithdrawalSchema>;
+export type ContractAdjustmentInput = z.infer<typeof contractAdjustmentSchema>;

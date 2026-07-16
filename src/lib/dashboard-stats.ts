@@ -1,13 +1,30 @@
 ﻿import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/db";
 import { formatDate } from "@/lib/date-format";
+import {
+  DASHBOARD_STATS_CACHE_TAG,
+  getAnalyticsStartDateValue,
+} from "@/lib/services/settings.service";
 
 /** Cached KPI payload — heavy (12+ DB ops); shared across all authenticated users */
 export async function getDashboardStatsCached() {
+  // Analytics-start floor for payment EVENTS. `paymentDate` is a date-only
+  // column (stored at UTC midnight), so the floor is the calendar date —
+  // not the 08:00 operational instant used for timestamped events.
+  const analyticsStartValue = await getAnalyticsStartDateValue();
+  const paymentFloor =
+    analyticsStartValue && /^\d{4}-\d{2}-\d{2}$/.test(analyticsStartValue)
+      ? new Date(`${analyticsStartValue}T00:00:00.000Z`)
+      : null;
+
   return unstable_cache(
     async () => {
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      const paymentDateFloor = paymentFloor
+        ? { paymentDate: { gte: paymentFloor } }
+        : {};
 
       const [
         ordersByStatus,
@@ -40,22 +57,34 @@ export async function getDashboardStatsCached() {
           _count: { status: true },
         }),
         prisma.payment.findMany({
-          where: { paymentDate: { gte: thirtyDaysAgo } },
+          where: {
+            paymentDate: {
+              gte:
+                paymentFloor && paymentFloor > thirtyDaysAgo
+                  ? paymentFloor
+                  : thirtyDaysAgo,
+            },
+          },
           select: { paymentDate: true, amount: true },
           orderBy: { paymentDate: "asc" },
         }),
         prisma.payment.groupBy({
           by: ["customerId"],
+          where: paymentDateFloor,
           _sum: { amount: true },
           orderBy: { _sum: { amount: "desc" } },
           take: 5,
         }),
         prisma.payment.groupBy({
           by: ["method"],
+          where: paymentDateFloor,
           _sum: { amount: true },
           _count: { method: true },
         }),
-        prisma.payment.aggregate({ _sum: { amount: true } }),
+        prisma.payment.aggregate({
+          where: paymentDateFloor,
+          _sum: { amount: true },
+        }),
         prisma.salesOrder.count({
           where: { status: { in: ["approved", "in_progress"] } },
         }),
@@ -164,7 +193,9 @@ export async function getDashboardStatsCached() {
         })),
       };
     },
-    ["dashboard-stats"],
-    { revalidate: 45 }
+    // Cache key varies with the analytics start so a settings change
+    // takes effect immediately; the tag lets the settings write flush it.
+    ["dashboard-stats", analyticsStartValue ?? "-"],
+    { revalidate: 45, tags: [DASHBOARD_STATS_CACHE_TAG] }
   )();
 }

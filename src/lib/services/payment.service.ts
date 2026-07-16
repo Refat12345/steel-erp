@@ -6,6 +6,7 @@ import type { PaginationParams, PaginatedResult } from "@/lib/api-utils";
 import { ServiceError } from "./errors";
 import { logAudit } from "./audit.service";
 import { logger } from "@/lib/logger";
+import { clampEventWindow } from "./settings.service";
 
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_EVEN });
 
@@ -79,10 +80,26 @@ export async function listPayments(
   const where: Prisma.PaymentWhereInput = {};
   if (filters.customerId != null) where.customerId = filters.customerId;
   if (filters.method != null) where.method = filters.method;
-  if (filters.from || filters.to) {
+  // Analytics-start floor on the payment event list. Customer BALANCES are
+  // cumulative and intentionally untouched by the analytics start date.
+  const window = await clampEventWindow(filters.from, filters.to);
+  // `paymentDate` is a date-only column (stored at UTC midnight) while the
+  // clamp floor is the 08:00 operational instant — comparing the raw floor
+  // against it would wrongly hide payments dated on the start day itself.
+  // Lower the injected floor to the calendar date at UTC midnight.
+  let from = window.from;
+  if (
+    window.analyticsStartDate &&
+    from &&
+    (!filters.from || from > filters.from)
+  ) {
+    const dateFloor = new Date(`${window.analyticsStartDate}T00:00:00.000Z`);
+    from = filters.from && filters.from > dateFloor ? filters.from : dateFloor;
+  }
+  if (from || window.to) {
     where.paymentDate = {
-      ...(filters.from ? { gte: filters.from } : {}),
-      ...(filters.to ? { lte: filters.to } : {}),
+      ...(from ? { gte: from } : {}),
+      ...(window.to ? { lte: window.to } : {}),
     };
   }
 

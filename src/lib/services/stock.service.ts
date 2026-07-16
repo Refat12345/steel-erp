@@ -18,6 +18,7 @@ import { logAudit } from "./audit.service";
 import { withRetry } from "./tx-retry";
 import { logger } from "@/lib/logger";
 import { isStockModuleEnabled } from "@/config/feature-flags";
+import { clampEventWindow } from "./settings.service";
 
 // ── Unit model (segment → tracked counting units) ───────────────────────────
 
@@ -1035,10 +1036,13 @@ export async function listMovements(
   const where: Prisma.StockMovementWhereInput = {};
   if (filters.locationId) where.locationId = filters.locationId;
   if (filters.type) where.type = filters.type;
-  if (filters.from || filters.to) {
+  // Analytics-start floor — the ledger UI sends no date filter, so without
+  // this the full pre-start history would leak into the list.
+  const window = await clampEventWindow(filters.from, filters.to);
+  if (window.from || window.to) {
     where.createdAt = {
-      ...(filters.from ? { gte: filters.from } : {}),
-      ...(filters.to ? { lte: filters.to } : {}),
+      ...(window.from ? { gte: window.from } : {}),
+      ...(window.to ? { lte: window.to } : {}),
     };
   }
 

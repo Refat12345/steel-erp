@@ -30,6 +30,19 @@ vi.mock("@/lib/db", () => ({ prisma: mockPrisma }));
 vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
+// Analytics-start clamp: passthrough by default (no start date configured).
+const mockClampEventWindow = vi.hoisted(() =>
+  vi.fn(async (from?: Date, to?: Date) => ({
+    from,
+    to,
+    clamped: false,
+    analyticsStartDate: null as string | null,
+  })),
+);
+vi.mock("./settings.service", () => ({
+  clampEventWindow: mockClampEventWindow,
+  getAnalyticsStartDateValue: vi.fn(async () => null),
+}));
 
 import {
   createPayment,
@@ -163,6 +176,67 @@ describe("listPayments", () => {
     const call = mockPrisma.payment.findMany.mock.calls[0][0];
     expect(call.where.paymentDate.gte).toEqual(from);
     expect(call.where.paymentDate.lte).toEqual(to);
+  });
+
+  // ── Analytics-start clamping ──────────────────────────────────
+  //
+  // `paymentDate` is a date-only column (stored at UTC midnight), so the
+  // injected floor must be the calendar date — NOT the 08:00 operational
+  // instant, which would hide payments dated on the start day itself.
+
+  it("floors an unfiltered list at the start DATE (UTC midnight), not the 08:00 instant", async () => {
+    mockPrisma.payment.findMany.mockResolvedValue([]);
+    mockPrisma.payment.count.mockResolvedValue(0);
+    mockClampEventWindow.mockResolvedValueOnce({
+      from: new Date(2026, 5, 1, 8, 0, 0, 0), // 08:00 local instant
+      to: undefined,
+      clamped: false,
+      analyticsStartDate: "2026-06-01",
+    });
+
+    await listPayments({}, { page: 1, pageSize: 10 });
+
+    const call = mockPrisma.payment.findMany.mock.calls[0][0];
+    // A payment dated exactly 2026-06-01 (stored 00:00Z) must be included.
+    expect(call.where.paymentDate.gte).toEqual(
+      new Date("2026-06-01T00:00:00.000Z"),
+    );
+  });
+
+  it("raises an explicit from that reaches before the start to the date floor", async () => {
+    mockPrisma.payment.findMany.mockResolvedValue([]);
+    mockPrisma.payment.count.mockResolvedValue(0);
+    const requestedFrom = new Date("2026-01-01");
+    mockClampEventWindow.mockResolvedValueOnce({
+      from: new Date(2026, 5, 1, 8, 0, 0, 0),
+      to: undefined,
+      clamped: true,
+      analyticsStartDate: "2026-06-01",
+    });
+
+    await listPayments({ from: requestedFrom }, { page: 1, pageSize: 10 });
+
+    const call = mockPrisma.payment.findMany.mock.calls[0][0];
+    expect(call.where.paymentDate.gte).toEqual(
+      new Date("2026-06-01T00:00:00.000Z"),
+    );
+  });
+
+  it("keeps an explicit from that is already after the start", async () => {
+    mockPrisma.payment.findMany.mockResolvedValue([]);
+    mockPrisma.payment.count.mockResolvedValue(0);
+    const requestedFrom = new Date("2026-06-15");
+    mockClampEventWindow.mockResolvedValueOnce({
+      from: requestedFrom,
+      to: undefined,
+      clamped: false,
+      analyticsStartDate: "2026-06-01",
+    });
+
+    await listPayments({ from: requestedFrom }, { page: 1, pageSize: 10 });
+
+    const call = mockPrisma.payment.findMany.mock.calls[0][0];
+    expect(call.where.paymentDate.gte).toEqual(requestedFrom);
   });
 });
 

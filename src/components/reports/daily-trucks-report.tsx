@@ -270,6 +270,7 @@ export function DailyTrucksReportView() {
           <Input
             type="date"
             value={operationalDate}
+            min={report?.analyticsStartDate ?? undefined}
             onChange={(e) => setOperationalDate(e.target.value)}
             className="w-full min-w-[10rem]"
           />
@@ -873,6 +874,23 @@ export function ReportsIndexView() {
                   <h2 className="font-semibold">Customer Withdrawals by Size</h2>
                   <p className="text-sm text-muted-foreground mt-1">
                     Bundles and weight withdrawn per customer and size over a date range
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+        ) : null}
+        {canReports ? (
+          <Link href="/reports/daily-billet" className="block min-w-0">
+            <Card className="h-full shadow-sm transition-colors hover:bg-muted/40">
+              <CardContent className="flex items-start gap-4 p-5">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                  <Boxes className="h-5 w-5 text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="font-semibold">Daily Billet Receiving</h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Operational-day net tons (قبان) — by supplier, contract, and length
                   </p>
                 </div>
               </CardContent>

@@ -7,8 +7,8 @@
  * Renders two tiers of content composed by `/api/dashboard/operations-stats`:
  *
  *   • OWNER tier — always rendered. Shows completed-truck KPIs for the
- *     selected period (today / week / month), 14-day activity, top
- *     customers, top destinations, kind mix, grade mix.
+ *     selected period (today / week / month), day compare, top
+ *     customers, top destinations, kind mix.
  *
  *   • OPS tier — rendered only when the API response contains an `ops`
  *     payload (i.e. the caller holds `dashboard.ops.view`). Shows live
@@ -21,16 +21,12 @@
  * ─────────────────────────────────────────────────────────────────────
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  Area,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
-  ComposedChart,
-  Legend,
-  Line,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -39,14 +35,24 @@ import {
   YAxis,
 } from "recharts";
 import {
+  Tooltip as UiTooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Activity,
   AlertTriangle,
   CheckCircle2,
   Gauge,
   MapPin,
+  Minus,
   Package,
   PieChart as PieIcon,
+  // Sparkles, // used by FactoryPulseBanner (temporarily hidden)
   Timer,
+  TrendingDown,
+  TrendingUp,
+  // Trophy, // used by FactoryPulseBanner (temporarily hidden)
   Truck,
   Users,
   Weight,
@@ -74,15 +80,53 @@ type TruckStatus =
   | "Completed"
   | "Cancelled";
 
+interface KpiTrend {
+  pct: number | null;
+  direction: "up" | "down" | "flat";
+}
+
+interface FactoryLiveFloor {
+  activeNow: number;
+  queuedNow: number;
+  loadingNow: number;
+  tareNow: number;
+  stuckNow: number;
+  longestDwell: {
+    plateNumber: string;
+    statusLabel: string;
+    minutesSince: number;
+  } | null;
+}
+
+interface FactoryPulse {
+  todayTons: number;
+  todayTrucks: number;
+  bestDay: { date: string; label: string; tons: number } | null;
+  pctOfRecord: number | null;
+  recordBroken: boolean;
+  liveFloor: FactoryLiveFloor;
+}
+
 interface OwnerStats {
   period: Period;
+  analyticsStartDate: string | null;
   kpis: {
     completedTrucks: number;
     totalTons: number;
     servedCustomers: number;
     servedDestinations: number;
   };
-  activity14d: { date: string; label: string; trucks: number; tons: number }[];
+  trends: {
+    completedTrucks: KpiTrend;
+    totalTons: KpiTrend;
+    servedCustomers: KpiTrend;
+    servedDestinations: KpiTrend;
+  };
+  pulse: FactoryPulse;
+  activity: {
+    granularity: "hour" | "day";
+    points: { key: string; label: string; trucks: number; tons: number }[];
+  };
   topCustomers: { id: number; name: string; code?: string; tons: number }[];
   topDestinations: { id: number; name: string; tons: number }[];
   tonsByKind: { kind: string; label: string; tons: number }[];
@@ -162,6 +206,31 @@ const PERIOD_LABEL: Record<Period, string> = {
   month: "هذا الشهر",
 };
 
+/** Hover hints for the period toggle — clarify calendar bounds. */
+const PERIOD_HINT: Record<Period, string> = {
+  today: "يوم التشغيل الحالي من 08:00 حتى الآن",
+  week: "من بداية الأسبوع (السبت) حتى نهايته",
+  month: "من بداية الشهر حتى نهايته",
+};
+
+/** Comparison caption under the trend arrow — the API compares against the
+ *  same elapsed slice of the previous period, so the wording matches. */
+const PERIOD_COMPARE_LABEL: Record<Period, string> = {
+  today: "عن أمس حتى نفس الوقت",
+  week: "عن الأسبوع الماضي حتى نفس الوقت",
+  month: "عن الشهر الماضي حتى نفس الوقت",
+};
+
+const LIVE_REFRESH_MS = 60_000;
+
+/** HH:MM:SS with latin digits for the "آخر تحديث" live badge. */
+const timeFormatter = new Intl.DateTimeFormat("en-GB-u-nu-latn", {
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+
 const KIND_COLORS: Record<string, string> = {
   REBAR: "#3b82f6",
   SHORTBAR_1_4M: "#8b5cf6",
@@ -171,11 +240,6 @@ const KIND_COLORS: Record<string, string> = {
   REBAR_UNDER_70CM: "#a855f7",
   BILLET_SCRAP_10M: "#f97316",
   SCRAP_50CM_1M: "#84cc16",
-};
-
-const GRADE_COLORS: Record<string, string> = {
-  FIRST: "#10b981",
-  SECOND: "#f59e0b",
 };
 
 const TOP_BAR_COLORS = [
@@ -206,9 +270,219 @@ function SectionLabel({
   );
 }
 
+/**
+ * Animates a number from its previous value to `target` with an
+ * ease-out curve (~0.9s). Returns `null` while the target is unknown so
+ * the caller can render a placeholder. Re-animates on every target
+ * change, which also makes live refreshes visibly "tick" to new values.
+ */
+function useCountUp(target: number | null, duration = 900): number | null {
+  const [display, setDisplay] = useState<number | null>(target);
+  const latest = useRef(0);
+
+  useEffect(() => {
+    // All state writes go through rAF: never set state synchronously
+    // inside the effect (avoids cascading render warnings).
+    if (target === null) {
+      const raf = requestAnimationFrame(() => setDisplay(null));
+      return () => cancelAnimationFrame(raf);
+    }
+    const from = latest.current;
+    if (from === target) {
+      const raf = requestAnimationFrame(() => setDisplay(target));
+      return () => cancelAnimationFrame(raf);
+    }
+    let raf: number;
+    const start = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      const v = from + (target - from) * eased;
+      latest.current = v;
+      setDisplay(v);
+      if (t < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration]);
+
+  return display;
+}
+
+function TrendBadge({
+  trend,
+  compareLabel,
+}: {
+  trend?: KpiTrend;
+  compareLabel: string;
+}) {
+  if (!trend) return null;
+
+  if (trend.pct === null) {
+    // No previous-period baseline (previous value was 0).
+    if (trend.direction === "up") {
+      return (
+        <span className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-600">
+          <TrendingUp className="h-3 w-3 shrink-0" />
+          نشاط جديد
+        </span>
+      );
+    }
+    return null;
+  }
+
+  const up = trend.direction === "up";
+  const flat = trend.direction === "flat";
+  const Icon = flat ? Minus : up ? TrendingUp : TrendingDown;
+  const cls = flat
+    ? "bg-muted text-muted-foreground"
+    : up
+      ? "bg-emerald-500/10 text-emerald-600"
+      : "bg-red-500/10 text-red-600";
+
+  return (
+    <span className="mt-1.5 inline-flex flex-wrap items-center gap-1">
+      <span
+        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${cls}`}
+      >
+        <Icon className="h-3 w-3 shrink-0" />
+        {flat ? "0٪" : `${up ? "+" : "−"}${Math.abs(trend.pct)}٪`}
+      </span>
+      <span className="text-[10px] text-muted-foreground">{compareLabel}</span>
+    </span>
+  );
+}
+
+// ─── Factory Pulse (hero banner) ───────────────────────────────────────
+
+/* ── FactoryPulseBanner — temporarily hidden; restore later ──────────
+function FactoryPulseBanner({
+  pulse,
+  loading,
+}: {
+  pulse?: FactoryPulse;
+  loading: boolean;
+}) {
+  const animatedTons = useCountUp(pulse ? pulse.todayTons : null);
+
+  if (loading && !pulse) {
+    return (
+      <div className="h-40 animate-pulse rounded-2xl bg-muted" aria-hidden />
+    );
+  }
+  if (!pulse?.liveFloor) return null;
+
+  const record = pulse.recordBroken;
+  const floor = pulse.liveFloor;
+  const background = record
+    ? "linear-gradient(135deg, #713f12 0%, #b45309 45%, #92400e 100%)"
+    : "linear-gradient(135deg, oklch(0.230 0.050 250) 0%, oklch(0.330 0.095 238) 55%, oklch(0.270 0.075 232) 100%)";
+
+  return (
+    <div
+      className="animate-in fade-in-0 slide-in-from-bottom-2 duration-500 relative overflow-hidden rounded-2xl p-5 text-white shadow-lg sm:p-6"
+      style={{ background }}
+    >
+      // Subtle blueprint grid so the banner reads "control room", not flat color
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.07]"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(255,255,255,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.6) 1px, transparent 1px)",
+          backgroundSize: "28px 28px",
+        }}
+      />
+
+      {record && (
+        <>
+          <Sparkles className="absolute start-4 top-3 h-5 w-5 animate-pulse text-amber-200" />
+          <Sparkles className="absolute bottom-3 end-24 h-4 w-4 animate-pulse text-amber-200 [animation-delay:400ms]" />
+        </>
+      )}
+
+      <div className="relative flex flex-col items-center gap-5 sm:flex-row sm:items-center sm:justify-between">
+        // ── Today's running total ──
+        <div className="flex flex-col items-center gap-1.5 text-center sm:items-start sm:text-start">
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest text-white/80">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-300 opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+            </span>
+            إنتاج اليوم حتى الآن — مباشر
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-5xl font-extrabold tabular-nums leading-none sm:text-6xl">
+              {formatTonsCompact(animatedTons ?? pulse.todayTons)}
+            </span>
+            <span className="text-lg font-semibold text-white/80">طن</span>
+          </div>
+          <p className="text-xs text-white/70">
+            حمولة {pulse.todayTrucks} شاحنة مكتملة منذ 08:00 صباحاً
+          </p>
+
+          {record && pulse.bestDay && (
+            <div className="mt-1 inline-flex items-center gap-2 rounded-full bg-amber-300/20 px-3 py-1.5 text-xs font-bold text-amber-100 ring-1 ring-amber-300/50">
+              <Trophy className="h-4 w-4 animate-bounce text-amber-300" />
+              رقم قياسي جديد! تجاوزتم أفضل يوم مسجل ({formatTons(pulse.bestDay.tons)})
+            </div>
+          )}
+        </div>
+
+        // ── Live floor: شاحنات في هذه اللحظة ──
+        <div className="flex w-full flex-col items-center gap-2 text-center sm:w-auto sm:min-w-[17rem] sm:items-end sm:text-end">
+          <div className="grid w-full grid-cols-2 gap-2">
+            <LiveFloorStat
+              value={floor.loadingNow}
+              label="شاحنة تُحمَّل داخل المعمل"
+              accent="text-amber-200"
+            />
+            <LiveFloorStat
+              value={floor.tareNow}
+              label="شاحنة على القبان الخارجي"
+              accent="text-cyan-200"
+            />
+          </div>
+          <span className="flex items-center gap-1.5 text-[11px] text-white/70">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-300 opacity-75" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            </span>
+            الوضع في هذه اللحظة داخل المصنع
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LiveFloorStat({
+  value,
+  label,
+  accent,
+}: {
+  value: number;
+  label: string;
+  accent: string;
+}) {
+  return (
+    <div className="rounded-xl bg-white/10 px-2 py-2 ring-1 ring-white/10">
+      <div className={`text-2xl font-extrabold tabular-nums leading-none ${accent}`}>
+        {value}
+      </div>
+      <div className="mt-1 text-[10px] leading-tight text-white/70">{label}</div>
+    </div>
+  );
+}
+── end FactoryPulseBanner ────────────────────────────────────────── */
+
 function KpiCard({
   title,
   value,
+  numericValue,
+  formatValue,
+  trend,
+  trendCompareLabel,
   sub,
   icon: Icon,
   color,
@@ -217,12 +491,22 @@ function KpiCard({
 }: {
   title: string;
   value: string;
+  numericValue?: number | null;
+  formatValue?: (v: number) => string;
+  trend?: KpiTrend;
+  trendCompareLabel?: string;
   sub: string;
   icon: React.ElementType;
   color: string;
   colorBg: string;
   colorRing: string;
 }) {
+  const animated = useCountUp(numericValue ?? null);
+  const display =
+    numericValue != null && formatValue
+      ? formatValue(animated ?? numericValue)
+      : value;
+
   return (
     <Card className="group gap-0 overflow-hidden pt-0 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
       <div
@@ -245,11 +529,15 @@ function KpiCard({
       </CardHeader>
       <CardContent className="pb-5">
         <div
-          className="financial-value text-3xl font-bold tracking-tight"
+          className="financial-value text-3xl font-bold tracking-tight tabular-nums"
           style={{ color }}
         >
-          {value}
+          {display}
         </div>
+        <TrendBadge
+          trend={trend}
+          compareLabel={trendCompareLabel ?? "عن الفترة السابقة"}
+        />
         <p className="mt-1 text-xs text-muted-foreground">{sub}</p>
       </CardContent>
     </Card>
@@ -290,21 +578,29 @@ function PeriodToggle({
       {options.map((opt) => {
         const active = opt === value;
         return (
-          <button
-            key={opt}
-            type="button"
-            disabled={disabled}
-            onClick={() => onChange(opt)}
-            className={[
-              "px-3 py-1.5 text-xs font-semibold rounded-md transition-all",
-              active
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
-              disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
-            ].join(" ")}
-          >
-            {PERIOD_LABEL[opt]}
-          </button>
+          <UiTooltip key={opt}>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => onChange(opt)}
+                  className={[
+                    "px-3 py-1.5 text-xs font-semibold rounded-md transition-all",
+                    active
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                    disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
+                  ].join(" ")}
+                />
+              }
+            >
+              {PERIOD_LABEL[opt]}
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-center leading-relaxed">
+              {PERIOD_HINT[opt]}
+            </TooltipContent>
+          </UiTooltip>
         );
       })}
     </div>
@@ -312,36 +608,6 @@ function PeriodToggle({
 }
 
 // ─── Tooltips ──────────────────────────────────────────────────────────
-
-function TonsTooltip({
-  active,
-  payload,
-  label,
-}: {
-  active?: boolean;
-  payload?: { value: number; name: string; color: string }[];
-  label?: string;
-}) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-md text-xs">
-      <p className="font-semibold text-foreground mb-1">{label}</p>
-      {payload.map((p) => (
-        <p key={p.name} className="text-muted-foreground">
-          <span
-            className="inline-block h-2 w-2 rounded-full me-1.5 align-middle"
-            style={{ background: p.color }}
-          />
-          <span className="font-bold text-primary">
-            {p.name === "trucks"
-              ? `${p.value} شاحنة`
-              : formatTons(p.value)}
-          </span>
-        </p>
-      ))}
-    </div>
-  );
-}
 
 function CountTooltip({
   active,
@@ -357,26 +623,6 @@ function CountTooltip({
       <p className="text-muted-foreground">
         <span className="font-bold text-primary">{payload[0].value}</span>{" "}
         شاحنة
-      </p>
-    </div>
-  );
-}
-
-function PieTonsTooltip({
-  active,
-  payload,
-}: {
-  active?: boolean;
-  payload?: { name: string; value: number }[];
-}) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-md text-xs">
-      <p className="font-semibold text-foreground">{payload[0].name}</p>
-      <p className="text-muted-foreground">
-        <span className="font-bold text-primary">
-          {formatTons(payload[0].value)}
-        </span>
       </p>
     </div>
   );
@@ -440,6 +686,7 @@ export function ChartsSection() {
   const [data, setData] = useState<ApiResponse["data"] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   // Period changes flow through this event handler so the loading/error
   // resets happen synchronously with the user gesture — not inside the
@@ -448,40 +695,62 @@ export function ChartsSection() {
     if (next === period) return;
     setLoading(true);
     setError(null);
+    // Drop the previous period snapshot so period-specific widgets never
+    // render against a mismatched payload while the next fetch is in flight.
+    setData(null);
     setPeriod(next);
   }
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/dashboard/operations-stats?period=${period}`)
-      .then((r) => r.json())
-      .then((j: ApiResponse) => {
-        if (cancelled) return;
-        if (!j.success) {
-          setError("تعذّر تحميل المؤشرات");
-          return;
-        }
-        setData(j.data);
-      })
-      .catch(() => {
-        if (!cancelled) setError("تعذّر الاتصال بالخادم");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    let initialLoad = true;
+
+    function load() {
+      const silent = !initialLoad;
+      initialLoad = false;
+      fetch(`/api/dashboard/operations-stats?period=${period}`)
+        .then((r) => r.json())
+        .then((j: ApiResponse) => {
+          if (cancelled) return;
+          if (!j.success) {
+            // Silent refresh failures keep the last good snapshot on
+            // screen instead of flashing an error over live data.
+            if (!silent) setError("تعذّر تحميل المؤشرات");
+            return;
+          }
+          setError(null);
+          setData(j.data);
+          setLastUpdated(new Date());
+        })
+        .catch(() => {
+          if (!cancelled && !silent) setError("تعذّر الاتصال بالخادم");
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    }
+
+    load();
+    const timer = setInterval(load, LIVE_REFRESH_MS);
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
   }, [period]);
 
   const owner = data?.owner;
   const ops = data?.ops;
 
+  const compareLabel = PERIOD_COMPARE_LABEL[period];
+
   // ── Owner KPI cards (4) ──────────────────────────────────────────────
   const ownerKpis = [
     {
       title: `شاحنات مكتملة (${PERIOD_LABEL[period]})`,
-      value: owner ? String(owner.kpis.completedTrucks) : "—",
+      value: "—",
+      numericValue: owner ? owner.kpis.completedTrucks : null,
+      formatValue: (v: number) => String(Math.round(v)),
+      trend: owner?.trends.completedTrucks,
       sub: "العمليات المغلقة بالكامل",
       icon: Truck,
       color: "oklch(0.390 0.130 232)",
@@ -490,7 +759,10 @@ export function ChartsSection() {
     },
     {
       title: `إجمالي الأطنان (${PERIOD_LABEL[period]})`,
-      value: owner ? formatTonsCompact(owner.kpis.totalTons) : "—",
+      value: "—",
+      numericValue: owner ? owner.kpis.totalTons : null,
+      formatValue: formatTonsCompact,
+      trend: owner?.trends.totalTons,
       sub: owner ? `${formatTons(owner.kpis.totalTons)} مسلَّمة` : "—",
       icon: Weight,
       color: "oklch(0.630 0.155 152)",
@@ -499,7 +771,10 @@ export function ChartsSection() {
     },
     {
       title: "الزبائن المخدومون",
-      value: owner ? String(owner.kpis.servedCustomers) : "—",
+      value: "—",
+      numericValue: owner ? owner.kpis.servedCustomers : null,
+      formatValue: (v: number) => String(Math.round(v)),
+      trend: owner?.trends.servedCustomers,
       sub: `خلال ${PERIOD_LABEL[period]}`,
       icon: Users,
       color: "oklch(0.720 0.150 65)",
@@ -508,7 +783,10 @@ export function ChartsSection() {
     },
     {
       title: "الوجهات المخدومة",
-      value: owner ? String(owner.kpis.servedDestinations) : "—",
+      value: "—",
+      numericValue: owner ? owner.kpis.servedDestinations : null,
+      formatValue: (v: number) => String(Math.round(v)),
+      trend: owner?.trends.servedDestinations,
       sub: `خلال ${PERIOD_LABEL[period]}`,
       icon: MapPin,
       color: "oklch(0.610 0.210 0)",
@@ -519,11 +797,29 @@ export function ChartsSection() {
 
   return (
     <div className="space-y-10">
-      {/* ── Header: period toggle ─────────────────────────────────── */}
+      {/* ── Factory pulse hero (temporarily hidden; restore later) ─
+      <FactoryPulseBanner pulse={owner?.pulse} loading={loading} />
+      */}
+
+      {/* ── Header: live badge + period toggle ───────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-muted-foreground">
-          الفترة المعروضة في بطاقات الإنجاز حسب يوم التشغيل 08:00 → 08:00
-        </p>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <span className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-600">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+            </span>
+            مباشر
+            {lastUpdated && (
+              <span className="font-normal text-muted-foreground tabular-nums">
+                آخر تحديث {timeFormatter.format(lastUpdated)}
+              </span>
+            )}
+          </span>
+          <p className="text-xs text-muted-foreground">
+            الفترة المعروضة في بطاقات الإنجاز حسب يوم التشغيل 08:00 → 08:00
+          </p>
+        </div>
         <PeriodToggle
           value={period}
           onChange={handlePeriodChange}
@@ -544,7 +840,7 @@ export function ChartsSection() {
             key={card.title}
             className="animate-in fade-in-0 slide-in-from-bottom-4 duration-500"
           >
-            <KpiCard {...card} />
+            <KpiCard {...card} trendCompareLabel={compareLabel} />
           </div>
         ))}
       </div>
@@ -556,7 +852,9 @@ export function ChartsSection() {
           <div className="grid gap-4 grid-cols-2 md:grid-cols-2 lg:grid-cols-4">
             <KpiCard
               title="قيد التنفيذ الآن"
-              value={String(ops.kpis.activeNow)}
+              value="—"
+              numericValue={ops.kpis.activeNow}
+              formatValue={(v) => String(Math.round(v))}
               sub="شاحنات بين الطابور والوزن الثاني"
               icon={Activity}
               color="oklch(0.620 0.175 222)"
@@ -565,7 +863,9 @@ export function ChartsSection() {
             />
             <KpiCard
               title="على الميزان الآن"
-              value={String(ops.kpis.onScaleNow)}
+              value="—"
+              numericValue={ops.kpis.onScaleNow}
+              formatValue={(v) => String(Math.round(v))}
               sub="بانتظار اكتمال التحميل"
               icon={Weight}
               color="oklch(0.650 0.190 290)"
@@ -574,7 +874,9 @@ export function ChartsSection() {
             />
             <KpiCard
               title="شاحنات عالقة"
-              value={String(ops.kpis.stuckNow)}
+              value="—"
+              numericValue={ops.kpis.stuckNow}
+              formatValue={(v) => String(Math.round(v))}
               sub="تجاوزت العتبة الزمنية لحالتها"
               icon={AlertTriangle}
               color="oklch(0.700 0.180 50)"
@@ -598,98 +900,6 @@ export function ChartsSection() {
         </>
       )}
 
-      {/* ── Owner Section: 14-day activity ────────────────────────────── */}
-      <SectionLabel icon={Activity} label="نشاط آخر 14 يوم" />
-
-      <Card className="shadow-sm">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-semibold">
-            الشاحنات المكتملة والأطنان المسلَّمة
-          </CardTitle>
-          <p className="text-xs text-muted-foreground">
-            خط الشاحنات (عدد) ومنطقة الأطنان — آخر 14 يوماً
-          </p>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <ChartSkeleton />
-          ) : !owner?.activity14d.length ? (
-            <EmptyState label="لا يوجد نشاط في آخر 14 يوم" />
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <ComposedChart
-                data={owner.activity14d}
-                margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
-              >
-                <defs>
-                  <linearGradient id="tonsGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="hsl(var(--border))"
-                  vertical={false}
-                />
-                <XAxis
-                  dataKey="label"
-                  tick={{
-                    fontSize: 10,
-                    fill: "hsl(var(--muted-foreground))",
-                  }}
-                  tickLine={false}
-                  axisLine={false}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  yAxisId="left"
-                  tick={{
-                    fontSize: 10,
-                    fill: "hsl(var(--muted-foreground))",
-                  }}
-                  tickLine={false}
-                  axisLine={false}
-                  width={28}
-                  allowDecimals={false}
-                />
-                <YAxis
-                  yAxisId="right"
-                  orientation="right"
-                  tickFormatter={formatTonsCompact}
-                  tick={{
-                    fontSize: 10,
-                    fill: "hsl(var(--muted-foreground))",
-                  }}
-                  tickLine={false}
-                  axisLine={false}
-                  width={36}
-                />
-                <Tooltip content={<TonsTooltip />} />
-                <Area
-                  yAxisId="right"
-                  type="monotone"
-                  dataKey="tons"
-                  name="tons"
-                  stroke="#10b981"
-                  strokeWidth={2}
-                  fill="url(#tonsGrad)"
-                />
-                <Line
-                  yAxisId="left"
-                  type="monotone"
-                  dataKey="trucks"
-                  name="trucks"
-                  stroke="#3b82f6"
-                  strokeWidth={2}
-                  dot={{ r: 3, fill: "#3b82f6", strokeWidth: 0 }}
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
-          )}
-        </CardContent>
-      </Card>
-
       {/* ── Owner Section: Customers + Destinations ────────────────── */}
       <SectionLabel icon={Users} label="الزبائن والوجهات" />
 
@@ -697,7 +907,7 @@ export function ChartsSection() {
         <Card className="shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold">
-              أكبر 5 زبائن (آخر 30 يوم)
+              أكبر 5 زبائن ({PERIOD_LABEL[period]})
             </CardTitle>
             <p className="text-xs text-muted-foreground">
               إجمالي الأطنان المسلَّمة
@@ -760,7 +970,7 @@ export function ChartsSection() {
         <Card className="shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold">
-              أكبر 5 وجهات (آخر 30 يوم)
+              أكبر 5 وجهات ({PERIOD_LABEL[period]})
             </CardTitle>
             <p className="text-xs text-muted-foreground">
               إجمالي الأطنان المسلَّمة
@@ -822,121 +1032,73 @@ export function ChartsSection() {
       </div>
 
       {/* ── Owner Section: Production breakdown ──────────────────────── */}
-      <SectionLabel icon={Package} label="توزيع الإنتاج (آخر 30 يوم)" />
+      <SectionLabel
+        icon={Package}
+        label={`توزيع الإنتاج (${PERIOD_LABEL[period]})`}
+      />
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold">
-              الأطنان حسب نوع المادة
-            </CardTitle>
-            <p className="text-xs text-muted-foreground">
-              مجموع وزن الجلسات حسب القياس
-            </p>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <ChartSkeleton />
-            ) : !owner?.tonsByKind.length ? (
-              <EmptyState label="لا توجد جلسات وزن" />
-            ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart
-                  data={owner.tonsByKind}
-                  margin={{ top: 4, right: 8, left: 0, bottom: 4 }}
+      <Card className="shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-semibold">
+            الأطنان حسب نوع المادة
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            مجموع وزن الجلسات حسب القياس
+          </p>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <ChartSkeleton />
+          ) : !owner?.tonsByKind.length ? (
+            <EmptyState label="لا توجد جلسات وزن" />
+          ) : (
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart
+                data={owner.tonsByKind}
+                margin={{ top: 4, right: 8, left: 0, bottom: 4 }}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="hsl(var(--border))"
+                  vertical={false}
+                />
+                <XAxis
+                  dataKey="label"
+                  tick={{
+                    fontSize: 11,
+                    fill: "hsl(var(--muted-foreground))",
+                  }}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  tickFormatter={formatTonsCompact}
+                  tick={{
+                    fontSize: 10,
+                    fill: "hsl(var(--muted-foreground))",
+                  }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={40}
+                />
+                <Tooltip content={<TonsBarTooltip />} />
+                <Bar
+                  dataKey="tons"
+                  radius={[6, 6, 0, 0]}
+                  maxBarSize={56}
                 >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="hsl(var(--border))"
-                    vertical={false}
-                  />
-                  <XAxis
-                    dataKey="label"
-                    tick={{
-                      fontSize: 11,
-                      fill: "hsl(var(--muted-foreground))",
-                    }}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <YAxis
-                    tickFormatter={formatTonsCompact}
-                    tick={{
-                      fontSize: 10,
-                      fill: "hsl(var(--muted-foreground))",
-                    }}
-                    tickLine={false}
-                    axisLine={false}
-                    width={40}
-                  />
-                  <Tooltip content={<TonsBarTooltip />} />
-                  <Bar
-                    dataKey="tons"
-                    radius={[6, 6, 0, 0]}
-                    maxBarSize={56}
-                  >
-                    {owner.tonsByKind.map((entry) => (
-                      <Cell
-                        key={entry.kind}
-                        fill={KIND_COLORS[entry.kind] ?? "#94a3b8"}
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold">
-              توزيع الجودة
-            </CardTitle>
-            <p className="text-xs text-muted-foreground">
-              نسبة الأطنان حسب الدرجة في{" "}
-              {PERIOD_LABEL[period]}
-            </p>
-          </CardHeader>
-          <CardContent className="flex flex-col items-center">
-            {loading ? (
-              <ChartSkeleton h={220} />
-            ) : !owner?.tonsByGrade.length ? (
-              <EmptyState label="لا توجد بيانات درجة" />
-            ) : (
-              <>
-                <ResponsiveContainer width="100%" height={180}>
-                  <PieChart>
-                    <Pie
-                      data={owner.tonsByGrade}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={52}
-                      outerRadius={78}
-                      paddingAngle={3}
-                      dataKey="tons"
-                      nameKey="label"
-                    >
-                      {owner.tonsByGrade.map((entry) => (
-                        <Cell
-                          key={entry.grade}
-                          fill={GRADE_COLORS[entry.grade] ?? "#94a3b8"}
-                        />
-                      ))}
-                    </Pie>
-                    <Tooltip content={<PieTonsTooltip />} />
-                    <Legend
-                      formatter={(value) => (
-                        <span className="text-xs">{value}</span>
-                      )}
+                  {owner.tonsByKind.map((entry) => (
+                    <Cell
+                      key={entry.kind}
+                      fill={KIND_COLORS[entry.kind] ?? "#94a3b8"}
                     />
-                  </PieChart>
-                </ResponsiveContainer>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
 
       {/* ── OPS Section: Fleet status + On scale ─────────────────────── */}
       {ops && (

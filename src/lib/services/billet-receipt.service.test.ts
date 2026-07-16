@@ -21,6 +21,19 @@ vi.mock("@/lib/logger", () => ({
 vi.mock("./tx-retry", () => ({
   withRetry: (fn: () => Promise<unknown>) => fn(),
 }));
+// Analytics-start clamp: passthrough by default (no start date configured).
+const mockClampEventWindow = vi.hoisted(() =>
+  vi.fn(async (from?: Date, to?: Date) => ({
+    from,
+    to,
+    clamped: false,
+    analyticsStartDate: null as string | null,
+  })),
+);
+vi.mock("./settings.service", () => ({
+  clampEventWindow: mockClampEventWindow,
+  getAnalyticsStartDateValue: vi.fn(async () => null),
+}));
 
 import { listReceipts } from "./billet-receipt.service";
 import { getOperationalDayWindow } from "@/lib/operational-day";
@@ -41,6 +54,7 @@ describe("listReceipts", () => {
     );
 
     const expectedWhere = {
+      isAdjustment: false,
       createdAt: {
         gte: new Date(2026, 5, 6, 8, 0, 0, 0),
         lt: new Date(2026, 5, 7, 8, 0, 0, 0),
@@ -59,9 +73,60 @@ describe("listReceipts", () => {
     await listReceipts({}, { page: 1, pageSize: 25 });
 
     expect(mockPrisma.billetReceipt.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: {} }),
+      expect.objectContaining({ where: { isAdjustment: false } }),
     );
-    expect(mockPrisma.billetReceipt.count).toHaveBeenCalledWith({ where: {} });
+    expect(mockPrisma.billetReceipt.count).toHaveBeenCalledWith({
+      where: { isAdjustment: false },
+    });
+  });
+
+  it("floors createdAt at the analytics start when no date filter is sent", async () => {
+    const analyticsStart = new Date(2026, 5, 1, 8, 0, 0, 0);
+    mockClampEventWindow.mockResolvedValueOnce({
+      from: analyticsStart,
+      to: undefined,
+      clamped: false,
+      analyticsStartDate: "2026-06-01",
+    });
+
+    await listReceipts({}, { page: 1, pageSize: 25 });
+
+    expect(mockClampEventWindow).toHaveBeenCalledWith(undefined, undefined);
+    expect(mockPrisma.billetReceipt.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { isAdjustment: false, createdAt: { gte: analyticsStart } },
+      }),
+    );
+    expect(mockPrisma.billetReceipt.count).toHaveBeenCalledWith({
+      where: { isAdjustment: false, createdAt: { gte: analyticsStart } },
+    });
+  });
+
+  it("raises an explicit dateFrom that reaches before the analytics start", async () => {
+    const requestedFrom = new Date(2026, 0, 1, 8, 0, 0, 0);
+    const requestedTo = new Date(2026, 6, 1, 8, 0, 0, 0);
+    const analyticsStart = new Date(2026, 5, 1, 8, 0, 0, 0);
+    mockClampEventWindow.mockResolvedValueOnce({
+      from: analyticsStart,
+      to: requestedTo,
+      clamped: true,
+      analyticsStartDate: "2026-06-01",
+    });
+
+    await listReceipts(
+      { dateFrom: requestedFrom, dateTo: requestedTo },
+      { page: 1, pageSize: 25 },
+    );
+
+    expect(mockClampEventWindow).toHaveBeenCalledWith(requestedFrom, requestedTo);
+    expect(mockPrisma.billetReceipt.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          isAdjustment: false,
+          createdAt: { gte: analyticsStart, lt: requestedTo },
+        },
+      }),
+    );
   });
 
   it("combines the operational window with status and plate filters", async () => {
@@ -80,6 +145,7 @@ describe("listReceipts", () => {
     expect(mockPrisma.billetReceipt.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
+          isAdjustment: false,
           status: "Registered",
           plateNumber: { contains: "123", mode: "insensitive" },
           createdAt: {

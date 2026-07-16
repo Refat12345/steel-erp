@@ -95,6 +95,7 @@ export function TruckList() {
   );
   const [showRegister, setShowRegister] = useState(false);
   const [editingTruckId, setEditingTruckId] = useState<number | null>(null);
+  const [analyticsStartDate, setAnalyticsStartDate] = useState<string | null>(null);
 
   const todayOperationalDate = defaultOperationalDateInput();
   const isTodaySelected = operationalDate === todayOperationalDate;
@@ -118,6 +119,7 @@ export function TruckList() {
       if (!json.success) throw new Error(json.error);
       setData(json.data);
       setTotal(json.total);
+      setAnalyticsStartDate(json.analyticsStartDate ?? null);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "خطأ في تحميل البيانات");
     } finally {
@@ -195,6 +197,7 @@ export function TruckList() {
                 type="date"
                 className="w-[10.5rem] shrink-0"
                 value={operationalDate}
+                min={analyticsStartDate ?? undefined}
                 onChange={(e) => setOperationalDate(e.target.value)}
               />
               <Button

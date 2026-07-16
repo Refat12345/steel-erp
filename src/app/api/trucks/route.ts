@@ -16,6 +16,7 @@ import {
 } from "@/lib/operational-day";
 import { truckRegisterSchema } from "@/lib/validators/truck";
 import { registerTruck, listOperations } from "@/lib/services/truck.service";
+import { getAnalyticsStartDateValue } from "@/lib/services/settings.service";
 import type { TruckStatus } from "@prisma/client";
 
 export async function GET(req: NextRequest) {
@@ -43,16 +44,19 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const result = await listOperations(
-      {
-        status: status || undefined,
-        plateNumber: plateNumber || undefined,
-        dateFrom: window?.from,
-        dateTo: window?.to,
-      },
-      pagination,
-    );
-    return NextResponse.json({ success: true, ...result });
+    const [result, analyticsStartDate] = await Promise.all([
+      listOperations(
+        {
+          status: status || undefined,
+          plateNumber: plateNumber || undefined,
+          dateFrom: window?.from,
+          dateTo: window?.to,
+        },
+        pagination,
+      ),
+      getAnalyticsStartDateValue(),
+    ]);
+    return NextResponse.json({ success: true, ...result, analyticsStartDate });
   } catch (e) {
     return handleServiceError(e);
   }
