@@ -22,6 +22,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   Bar,
   BarChart,
@@ -64,6 +65,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+
+type DashboardT = ReturnType<typeof useTranslations<"dashboard">>;
 
 // ─── Types — mirror the API response ──────────────────────────────────
 
@@ -149,6 +152,7 @@ interface OpsStats {
   onScale: {
     id: number;
     plateNumber: string;
+    status: TruckStatus;
     statusLabel: string;
     minutesSince: number;
   }[];
@@ -160,6 +164,7 @@ interface OpsStats {
   stuckTrucks: {
     id: number;
     plateNumber: string;
+    status: TruckStatus;
     statusLabel: string;
     thresholdMin: number;
     minutesSince: number;
@@ -176,11 +181,11 @@ interface ApiResponse {
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
-function formatTons(v: number): string {
+function formatTons(v: number, tonsUnit: string): string {
   return `${new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
-  }).format(v)} طن`;
+  }).format(v)} ${tonsUnit}`;
 }
 
 function formatTonsCompact(v: number): string {
@@ -191,39 +196,50 @@ function formatTonsCompact(v: number): string {
   }).format(v);
 }
 
-function formatMinutes(min: number | null): string {
+function formatMinutes(min: number | null, t: DashboardT): string {
   if (min === null || min === undefined) return "—";
-  if (min < 60) return `${min} د`;
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  if (m === 0) return `${h} س`;
-  return `${h} س ${m} د`;
+  if (min < 60) return t("units.minutesShort", { n: min });
+  if (min < 1440) {
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    if (m === 0) return t("units.hoursShort", { h });
+    return t("units.hoursMinutes", { h, m });
+  }
+  const d = Math.floor(min / 1440);
+  const h = Math.floor((min % 1440) / 60);
+  if (h === 0) return t("units.daysShort", { d });
+  return t("units.daysHours", { d, h });
 }
 
-const PERIOD_LABEL: Record<Period, string> = {
-  today: "اليوم",
-  week: "هذا الأسبوع",
-  month: "هذا الشهر",
-};
+const MATERIAL_KINDS = [
+  "REBAR",
+  "SHORTBAR_1_4M",
+  "SHORTBAR_4_12M",
+  "SCRAP",
+  "BILLET_WIRE",
+  "REBAR_UNDER_70CM",
+  "BILLET_SCRAP_10M",
+  "SCRAP_50CM_1M",
+] as const;
 
-/** Hover hints for the period toggle — clarify calendar bounds. */
-const PERIOD_HINT: Record<Period, string> = {
-  today: "يوم التشغيل الحالي من 08:00 حتى الآن",
-  week: "من بداية الأسبوع (السبت) حتى نهايته",
-  month: "من بداية الشهر حتى نهايته",
-};
+function truckStatusLabel(status: TruckStatus, t: DashboardT): string {
+  return t(`truckStatus.${status}`);
+}
 
-/** Comparison caption under the trend arrow — the API compares against the
- *  same elapsed slice of the previous period, so the wording matches. */
-const PERIOD_COMPARE_LABEL: Record<Period, string> = {
-  today: "عن أمس حتى نفس الوقت",
-  week: "عن الأسبوع الماضي حتى نفس الوقت",
-  month: "عن الشهر الماضي حتى نفس الوقت",
-};
+function materialKindLabel(
+  kind: string,
+  fallback: string,
+  t: DashboardT,
+): string {
+  if ((MATERIAL_KINDS as readonly string[]).includes(kind)) {
+    return t(`materialKind.${kind as (typeof MATERIAL_KINDS)[number]}`);
+  }
+  return fallback;
+}
 
 const LIVE_REFRESH_MS = 60_000;
 
-/** HH:MM:SS with latin digits for the "آخر تحديث" live badge. */
+/** HH:MM:SS with latin digits for the live "last updated" badge. */
 const timeFormatter = new Intl.DateTimeFormat("en-GB-u-nu-latn", {
   hour: "2-digit",
   minute: "2-digit",
@@ -316,6 +332,7 @@ function TrendBadge({
   trend?: KpiTrend;
   compareLabel: string;
 }) {
+  const t = useTranslations("dashboard");
   if (!trend) return null;
 
   if (trend.pct === null) {
@@ -324,7 +341,7 @@ function TrendBadge({
       return (
         <span className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-600">
           <TrendingUp className="h-3 w-3 shrink-0" />
-          نشاط جديد
+          {t("trend.newActivity")}
         </span>
       );
     }
@@ -339,6 +356,11 @@ function TrendBadge({
     : up
       ? "bg-emerald-500/10 text-emerald-600"
       : "bg-red-500/10 text-red-600";
+  const pctLabel = flat
+    ? t("trend.flatPercent")
+    : up
+      ? t("trend.percentUp", { pct: Math.abs(trend.pct) })
+      : t("trend.percentDown", { pct: Math.abs(trend.pct) });
 
   return (
     <span className="mt-1.5 inline-flex flex-wrap items-center gap-1">
@@ -346,7 +368,7 @@ function TrendBadge({
         className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${cls}`}
       >
         <Icon className="h-3 w-3 shrink-0" />
-        {flat ? "0٪" : `${up ? "+" : "−"}${Math.abs(trend.pct)}٪`}
+        {pctLabel}
       </span>
       <span className="text-[10px] text-muted-foreground">{compareLabel}</span>
     </span>
@@ -501,6 +523,7 @@ function KpiCard({
   colorBg: string;
   colorRing: string;
 }) {
+  const t = useTranslations("dashboard");
   const animated = useCountUp(numericValue ?? null);
   const display =
     numericValue != null && formatValue
@@ -536,7 +559,7 @@ function KpiCard({
         </div>
         <TrendBadge
           trend={trend}
-          compareLabel={trendCompareLabel ?? "عن الفترة السابقة"}
+          compareLabel={trendCompareLabel ?? t("periodCompare.previous")}
         />
         <p className="mt-1 text-xs text-muted-foreground">{sub}</p>
       </CardContent>
@@ -572,6 +595,7 @@ function PeriodToggle({
   onChange: (p: Period) => void;
   disabled?: boolean;
 }) {
+  const t = useTranslations("dashboard");
   const options: Period[] = ["today", "week", "month"];
   return (
     <div className="inline-flex items-center rounded-lg border border-border bg-card p-1 shadow-sm">
@@ -595,10 +619,10 @@ function PeriodToggle({
                 />
               }
             >
-              {PERIOD_LABEL[opt]}
+              {t(`period.${opt}`)}
             </TooltipTrigger>
             <TooltipContent side="bottom" className="text-center leading-relaxed">
-              {PERIOD_HINT[opt]}
+              {t(`periodHint.${opt}`)}
             </TooltipContent>
           </UiTooltip>
         );
@@ -616,13 +640,14 @@ function CountTooltip({
   active?: boolean;
   payload?: { value: number; name: string }[];
 }) {
+  const t = useTranslations("dashboard");
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-md text-xs">
       <p className="font-semibold text-foreground">{payload[0].name}</p>
       <p className="text-muted-foreground">
         <span className="font-bold text-primary">{payload[0].value}</span>{" "}
-        شاحنة
+        {t("units.truck")}
       </p>
     </div>
   );
@@ -637,13 +662,14 @@ function TonsBarTooltip({
   payload?: { value: number }[];
   label?: string;
 }) {
+  const t = useTranslations("dashboard");
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-md text-xs">
       <p className="font-semibold text-foreground mb-1">{label}</p>
       <p className="text-muted-foreground">
         <span className="font-bold text-primary">
-          {formatTons(payload[0].value)}
+          {formatTons(payload[0].value, t("units.tons"))}
         </span>
       </p>
     </div>
@@ -682,11 +708,14 @@ function TruncatedYTick({
 // ─── Main Component ─────────────────────────────────────────────────────
 
 export function ChartsSection() {
+  const t = useTranslations("dashboard");
   const [period, setPeriod] = useState<Period>("today");
   const [data, setData] = useState<ApiResponse["data"] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const periodLabel = t(`period.${period}`);
+  const tonsUnit = t("units.tons");
 
   // Period changes flow through this event handler so the loading/error
   // resets happen synchronously with the user gesture — not inside the
@@ -715,7 +744,7 @@ export function ChartsSection() {
           if (!j.success) {
             // Silent refresh failures keep the last good snapshot on
             // screen instead of flashing an error over live data.
-            if (!silent) setError("تعذّر تحميل المؤشرات");
+            if (!silent) setError(t("errorLoad"));
             return;
           }
           setError(null);
@@ -723,7 +752,7 @@ export function ChartsSection() {
           setLastUpdated(new Date());
         })
         .catch(() => {
-          if (!cancelled && !silent) setError("تعذّر الاتصال بالخادم");
+          if (!cancelled && !silent) setError(t("errorNetwork"));
         })
         .finally(() => {
           if (!cancelled) setLoading(false);
@@ -736,58 +765,74 @@ export function ChartsSection() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [period]);
+  }, [period, t]);
 
   const owner = data?.owner;
   const ops = data?.ops;
 
-  const compareLabel = PERIOD_COMPARE_LABEL[period];
+  const compareLabel = t(`periodCompare.${period}`);
+
+  const tonsByKindLocalized =
+    owner?.tonsByKind.map((entry) => ({
+      ...entry,
+      label: materialKindLabel(entry.kind, entry.label, t),
+    })) ?? [];
+
+  const fleetStatusLocalized =
+    ops?.fleetStatus.map((entry) => ({
+      ...entry,
+      label: truckStatusLabel(entry.status, t),
+    })) ?? [];
 
   // ── Owner KPI cards (4) ──────────────────────────────────────────────
   const ownerKpis = [
     {
-      title: `شاحنات مكتملة (${PERIOD_LABEL[period]})`,
+      title: t("kpis.completedTrucks", { period: periodLabel }),
       value: "—",
       numericValue: owner ? owner.kpis.completedTrucks : null,
       formatValue: (v: number) => String(Math.round(v)),
       trend: owner?.trends.completedTrucks,
-      sub: "العمليات المغلقة بالكامل",
+      sub: t("kpis.completedTrucksSub"),
       icon: Truck,
       color: "oklch(0.390 0.130 232)",
       colorBg: "oklch(0.390 0.130 232 / 12%)",
       colorRing: "oklch(0.390 0.130 232 / 25%)",
     },
     {
-      title: `إجمالي الأطنان (${PERIOD_LABEL[period]})`,
+      title: t("kpis.totalTons", { period: periodLabel }),
       value: "—",
       numericValue: owner ? owner.kpis.totalTons : null,
       formatValue: formatTonsCompact,
       trend: owner?.trends.totalTons,
-      sub: owner ? `${formatTons(owner.kpis.totalTons)} مسلَّمة` : "—",
+      sub: owner
+        ? t("kpis.totalTonsDelivered", {
+            tons: formatTons(owner.kpis.totalTons, tonsUnit),
+          })
+        : "—",
       icon: Weight,
       color: "oklch(0.630 0.155 152)",
       colorBg: "oklch(0.630 0.155 152 / 12%)",
       colorRing: "oklch(0.630 0.155 152 / 25%)",
     },
     {
-      title: "الزبائن المخدومون",
+      title: t("kpis.servedCustomers"),
       value: "—",
       numericValue: owner ? owner.kpis.servedCustomers : null,
       formatValue: (v: number) => String(Math.round(v)),
       trend: owner?.trends.servedCustomers,
-      sub: `خلال ${PERIOD_LABEL[period]}`,
+      sub: t("kpis.duringPeriod", { period: periodLabel }),
       icon: Users,
       color: "oklch(0.720 0.150 65)",
       colorBg: "oklch(0.720 0.150 65 / 14%)",
       colorRing: "oklch(0.720 0.150 65 / 28%)",
     },
     {
-      title: "الوجهات المخدومة",
+      title: t("kpis.servedDestinations"),
       value: "—",
       numericValue: owner ? owner.kpis.servedDestinations : null,
       formatValue: (v: number) => String(Math.round(v)),
       trend: owner?.trends.servedDestinations,
-      sub: `خلال ${PERIOD_LABEL[period]}`,
+      sub: t("kpis.duringPeriod", { period: periodLabel }),
       icon: MapPin,
       color: "oklch(0.610 0.210 0)",
       colorBg: "oklch(0.610 0.210 0 / 12%)",
@@ -809,15 +854,15 @@ export function ChartsSection() {
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
             </span>
-            مباشر
+            {t("live")}
             {lastUpdated && (
               <span className="font-normal text-muted-foreground tabular-nums">
-                آخر تحديث {timeFormatter.format(lastUpdated)}
+                {t("lastUpdated", { time: timeFormatter.format(lastUpdated) })}
               </span>
             )}
           </span>
           <p className="text-xs text-muted-foreground">
-            الفترة المعروضة في بطاقات الإنجاز حسب يوم التشغيل 08:00 → 08:00
+            {t("periodNote")}
           </p>
         </div>
         <PeriodToggle
@@ -848,49 +893,51 @@ export function ChartsSection() {
       {/* ── OPS KPIs (only if `ops` present) ──────────────────────── */}
       {ops && (
         <>
-          <SectionLabel icon={Gauge} label="حالة العمليات الآن" />
+          <SectionLabel icon={Gauge} label={t("sections.opsStatus")} />
           <div className="grid gap-4 grid-cols-2 md:grid-cols-2 lg:grid-cols-4">
             <KpiCard
-              title="قيد التنفيذ الآن"
+              title={t("kpis.activeNow")}
               value="—"
               numericValue={ops.kpis.activeNow}
               formatValue={(v) => String(Math.round(v))}
-              sub="شاحنات بين الطابور والوزن الثاني"
+              sub={t("kpis.activeNowSub")}
               icon={Activity}
               color="oklch(0.620 0.175 222)"
               colorBg="oklch(0.620 0.175 222 / 12%)"
               colorRing="oklch(0.620 0.175 222 / 25%)"
             />
             <KpiCard
-              title="على الميزان الآن"
+              title={t("kpis.onScaleNow")}
               value="—"
               numericValue={ops.kpis.onScaleNow}
               formatValue={(v) => String(Math.round(v))}
-              sub="بانتظار اكتمال التحميل"
+              sub={t("kpis.onScaleNowSub")}
               icon={Weight}
               color="oklch(0.650 0.190 290)"
               colorBg="oklch(0.650 0.190 290 / 12%)"
               colorRing="oklch(0.650 0.190 290 / 25%)"
             />
             <KpiCard
-              title="شاحنات عالقة"
+              title={t("kpis.stuckTrucks")}
               value="—"
               numericValue={ops.kpis.stuckNow}
               formatValue={(v) => String(Math.round(v))}
-              sub="تجاوزت العتبة الزمنية لحالتها"
+              sub={t("kpis.stuckTrucksSub")}
               icon={AlertTriangle}
               color="oklch(0.700 0.180 50)"
               colorBg="oklch(0.700 0.180 50 / 12%)"
               colorRing="oklch(0.700 0.180 50 / 25%)"
             />
             <KpiCard
-              title="نسبة الإلغاء (30 يوم)"
+              title={t("kpis.cancellationPct")}
               value={
                 ops.kpis.cancellationPct30d === null
                   ? "—"
-                  : `${ops.kpis.cancellationPct30d}٪`
+                  : t("trend.percentValue", {
+                      value: ops.kpis.cancellationPct30d,
+                    })
               }
-              sub="من إجمالي العمليات المنتهية"
+              sub={t("kpis.cancellationPctSub")}
               icon={AlertTriangle}
               color="oklch(0.610 0.210 0)"
               colorBg="oklch(0.610 0.210 0 / 12%)"
@@ -901,23 +948,23 @@ export function ChartsSection() {
       )}
 
       {/* ── Owner Section: Customers + Destinations ────────────────── */}
-      <SectionLabel icon={Users} label="الزبائن والوجهات" />
+      <SectionLabel icon={Users} label={t("sections.customersDestinations")} />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold">
-              أكبر 5 زبائن ({PERIOD_LABEL[period]})
+              {t("charts.topCustomers", { period: periodLabel })}
             </CardTitle>
             <p className="text-xs text-muted-foreground">
-              إجمالي الأطنان المسلَّمة
+              {t("charts.totalTonsDelivered")}
             </p>
           </CardHeader>
           <CardContent>
             {loading ? (
               <ChartSkeleton />
             ) : !owner?.topCustomers.length ? (
-              <EmptyState label="لا توجد بيانات تسليم" />
+              <EmptyState label={t("empty.deliveries")} />
             ) : (
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart
@@ -970,17 +1017,17 @@ export function ChartsSection() {
         <Card className="shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold">
-              أكبر 5 وجهات ({PERIOD_LABEL[period]})
+              {t("charts.topDestinations", { period: periodLabel })}
             </CardTitle>
             <p className="text-xs text-muted-foreground">
-              إجمالي الأطنان المسلَّمة
+              {t("charts.totalTonsDelivered")}
             </p>
           </CardHeader>
           <CardContent>
             {loading ? (
               <ChartSkeleton />
             ) : !owner?.topDestinations.length ? (
-              <EmptyState label="لا توجد بيانات وجهات" />
+              <EmptyState label={t("empty.destinations")} />
             ) : (
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart
@@ -1034,27 +1081,27 @@ export function ChartsSection() {
       {/* ── Owner Section: Production breakdown ──────────────────────── */}
       <SectionLabel
         icon={Package}
-        label={`توزيع الإنتاج (${PERIOD_LABEL[period]})`}
+        label={t("sections.productionMix", { period: periodLabel })}
       />
 
       <Card className="shadow-sm">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-semibold">
-            الأطنان حسب نوع المادة
+            {t("charts.tonsByKind")}
           </CardTitle>
           <p className="text-xs text-muted-foreground">
-            مجموع وزن الجلسات حسب القياس
+            {t("charts.tonsByKindSub")}
           </p>
         </CardHeader>
         <CardContent>
           {loading ? (
             <ChartSkeleton />
-          ) : !owner?.tonsByKind.length ? (
-            <EmptyState label="لا توجد جلسات وزن" />
+          ) : !tonsByKindLocalized.length ? (
+            <EmptyState label={t("empty.weighSessions")} />
           ) : (
             <ResponsiveContainer width="100%" height={220}>
               <BarChart
-                data={owner.tonsByKind}
+                data={tonsByKindLocalized}
                 margin={{ top: 4, right: 8, left: 0, bottom: 4 }}
               >
                 <CartesianGrid
@@ -1087,7 +1134,7 @@ export function ChartsSection() {
                   radius={[6, 6, 0, 0]}
                   maxBarSize={56}
                 >
-                  {owner.tonsByKind.map((entry) => (
+                  {tonsByKindLocalized.map((entry) => (
                     <Cell
                       key={entry.kind}
                       fill={KIND_COLORS[entry.kind] ?? "#94a3b8"}
@@ -1103,27 +1150,27 @@ export function ChartsSection() {
       {/* ── OPS Section: Fleet status + On scale ─────────────────────── */}
       {ops && (
         <>
-          <SectionLabel icon={PieIcon} label="حالة الأسطول" />
+          <SectionLabel icon={PieIcon} label={t("sections.fleetStatus")} />
 
           <div className="grid gap-6 lg:grid-cols-5">
             <Card className="lg:col-span-3 shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold">
-                  توزيع الشاحنات حسب الحالة
+                  {t("charts.fleetByStatus")}
                 </CardTitle>
                 <p className="text-xs text-muted-foreground">
-                  لقطة حالية لكامل الأسطول
+                  {t("charts.fleetByStatusSub")}
                 </p>
               </CardHeader>
               <CardContent className="flex flex-col items-center">
-                {!ops.fleetStatus.length ? (
-                  <EmptyState label="لا توجد شاحنات مسجَّلة بعد" />
+                {!fleetStatusLocalized.length ? (
+                  <EmptyState label={t("empty.noTrucks")} />
                 ) : (
                   <>
                     <ResponsiveContainer width="100%" height={220}>
                       <PieChart>
                         <Pie
-                          data={ops.fleetStatus}
+                          data={fleetStatusLocalized}
                           cx="50%"
                           cy="50%"
                           innerRadius={56}
@@ -1132,7 +1179,7 @@ export function ChartsSection() {
                           dataKey="count"
                           nameKey="label"
                         >
-                          {ops.fleetStatus.map((entry) => (
+                          {fleetStatusLocalized.map((entry) => (
                             <Cell
                               key={entry.status}
                               fill={entry.color}
@@ -1143,7 +1190,7 @@ export function ChartsSection() {
                       </PieChart>
                     </ResponsiveContainer>
                     <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1.5">
-                      {ops.fleetStatus.map((s) => (
+                      {fleetStatusLocalized.map((s) => (
                         <div
                           key={s.status}
                           className="flex items-center gap-1.5 text-xs text-muted-foreground"
@@ -1167,37 +1214,37 @@ export function ChartsSection() {
             <Card className="lg:col-span-2 shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold">
-                  على الميزان الآن
+                  {t("charts.onScaleNow")}
                 </CardTitle>
                 <p className="text-xs text-muted-foreground">
                   {ops.onScale.length === 0
-                    ? "لا توجد شاحنات على الميزان"
-                    : `${ops.onScale.length} شاحنة`}
+                    ? t("charts.onScaleEmpty")
+                    : t("charts.onScaleCount", { count: ops.onScale.length })}
                 </p>
               </CardHeader>
               <CardContent>
                 {ops.onScale.length === 0 ? (
                   <div className="flex h-40 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
                     <CheckCircle2 className="h-6 w-6 text-emerald-500" />
-                    الميزان فارغ
+                    {t("charts.scaleClear")}
                   </div>
                 ) : (
                   <ul className="divide-y divide-border rounded-lg border border-border overflow-hidden">
-                    {ops.onScale.map((t) => (
+                    {ops.onScale.map((truck) => (
                       <li
-                        key={t.id}
+                        key={truck.id}
                         className="flex items-center justify-between gap-2 px-3 py-2 text-xs"
                       >
                         <div className="flex flex-col">
                           <span className="font-semibold tabular-nums">
-                            {t.plateNumber}
+                            {truck.plateNumber}
                           </span>
                           <span className="text-muted-foreground">
-                            {t.statusLabel}
+                            {truckStatusLabel(truck.status, t)}
                           </span>
                         </div>
                         <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground tabular-nums">
-                          {formatMinutes(t.minutesSince)}
+                          {formatMinutes(truck.minutesSince, t)}
                         </span>
                       </li>
                     ))}
@@ -1212,31 +1259,31 @@ export function ChartsSection() {
       {/* ── OPS Section: Efficiency averages ─────────────────────────── */}
       {ops && (
         <>
-          <SectionLabel icon={Timer} label="مؤشرات الكفاءة (30 يوم)" />
+          <SectionLabel icon={Timer} label={t("sections.efficiency")} />
 
           <div className="grid gap-4 grid-cols-1 md:grid-cols-3">
             <KpiCard
-              title="متوسط زمن الدورة"
-              value={formatMinutes(ops.averages30d.avgCycleMin)}
-              sub="من التسجيل حتى الإغلاق"
+              title={t("kpis.avgCycle")}
+              value={formatMinutes(ops.averages30d.avgCycleMin, t)}
+              sub={t("kpis.avgCycleSub")}
               icon={Timer}
               color="oklch(0.620 0.175 222)"
               colorBg="oklch(0.620 0.175 222 / 12%)"
               colorRing="oklch(0.620 0.175 222 / 25%)"
             />
             <KpiCard
-              title="الانتظار قبل الفارغ"
-              value={formatMinutes(ops.averages30d.avgWaitBeforeTareMin)}
-              sub="من التسجيل حتى وزن الفارغ"
+              title={t("kpis.avgWaitBeforeTare")}
+              value={formatMinutes(ops.averages30d.avgWaitBeforeTareMin, t)}
+              sub={t("kpis.avgWaitBeforeTareSub")}
               icon={Timer}
               color="oklch(0.720 0.150 65)"
               colorBg="oklch(0.720 0.150 65 / 14%)"
               colorRing="oklch(0.720 0.150 65 / 28%)"
             />
             <KpiCard
-              title="متوسط زمن تأكيد التحميل"
-              value={formatMinutes(ops.averages30d.avgLoadingMin)}
-              sub="من الوزن الفارغ حتى تأكيد المحمّل — 30 يوم"
+              title={t("kpis.avgLoadingConfirm")}
+              value={formatMinutes(ops.averages30d.avgLoadingMin, t)}
+              sub={t("kpis.avgLoadingConfirmSub")}
               icon={Timer}
               color="oklch(0.650 0.190 290)"
               colorBg="oklch(0.650 0.190 290 / 12%)"
@@ -1249,50 +1296,58 @@ export function ChartsSection() {
       {/* ── OPS Section: Stuck trucks alert ──────────────────────────── */}
       {ops && (
         <>
-          <SectionLabel icon={AlertTriangle} label="تنبيهات الشاحنات العالقة" />
+          <SectionLabel icon={AlertTriangle} label={t("sections.stuckAlerts")} />
 
           <Card className="shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold">
-                شاحنات تجاوزت العتبة الزمنية لحالتها
+                {t("charts.stuckTitle")}
               </CardTitle>
               <p className="text-xs text-muted-foreground">
                 {ops.stuckTrucks.length === 0
-                  ? "لا توجد شاحنات عالقة الآن"
-                  : `${ops.stuckTrucks.length} شاحنة بحاجة لمتابعة`}
+                  ? t("charts.stuckNone")
+                  : t("charts.stuckCount", { count: ops.stuckTrucks.length })}
               </p>
             </CardHeader>
             <CardContent>
               {ops.stuckTrucks.length === 0 ? (
                 <div className="flex h-32 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
                   <CheckCircle2 className="h-6 w-6 text-emerald-500" />
-                  جميع العمليات تسير ضمن العتبات المسموحة
+                  {t("charts.stuckAllClear")}
                 </div>
               ) : (
                 <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className="min-w-[480px] w-full text-xs">
+                  <table className="min-w-[480px] w-full table-fixed text-xs">
                     <thead className="bg-muted/50">
-                      <tr className="text-right">
-                        <th className="px-3 py-2 font-semibold">رقم اللوحة</th>
-                        <th className="px-3 py-2 font-semibold">الحالة</th>
-                        <th className="px-3 py-2 font-semibold">منذ</th>
-                        <th className="px-3 py-2 font-semibold">العتبة</th>
+                      <tr>
+                        <th className="w-[28%] px-3 py-2 text-start font-semibold">
+                          {t("table.plateNumber")}
+                        </th>
+                        <th className="w-[28%] px-3 py-2 text-start font-semibold">
+                          {t("table.status")}
+                        </th>
+                        <th className="w-[22%] px-3 py-2 text-start font-semibold">
+                          {t("table.since")}
+                        </th>
+                        <th className="w-[22%] px-3 py-2 text-start font-semibold">
+                          {t("table.threshold")}
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                      {ops.stuckTrucks.map((t) => (
-                        <tr key={t.id} className="bg-card">
-                          <td className="px-3 py-2 font-semibold tabular-nums">
-                            {t.plateNumber}
+                      {ops.stuckTrucks.map((truck) => (
+                        <tr key={truck.id} className="bg-card">
+                          <td className="px-3 py-2 text-start font-semibold tabular-nums">
+                            {truck.plateNumber}
                           </td>
-                          <td className="px-3 py-2 text-muted-foreground">
-                            {t.statusLabel}
+                          <td className="px-3 py-2 text-start text-muted-foreground">
+                            {truckStatusLabel(truck.status, t)}
                           </td>
-                          <td className="px-3 py-2 tabular-nums text-amber-600">
-                            {formatMinutes(t.minutesSince)}
+                          <td className="px-3 py-2 text-start tabular-nums text-amber-600">
+                            {formatMinutes(truck.minutesSince, t)}
                           </td>
-                          <td className="px-3 py-2 tabular-nums text-muted-foreground">
-                            {formatMinutes(t.thresholdMin)}
+                          <td className="px-3 py-2 text-start tabular-nums text-muted-foreground">
+                            {formatMinutes(truck.thresholdMin, t)}
                           </td>
                         </tr>
                       ))}
