@@ -7,7 +7,10 @@ import { toast } from "sonner";
 import { sessionHasPermission } from "@/lib/client-permissions";
 import { compressImage } from "@/lib/compress-image";
 import { fetchUploadedFile } from "@/lib/uploaded-file-url";
+import { useLocale, useTranslations } from "next-intl";
+import { getTextDirection, type Locale } from "@/i18n/config";
 import { formatDate } from "@/lib/date-format";
+import { formatDecimal, formatInteger } from "@/lib/number-format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +35,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  ArrowLeft,
   ArrowRight,
   Package,
   Truck,
@@ -47,10 +51,10 @@ import {
   History,
 } from "lucide-react";
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+function formatFileSize(bytes: number, t: ReturnType<typeof useTranslations>): string {
+  if (bytes < 1024) return t("fileSizeB", { n: formatInteger(bytes) });
+  if (bytes < 1024 * 1024) return t("fileSizeKb", { n: formatInteger(bytes / 1024) });
+  return t("fileSizeMb", { n: formatDecimal(bytes / (1024 * 1024), 1) });
 }
 
 interface PieceBalance {
@@ -108,44 +112,11 @@ interface EditablePieceRow {
 
 let pieceRowKey = 0;
 
-const statusMap: Record<
-  string,
-  { label: string; variant: "default" | "secondary" | "destructive" }
-> = {
-  Active: { label: "فعّال", variant: "default" },
-  Completed: { label: "مكتمل", variant: "secondary" },
-  Cancelled: { label: "ملغى", variant: "destructive" },
+const statusMap: Record<string, "default" | "secondary" | "destructive"> = {
+  Active: "default",
+  Completed: "secondary",
+  Cancelled: "destructive",
 };
-
-const receiptStatusMap: Record<string, string> = {
-  Registered: "مسجّلة",
-  Loaded: "وُزنت محمّلة",
-  Unloading: "قيد التفريغ",
-  AwaitingExit: "بانتظار الخروج",
-  Completed: "مكتملة",
-  Cancelled: "ملغاة",
-};
-
-function formatKg(value: string | number | null): string {
-  if (value == null) return "—";
-  const n = typeof value === "string" ? Number(value) : value;
-  if (!Number.isFinite(n)) return "—";
-  return n.toLocaleString("en-US", { maximumFractionDigits: 3 });
-}
-
-function formatRemainingKg(value: string | number | null): string {
-  if (value == null) return "—";
-  const n = typeof value === "string" ? Number(value) : value;
-  if (!Number.isFinite(n)) return "—";
-  if (n < 0) return `تجاوز ${formatKg(Math.abs(n))}`;
-  return formatKg(n);
-}
-
-function formatRemainingPieces(value: number | null): string {
-  if (value == null || !Number.isFinite(value)) return "—";
-  if (value < 0) return `تجاوز ${Math.abs(value)}`;
-  return String(value);
-}
 
 export default function BilletContractDetailPage({
   params,
@@ -153,6 +124,19 @@ export default function BilletContractDetailPage({
   params: Promise<{ contractNumber: string }>;
 }) {
   const { contractNumber } = use(params);
+  const t = useTranslations("billet");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+  const BackIcon = dir === "rtl" ? ArrowRight : ArrowLeft;
+  const formatKg = (value: string | number | null) =>
+    value == null || !Number.isFinite(Number(value)) ? t("emDash") : formatDecimal(value, 3);
+  const formatRemainingKg = (value: string | number | null) => {
+    if (value == null || !Number.isFinite(Number(value))) return t("emDash");
+    return Number(value) < 0 ? t("contracts.overshoot", { value: formatKg(Math.abs(Number(value))) }) : formatKg(value);
+  };
+  const formatRemainingPieces = (value: number | null) =>
+    value == null || !Number.isFinite(value) ? t("emDash") : value < 0 ? t("contracts.overshoot", { value: formatInteger(Math.abs(value)) }) : formatInteger(value);
   const { data: session } = useSession();
   const canEdit = sessionHasPermission(session, "billet.contract.edit");
   const canChangeStatus = sessionHasPermission(session, "billet.contract.change_status");
@@ -180,7 +164,7 @@ export default function BilletContractDetailPage({
   const [priorDialogOpen, setPriorDialogOpen] = useState(false);
   const [priorWeightKg, setPriorWeightKg] = useState("");
   const [priorDate, setPriorDate] = useState("");
-  const [priorNotes, setPriorNotes] = useState("سحب سابق قبل تشغيل النظام");
+  const [priorNotes, setPriorNotes] = useState("");
   const [priorPieces, setPriorPieces] = useState<Record<number, string>>({});
   const [priorSaving, setPriorSaving] = useState(false);
 
@@ -216,11 +200,11 @@ export default function BilletContractDetailPage({
         toast.error(json.error);
       }
     } catch {
-      toast.error("خطأ في جلب بيانات العقد");
+      toast.error(t("contracts.errorLoadDetail"));
     } finally {
       setLoading(false);
     }
-  }, [contractNumber]);
+  }, [contractNumber, t]);
 
   useEffect(() => {
     fetchContract();
@@ -260,7 +244,7 @@ export default function BilletContractDetailPage({
     }
     setPriorWeightKg("");
     setPriorDate("");
-    setPriorNotes("سحب سابق قبل تشغيل النظام");
+    setPriorNotes(t("contracts.priorNotesDefault"));
     setPriorPieces(seed);
     setPriorDialogOpen(true);
   };
@@ -275,13 +259,13 @@ export default function BilletContractDetailPage({
 
   const saveContractDetails = async () => {
     if (!supplierName.trim()) {
-      toast.error("اسم المورّد مطلوب");
+      toast.error(t("contracts.toastSupplierRequired"));
       return;
     }
 
     const weight = Number(contractedWeightKg);
     if (!Number.isFinite(weight) || weight <= 0) {
-      toast.error("الوزن الإجمالي يجب أن يكون أكبر من صفر");
+      toast.error(t("contracts.toastWeightPositive"));
       return;
     }
 
@@ -291,19 +275,19 @@ export default function BilletContractDetailPage({
       const len = Number(row.billetLengthM);
       const pcs = Number(row.contractedPieces);
       if (!Number.isInteger(len) || len <= 0) {
-        toast.error("طول البيلت يجب أن يكون عدداً صحيحاً موجباً");
+        toast.error(t("contracts.toastLengthInteger"));
         return;
       }
       if (!Number.isInteger(pcs) || pcs <= 0) {
-        toast.error(`عدد القطع للطول ${row.billetLengthM || "المحدد"} يجب أن يكون أكبر من صفر`);
+        toast.error(t("contracts.toastPiecesForLengthNamed", { length: row.billetLengthM || t("contracts.ariaLength") }));
         return;
       }
       if (seen.has(len)) {
-        toast.error("لا يمكن تكرار نفس الطول");
+        toast.error(t("contracts.toastDuplicateLength"));
         return;
       }
       if (pcs < row.acceptedPieces) {
-        toast.error(`عدد قطع طول ${len}م لا يمكن أن يكون أقل من المستلَم (${row.acceptedPieces})`);
+        toast.error(t("contracts.toastPiecesBelowAccepted", { length: len, accepted: formatInteger(row.acceptedPieces) }));
         return;
       }
       seen.add(len);
@@ -311,7 +295,7 @@ export default function BilletContractDetailPage({
     }
 
     if (lines.length === 0) {
-      toast.error("أضف عدد القطع لطول واحد على الأقل");
+      toast.error(t("contracts.toastAddAtLeastOneLength"));
       return;
     }
 
@@ -329,13 +313,13 @@ export default function BilletContractDetailPage({
       });
       const json = await res.json();
       if (json.success) {
-        toast.success("تم حفظ تعديلات العقد");
+        toast.success(t("contracts.toastSaved"));
         fetchContract();
       } else {
         toast.error(json.error);
       }
     } catch {
-      toast.error("خطأ في الحفظ");
+      toast.error(t("contracts.toastSaveError"));
     } finally {
       setSaving(false);
     }
@@ -343,7 +327,7 @@ export default function BilletContractDetailPage({
 
   const changeStatus = async () => {
     if (!statusReason.trim()) {
-      toast.error("يجب إدخال سبب تغيير الحالة");
+      toast.error(t("contracts.toastStatusReasonRequired"));
       return;
     }
     setStatusSaving(true);
@@ -355,7 +339,7 @@ export default function BilletContractDetailPage({
       });
       const json = await res.json();
       if (json.success) {
-        toast.success("تم تغيير حالة العقد");
+        toast.success(t("contracts.toastStatusChanged"));
         setStatusDialogOpen(false);
         setStatusReason("");
         fetchContract();
@@ -363,7 +347,7 @@ export default function BilletContractDetailPage({
         toast.error(json.error);
       }
     } catch {
-      toast.error("خطأ في تغيير الحالة");
+      toast.error(t("contracts.toastStatusChangeError"));
     } finally {
       setStatusSaving(false);
     }
@@ -373,11 +357,11 @@ export default function BilletContractDetailPage({
     if (!data) return;
     const weight = Number(priorWeightKg);
     if (!Number.isFinite(weight) || weight <= 0) {
-      toast.error("الوزن الصافي يجب أن يكون أكبر من صفر");
+      toast.error(t("contracts.toastPriorWeightPositive"));
       return;
     }
     if (!priorNotes.trim()) {
-      toast.error("ملاحظة السحب السابق مطلوبة");
+      toast.error(t("contracts.toastPriorNotesRequired"));
       return;
     }
 
@@ -391,7 +375,7 @@ export default function BilletContractDetailPage({
 
     for (const line of lines) {
       if (!Number.isInteger(line.acceptedPieces)) {
-        toast.error(`عدد قطع طول ${line.billetLengthM}م يجب أن يكون عدداً صحيحاً`);
+        toast.error(t("contracts.toastPriorPiecesInteger", { length: line.billetLengthM }));
         return;
       }
     }
@@ -419,11 +403,11 @@ export default function BilletContractDetailPage({
         toast.error(json.error);
         return;
       }
-      toast.success("تم تسجيل السحب السابق وخصمه من رصيد العقد");
+      toast.success(t("contracts.toastPriorSuccess"));
       setPriorDialogOpen(false);
       fetchContract();
     } catch {
-      toast.error("خطأ في تسجيل السحب السابق");
+      toast.error(t("contracts.toastPriorError"));
     } finally {
       setPriorSaving(false);
     }
@@ -433,11 +417,11 @@ export default function BilletContractDetailPage({
     if (!data) return;
     const weight = adjustWeightKg.trim() === "" ? 0 : Number(adjustWeightKg);
     if (!Number.isFinite(weight)) {
-      toast.error("الوزن غير صالح");
+      toast.error(t("contracts.toastAdjustWeightInvalid"));
       return;
     }
     if (!adjustNotes.trim()) {
-      toast.error("سبب التسوية مطلوب");
+      toast.error(t("contracts.toastAdjustReasonRequired"));
       return;
     }
 
@@ -447,14 +431,18 @@ export default function BilletContractDetailPage({
       if (raw === "" || raw === "-") continue;
       const pieces = Number(raw);
       if (!Number.isInteger(pieces)) {
-        toast.error(`عدد قطع طول ${balance.billetLengthM}م يجب أن يكون عدداً صحيحاً`);
+        toast.error(
+          t("contracts.toastPriorPiecesInteger", {
+            length: balance.billetLengthM,
+          }),
+        );
         return;
       }
       if (pieces !== 0) lines.push({ billetLengthM: balance.billetLengthM, pieces });
     }
 
     if (weight === 0 && lines.length === 0) {
-      toast.error("أدخل وزناً أو عدد قطع للتسوية");
+      toast.error(t("contracts.toastAdjustNeedValue"));
       return;
     }
 
@@ -477,11 +465,11 @@ export default function BilletContractDetailPage({
         toast.error(json.error);
         return;
       }
-      toast.success("تم تسجيل التسوية على رصيد العقد");
+      toast.success(t("contracts.toastAdjustSuccess"));
       setAdjustDialogOpen(false);
       fetchContract();
     } catch {
-      toast.error("خطأ في تسجيل التسوية");
+      toast.error(t("contracts.toastAdjustError"));
     } finally {
       setAdjustSaving(false);
     }
@@ -506,10 +494,10 @@ export default function BilletContractDetailPage({
         toast.error(json.error);
         return;
       }
-      toast.success("تم رفع المرفق");
+      toast.success(t("contracts.toastAttachmentUploaded"));
       fetchContract();
     } catch {
-      toast.error("خطأ في رفع المرفق");
+      toast.error(t("contracts.toastUploadError"));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -521,17 +509,17 @@ export default function BilletContractDetailPage({
     try {
       const res = await fetchUploadedFile(filePath);
       if (!res.ok) {
-        toast.error("تعذر تحميل الملف");
+        toast.error(t("contracts.toastFileLoadError"));
         return;
       }
       const blob = await res.blob();
       const objUrl = URL.createObjectURL(blob);
       const win = window.open(objUrl, "_blank");
       if (win) win.opener = null;
-      else toast.error("اسمح بالنوافذ المنبثقة لمعاينة الملف");
+      else toast.error(t("contracts.toastPopupBlocked"));
       window.setTimeout(() => URL.revokeObjectURL(objUrl), 120_000);
     } catch {
-      toast.error("تعذر الاتصال بالخادم");
+      toast.error(t("contracts.toastServerError"));
     } finally {
       setOpeningAttachmentId(null);
     }
@@ -551,9 +539,9 @@ export default function BilletContractDetailPage({
     return (
       <div className="flex flex-col items-center justify-center h-64 gap-4">
         <AlertTriangle className="h-12 w-12 text-muted-foreground" />
-        <p className="text-muted-foreground">العقد غير موجود</p>
+        <p className="text-muted-foreground">{t("contracts.notFound")}</p>
         <Button variant="outline" onClick={() => router.push("/billet-contracts")}>
-          العودة للعقود
+          {t("contracts.backToContracts")}
         </Button>
       </div>
     );
@@ -574,25 +562,24 @@ export default function BilletContractDetailPage({
             size="icon-sm"
             onClick={() => router.push("/billet-contracts")}
           >
-            <ArrowRight className="h-4 w-4" />
+            <BackIcon className="h-4 w-4" />
           </Button>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl font-bold tracking-tight font-mono">
                 {data.contract.contractNumber}
               </h1>
-              <Badge variant={st.variant}>{st.label}</Badge>
+              <Badge variant={st}>{tEnums(`billetContractStatus.${data.contract.status}`)}</Badge>
             </div>
             <p className="text-xs text-muted-foreground mt-0.5 truncate">
-              {data.contract.supplierName} — أُنشئ {formatDate(data.contract.createdAt)} بواسطة{" "}
-              {data.contract.creator.fullName}
+              {data.contract.supplierName} — {t("contracts.createdAtBy", { date: formatDate(data.contract.createdAt), name: data.contract.creator.fullName })}
             </p>
           </div>
         </div>
 
         {(canRecordPriorWithdrawal || canChangeStatus) &&
           data.contract.status === "Active" && (
-          <div className="flex flex-wrap gap-2 pr-10">
+          <div className="flex flex-wrap gap-2 pe-10">
             {canRecordPriorWithdrawal && (
               <>
                 <Button
@@ -601,7 +588,7 @@ export default function BilletContractDetailPage({
                   onClick={openPriorWithdrawalDialog}
                 >
                   <History className="h-4 w-4" />
-                  سحب سابق
+                  {t("contracts.priorWithdrawal")}
                 </Button>
                 <Button
                   size="sm"
@@ -609,7 +596,7 @@ export default function BilletContractDetailPage({
                   onClick={openAdjustmentDialog}
                 >
                   <Scale className="h-4 w-4" />
-                  تسوية رصيد
+                  {t("contracts.balanceAdjustment")}
                 </Button>
               </>
             )}
@@ -623,7 +610,7 @@ export default function BilletContractDetailPage({
                     setStatusDialogOpen(true);
                   }}
                 >
-                  إتمام
+                  {t("contracts.complete")}
                 </Button>
                 <Button
                   size="sm"
@@ -633,7 +620,7 @@ export default function BilletContractDetailPage({
                     setStatusDialogOpen(true);
                   }}
                 >
-                  إلغاء
+                  {t("cancel")}
                 </Button>
               </>
             )}
@@ -644,11 +631,11 @@ export default function BilletContractDetailPage({
       {/* Editable contract details */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">بيانات العقد</CardTitle>
+          <CardTitle className="text-base">{t("contracts.detailsTitle")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="supplierName">اسم المورّد</Label>
+            <Label htmlFor="supplierName">{t("contracts.supplierNameLabel")}</Label>
             <Input
               id="supplierName"
               value={supplierName}
@@ -658,7 +645,7 @@ export default function BilletContractDetailPage({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="contractedWeightKg">الوزن الإجمالي المتعاقد عليه (كغ)</Label>
+            <Label htmlFor="contractedWeightKg">{t("contracts.contractedWeightLabel")}</Label>
             <Input
               id="contractedWeightKg"
               type="number"
@@ -671,7 +658,7 @@ export default function BilletContractDetailPage({
               className={!canEdit ? "bg-muted/50" : undefined}
             />
             <p className="text-xs text-muted-foreground">
-              يمكن أن يكون الوزن المتعاقد عليه أقل من المستلَم، وسيظهر الفرق كتجاوز في الرصيد.
+              {t("contracts.contractedWeightHint")}
             </p>
           </div>
         </CardContent>
@@ -682,19 +669,19 @@ export default function BilletContractDetailPage({
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
             <Scale className="h-4 w-4" />
-            رصيد الوزن (كغ)
+            {t("contracts.weightBalanceTitle")}
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-3 gap-3 text-center">
             <div className="rounded-lg border p-3">
-              <p className="text-xs text-muted-foreground">المتعاقد</p>
+              <p className="text-xs text-muted-foreground">{t("contracts.contracted")}</p>
               <p className="text-lg font-bold tabular-nums">
                 {formatKg(data.contractedWeightKg)}
               </p>
             </div>
             <div className="rounded-lg border p-3">
-              <p className="text-xs text-muted-foreground">المستلَم</p>
+              <p className="text-xs text-muted-foreground">{t("contracts.received")}</p>
               <p className="text-lg font-bold tabular-nums">
                 {formatKg(data.receivedWeightKg)}
               </p>
@@ -706,7 +693,7 @@ export default function BilletContractDetailPage({
                   : "bg-muted/30"
               }`}
             >
-              <p className="text-xs text-muted-foreground">المتبقّي</p>
+              <p className="text-xs text-muted-foreground">{t("contracts.remaining")}</p>
               <p
                 className={`text-lg font-bold tabular-nums ${
                   Number(data.remainingWeightKg) < 0 ? "text-destructive" : ""
@@ -721,8 +708,7 @@ export default function BilletContractDetailPage({
               <div className="flex items-start gap-2">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <p>
-                  الفرق بين وزن بوليصة الشحن والوزن الفعلي المستلم على
-                  ميزان الشركة.
+                  {t("contracts.overshootHint")}
                 </p>
               </div>
             </div>
@@ -736,12 +722,12 @@ export default function BilletContractDetailPage({
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-base flex items-center gap-2">
               <Package className="h-4 w-4" />
-              رصيد القطع لكل طول
+              {t("contracts.pieceBalanceTitle")}
             </CardTitle>
             {canEdit && (
               <Button type="button" variant="outline" size="sm" onClick={addPieceRow}>
                 <Plus className="h-3.5 w-3.5" />
-                إضافة طول
+                {t("contracts.addLength")}
               </Button>
             )}
           </div>
@@ -751,10 +737,10 @@ export default function BilletContractDetailPage({
             <Table className="w-full min-w-[560px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="text-start">الطول</TableHead>
-                  <TableHead className="text-center">المتعاقد</TableHead>
-                  <TableHead className="text-center">المستلَم المقبول</TableHead>
-                  <TableHead className="text-center">المتبقّي</TableHead>
+                  <TableHead className="text-start">{t("contracts.colLength")}</TableHead>
+                  <TableHead className="text-center">{t("contracts.contracted")}</TableHead>
+                  <TableHead className="text-center">{t("contracts.colAcceptedReceived")}</TableHead>
+                  <TableHead className="text-center">{t("contracts.remaining")}</TableHead>
                   {canEdit && <TableHead className="w-12" />}
                 </TableRow>
               </TableHeader>
@@ -777,7 +763,7 @@ export default function BilletContractDetailPage({
                                 updatePieceRow(row.key, "billetLengthM", e.target.value)
                               }
                               className="h-8 w-24"
-                              aria-label="الطول"
+                              aria-label={t("contracts.ariaLength")}
                             />
                           </TableCell>
                           <TableCell className="text-center">
@@ -789,7 +775,7 @@ export default function BilletContractDetailPage({
                                 updatePieceRow(row.key, "contractedPieces", e.target.value)
                               }
                               className="h-8 w-28 text-center"
-                              aria-label="عدد القطع المتعاقد عليها"
+                              aria-label={t("contracts.ariaContractedPieces")}
                             />
                           </TableCell>
                           <TableCell className="text-center tabular-nums">
@@ -814,8 +800,8 @@ export default function BilletContractDetailPage({
                               disabled={pieceRows.length <= 1 || row.acceptedPieces > 0}
                               title={
                                 row.acceptedPieces > 0
-                                  ? "لا يمكن حذف طول عليه استلامات"
-                                  : "حذف الطول"
+                                  ? t("contracts.cannotDeleteLengthWithReceipts")
+                                  : t("contracts.deleteLength")
                               }
                             >
                               <Trash2 className="h-4 w-4" />
@@ -827,7 +813,7 @@ export default function BilletContractDetailPage({
                   : data.pieceBalances.map((b) => (
                       <TableRow key={b.billetLengthM}>
                         <TableCell className="text-start font-medium">
-                          {b.billetLengthM}م
+                          {t("lengthMeters", { n: formatInteger(b.billetLengthM) })}
                         </TableCell>
                         <TableCell className="text-center tabular-nums">
                           {b.contractedPieces}
@@ -848,9 +834,7 @@ export default function BilletContractDetailPage({
             </Table>
           </div>
           {canEdit && (
-            <p className="mt-2 text-xs text-muted-foreground">
-              لا يمكن تخفيض عدد القطع تحت المستلَم المقبول، ولا حذف طول عليه استلامات.
-            </p>
+            <p className="mt-2 text-xs text-muted-foreground">{t("contracts.pieceEditHint")}</p>
           )}
         </CardContent>
       </Card>
@@ -860,25 +844,25 @@ export default function BilletContractDetailPage({
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
             <Truck className="h-4 w-4" />
-            الاستلامات المرتبطة ({data.receipts.length})
+            {t("contracts.linkedReceipts", { count: formatInteger(data.receipts.length) })}
           </CardTitle>
         </CardHeader>
         <CardContent>
           {data.receipts.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">
-              لا توجد استلامات بعد
+              {t("contracts.noReceiptsYet")}
             </p>
           ) : (
             <div className="rounded-lg border overflow-x-auto">
               <Table className="w-full min-w-[640px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-start">رقم الاستلام</TableHead>
-                    <TableHead className="text-start">النوع</TableHead>
-                    <TableHead className="text-start">اللوحة</TableHead>
-                    <TableHead className="text-start">الحالة</TableHead>
-                    <TableHead className="text-start">الصافي (كغ)</TableHead>
-                    <TableHead className="text-start">التاريخ</TableHead>
+                    <TableHead className="text-start">{t("contracts.colReceiptNumber")}</TableHead>
+                    <TableHead className="text-start">{t("contracts.colType")}</TableHead>
+                    <TableHead className="text-start">{t("contracts.colPlate")}</TableHead>
+                    <TableHead className="text-start">{t("contracts.colStatus")}</TableHead>
+                    <TableHead className="text-start">{t("contracts.colNetKg")}</TableHead>
+                    <TableHead className="text-start">{t("contracts.colDate")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -893,14 +877,14 @@ export default function BilletContractDetailPage({
                       </TableCell>
                       <TableCell className="text-start">
                         {r.isPriorWithdrawal ? (
-                          <Badge variant="secondary">سحب سابق</Badge>
+                          <Badge variant="secondary">{t("contracts.priorWithdrawal")}</Badge>
                         ) : (
-                          <span className="text-xs text-muted-foreground">استلام</span>
+                          <span className="text-xs text-muted-foreground">{t("contracts.typeReceipt")}</span>
                         )}
                       </TableCell>
                       <TableCell className="text-start">{r.plateNumber}</TableCell>
                       <TableCell className="text-start text-xs">
-                        {receiptStatusMap[r.status] || r.status}
+                        {tEnums(`billetReceiptStatus.${r.status}`)}
                       </TableCell>
                       <TableCell className="text-start tabular-nums">
                         {formatKg(r.netWeightKg)}
@@ -925,7 +909,7 @@ export default function BilletContractDetailPage({
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-base flex items-center gap-2">
               <Paperclip className="h-4 w-4" />
-              المرفقات ({data.attachments.length})
+              {t("contracts.attachmentsCount", { count: formatInteger(data.attachments.length) })}
             </CardTitle>
             {canUpload && (
               <>
@@ -948,7 +932,7 @@ export default function BilletContractDetailPage({
                   ) : (
                     <Upload className="h-3.5 w-3.5" />
                   )}
-                  رفع مرفق
+                  {t("contracts.uploadAttachment")}
                 </Button>
               </>
             )}
@@ -957,7 +941,7 @@ export default function BilletContractDetailPage({
         <CardContent>
           {data.attachments.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">
-              لا توجد مرفقات
+              {t("contracts.noAttachments")}
             </p>
           ) : (
             <ul className="space-y-2">
@@ -979,7 +963,7 @@ export default function BilletContractDetailPage({
                     <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
                   )}
                   <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                    {formatFileSize(a.fileSize)}
+                    {formatFileSize(a.fileSize, t)}
                   </span>
                 </li>
               ))}
@@ -991,7 +975,7 @@ export default function BilletContractDetailPage({
       {/* Notes */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">ملاحظات</CardTitle>
+          <CardTitle className="text-base">{t("notes")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <Textarea
@@ -999,7 +983,7 @@ export default function BilletContractDetailPage({
             onChange={(e) => setNotes(e.target.value)}
             readOnly={!canEdit}
             rows={3}
-            placeholder="ملاحظات على العقد..."
+            placeholder={t("contracts.notesPlaceholderDetail")}
             className={!canEdit ? "bg-muted/50" : undefined}
           />
           {canEdit && (
@@ -1014,7 +998,7 @@ export default function BilletContractDetailPage({
                 ) : (
                   <Save className="h-3.5 w-3.5" />
                 )}
-                حفظ تعديلات العقد
+                {t("contracts.saveContractEdits")}
               </Button>
             </div>
           )}
@@ -1023,17 +1007,15 @@ export default function BilletContractDetailPage({
 
       {/* Prior Withdrawal Dialog */}
       <Dialog open={priorDialogOpen} onOpenChange={setPriorDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent dir={dir} className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>تسجيل سحب سابق</DialogTitle>
-            <DialogDescription>
-              يُخصم هذا السجل فوراً من رصيد العقد ويظهر في التقارير كسحب سابق.
-            </DialogDescription>
+            <DialogTitle>{t("contracts.priorDialogTitle")}</DialogTitle>
+            <DialogDescription>{t("contracts.priorDialogDesc")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="priorWeightKg">الوزن الصافي (كغ) *</Label>
+                <Label htmlFor="priorWeightKg">{t("contracts.priorNetWeightRequired")}</Label>
                 <Input
                   id="priorWeightKg"
                   type="number"
@@ -1042,11 +1024,11 @@ export default function BilletContractDetailPage({
                   inputMode="decimal"
                   value={priorWeightKg}
                   onChange={(e) => setPriorWeightKg(e.target.value)}
-                  placeholder="مثال: 8330940"
+                  placeholder={t("contracts.priorWeightPlaceholder")}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="priorDate">تاريخ السحب</Label>
+                <Label htmlFor="priorDate">{t("contracts.priorDate")}</Label>
                 <Input
                   id="priorDate"
                   type="date"
@@ -1057,21 +1039,21 @@ export default function BilletContractDetailPage({
             </div>
 
             <div className="space-y-2">
-              <Label>القطع المقبولة حسب الطول (اختياري)</Label>
+              <Label>{t("contracts.priorAcceptedPiecesOptional")}</Label>
               <div className="rounded-lg border overflow-x-auto">
                 <Table className="min-w-[420px]">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="text-start">الطول</TableHead>
-                      <TableHead className="text-center">المتبقي الحالي</TableHead>
-                      <TableHead className="text-center">قطع السحب السابق</TableHead>
+                      <TableHead className="text-start">{t("contracts.colLength")}</TableHead>
+                      <TableHead className="text-center">{t("contracts.colCurrentRemaining")}</TableHead>
+                      <TableHead className="text-center">{t("contracts.colPriorPieces")}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {data.pieceBalances.map((balance) => (
                       <TableRow key={balance.billetLengthM}>
                         <TableCell className="text-start font-medium">
-                          {balance.billetLengthM}م
+                          {t("lengthMeters", { n: formatInteger(balance.billetLengthM) })}
                         </TableCell>
                         <TableCell
                           className={`text-center tabular-nums ${
@@ -1103,13 +1085,13 @@ export default function BilletContractDetailPage({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="priorNotes">ملاحظة / سبب *</Label>
+              <Label htmlFor="priorNotes">{t("contracts.priorNotesRequired")}</Label>
               <Textarea
                 id="priorNotes"
                 value={priorNotes}
                 onChange={(e) => setPriorNotes(e.target.value)}
                 rows={3}
-                placeholder="مثال: سحب قبل تشغيل النظام حسب كشوفات المورد"
+                placeholder={t("contracts.priorNotesPlaceholder")}
               />
             </div>
           </div>
@@ -1119,11 +1101,11 @@ export default function BilletContractDetailPage({
               onClick={() => setPriorDialogOpen(false)}
               disabled={priorSaving}
             >
-              إلغاء
+              {t("cancel")}
             </Button>
             <Button onClick={submitPriorWithdrawal} disabled={priorSaving}>
               {priorSaving && <Loader2 className="animate-spin" />}
-              تسجيل وخصم
+              {t("contracts.priorSubmit")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1131,17 +1113,16 @@ export default function BilletContractDetailPage({
 
       {/* Adjustment Dialog */}
       <Dialog open={adjustDialogOpen} onOpenChange={setAdjustDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent dir={dir} className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>تسوية رصيد العقد</DialogTitle>
+            <DialogTitle>{t("contracts.adjustDialogTitle")}</DialogTitle>
             <DialogDescription>
-              أدخل قيماً موجبة لزيادة المستلم أو سالبة لإنقاصه — الوزن والقطع
-              اختياريان لكن يجب إدخال أحدهما على الأقل.
+              {t("contracts.adjustDialogDesc")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="adjustWeightKg">تعديل الوزن الصافي (كغ)</Label>
+              <Label htmlFor="adjustWeightKg">{t("contracts.adjustNetWeight")}</Label>
               <Input
                 id="adjustWeightKg"
                 type="number"
@@ -1149,26 +1130,26 @@ export default function BilletContractDetailPage({
                 inputMode="decimal"
                 value={adjustWeightKg}
                 onChange={(e) => setAdjustWeightKg(e.target.value)}
-                placeholder="مثال: 1500 أو -1500"
+                placeholder={t("contracts.adjustWeightPlaceholder")}
               />
             </div>
 
             <div className="space-y-2">
-              <Label>تعديل القطع حسب الطول (+ / −)</Label>
+              <Label>{t("contracts.adjustPiecesByLength")}</Label>
               <div className="rounded-lg border overflow-x-auto">
                 <Table className="min-w-[420px]">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="text-start">الطول</TableHead>
-                      <TableHead className="text-center">المستلم الحالي</TableHead>
-                      <TableHead className="text-center">تعديل القطع</TableHead>
+                      <TableHead className="text-start">{t("contracts.colLength")}</TableHead>
+                      <TableHead className="text-center">{t("contracts.colCurrentAccepted")}</TableHead>
+                      <TableHead className="text-center">{t("contracts.colPieceAdjust")}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {data.pieceBalances.map((balance) => (
                       <TableRow key={balance.billetLengthM}>
                         <TableCell className="text-start font-medium">
-                          {balance.billetLengthM}م
+                          {t("lengthMeters", { n: formatInteger(balance.billetLengthM) })}
                         </TableCell>
                         <TableCell className="text-center tabular-nums">
                           {balance.acceptedPieces}
@@ -1195,13 +1176,13 @@ export default function BilletContractDetailPage({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="adjustNotes">سبب التسوية *</Label>
+              <Label htmlFor="adjustNotes">{t("contracts.adjustReasonRequired")}</Label>
               <Textarea
                 id="adjustNotes"
                 value={adjustNotes}
                 onChange={(e) => setAdjustNotes(e.target.value)}
                 rows={3}
-                placeholder="مثال: تصحيح وزن استلام مسجّل بالخطأ"
+                placeholder={t("contracts.adjustReasonPlaceholder")}
               />
             </div>
           </div>
@@ -1211,11 +1192,11 @@ export default function BilletContractDetailPage({
               onClick={() => setAdjustDialogOpen(false)}
               disabled={adjustSaving}
             >
-              إلغاء
+              {t("cancel")}
             </Button>
             <Button onClick={submitAdjustment} disabled={adjustSaving}>
               {adjustSaving && <Loader2 className="animate-spin" />}
-              تسجيل التسوية
+              {t("contracts.adjustSubmit")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1223,20 +1204,22 @@ export default function BilletContractDetailPage({
 
       {/* Status Change Dialog */}
       <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent dir={dir} className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {newStatus === "Completed" ? "إتمام العقد" : "إلغاء العقد"}
+              {newStatus === "Completed"
+                ? t("contracts.statusCompleteTitle")
+                : t("contracts.statusCancelTitle")}
             </DialogTitle>
-            <DialogDescription>يجب إدخال سبب لتغيير حالة العقد</DialogDescription>
+            <DialogDescription>{t("contracts.statusReasonDesc")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <Label htmlFor="statusReason">السبب *</Label>
+            <Label htmlFor="statusReason">{t("contracts.reasonRequired")}</Label>
             <Input
               id="statusReason"
               value={statusReason}
               onChange={(e) => setStatusReason(e.target.value)}
-              placeholder="أدخل سبب تغيير الحالة..."
+              placeholder={t("contracts.statusReasonPlaceholder")}
             />
           </div>
           <DialogFooter>
@@ -1246,7 +1229,7 @@ export default function BilletContractDetailPage({
               disabled={statusSaving}
             >
               {statusSaving && <Loader2 className="animate-spin" />}
-              تأكيد
+              {t("confirm")}
             </Button>
           </DialogFooter>
         </DialogContent>

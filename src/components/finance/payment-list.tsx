@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
+import { useLocale, useTranslations } from "next-intl";
 import { sessionHasPermission } from "@/lib/client-permissions";
 import { toast } from "sonner";
 import {
@@ -33,6 +34,8 @@ import { RecordPaymentDialog } from "./record-payment-dialog";
 import { PaymentDetailDialog } from "./payment-detail-dialog";
 import { CustomerBalanceDialog } from "./customer-balance-dialog";
 import { formatDate } from "@/lib/date-format";
+import { formatAmount, formatInteger } from "@/lib/number-format";
+import { getTextDirection, type Locale } from "@/i18n/config";
 
 interface PaymentRow {
   id: number;
@@ -48,28 +51,20 @@ interface PaymentRow {
   _count: { allocations: number };
 }
 
-const methodLabels: Record<string, string> = {
-  CASH: "نقدي",
-  BANK_TRANSFER: "تحويل بنكي",
-  CHECK: "شيك",
-};
-
 const methodVariant: Record<string, "default" | "secondary"> = {
   CASH: "default",
   BANK_TRANSFER: "secondary",
   CHECK: "secondary",
 };
 
-function formatAmount(value: string): string {
-  const n = Number(value);
-  if (Number.isNaN(n)) return value;
-  return n.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+const PAYMENT_METHODS = ["CASH", "BANK_TRANSFER", "CHECK"] as const;
 
 export function PaymentList() {
+  const t = useTranslations("finance");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+  const isRtl = dir === "rtl";
   const { data: session } = useSession();
   const canCreate = sessionHasPermission(session, "payment.create");
   const [payments, setPayments] = useState<PaymentRow[]>([]);
@@ -101,18 +96,23 @@ export function PaymentList() {
         setTotal(json.total);
       }
     } catch {
-      toast.error("خطأ في جلب بيانات الدفعات");
+      toast.error(t("errorLoadPayments"));
     } finally {
       setLoading(false);
     }
-  }, [methodFilter, page]);
+  }, [methodFilter, page, t]);
 
   useEffect(() => {
     fetchPayments();
   }, [fetchPayments]);
 
+  function methodLabel(method: string): string {
+    const key = `paymentMethod.${method}` as const;
+    return tEnums.has(key) ? tEnums(key) : method;
+  }
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0 max-w-full">
       <div className="flex flex-wrap items-center gap-3">
         <Select
           value={methodFilter}
@@ -122,13 +122,15 @@ export function PaymentList() {
           }}
         >
           <SelectTrigger size="sm" className="min-w-[180px]">
-            <SelectValue placeholder="طريقة الدفع" />
+            <SelectValue placeholder={t("paymentMethod")} />
           </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">كل الطرق</SelectItem>
-            <SelectItem value="CASH">نقدي</SelectItem>
-            <SelectItem value="BANK_TRANSFER">تحويل بنكي</SelectItem>
-            <SelectItem value="CHECK">شيك</SelectItem>
+          <SelectContent dir={dir}>
+            <SelectItem value="all">{t("allMethods")}</SelectItem>
+            {PAYMENT_METHODS.map((m) => (
+              <SelectItem key={m} value={m}>
+                {tEnums(`paymentMethod.${m}`)}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
 
@@ -137,7 +139,7 @@ export function PaymentList() {
         {canCreate && (
           <Button onClick={() => setShowCreate(true)} size="sm">
             <Plus className="h-4 w-4" />
-            تسجيل دفعة
+            {t("recordPayment")}
           </Button>
         )}
       </div>
@@ -146,14 +148,14 @@ export function PaymentList() {
         <Table className="min-w-[700px]">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-16">#</TableHead>
-              <TableHead>العميل</TableHead>
-              <TableHead className="w-32">المبلغ ($)</TableHead>
-              <TableHead className="w-32">طريقة الدفع</TableHead>
-              <TableHead className="w-32">تاريخ الدفع</TableHead>
-              <TableHead className="w-24 text-center">توزيعات</TableHead>
-              <TableHead className="w-36">المرجع</TableHead>
-              <TableHead className="w-36">بواسطة</TableHead>
+              <TableHead className="w-16">{t("colId")}</TableHead>
+              <TableHead>{t("colCustomer")}</TableHead>
+              <TableHead className="w-32">{t("colAmount")}</TableHead>
+              <TableHead className="w-32">{t("colPaymentMethod")}</TableHead>
+              <TableHead className="w-32">{t("colPaymentDate")}</TableHead>
+              <TableHead className="w-24 text-center">{t("colAllocations")}</TableHead>
+              <TableHead className="w-36">{t("colReference")}</TableHead>
+              <TableHead className="w-36">{t("colBy")}</TableHead>
               <TableHead className="w-20" />
             </TableRow>
           </TableHeader>
@@ -176,14 +178,16 @@ export function PaymentList() {
                 >
                   <div className="flex flex-col items-center gap-2">
                     <Wallet className="h-8 w-8 opacity-40" />
-                    لا توجد دفعات مسجّلة
+                    {t("emptyPayments")}
                   </div>
                 </TableCell>
               </TableRow>
             ) : (
               payments.map((p) => (
                 <TableRow key={p.id}>
-                  <TableCell className="font-mono text-xs">{p.id}</TableCell>
+                  <TableCell className="font-mono text-xs tabular-nums">
+                    {formatInteger(p.id)}
+                  </TableCell>
                   <TableCell>
                     <button
                       className="font-medium text-primary hover:underline text-start"
@@ -195,22 +199,22 @@ export function PaymentList() {
                       {p.customer.code}
                     </span>
                   </TableCell>
-                  <TableCell className="font-mono font-semibold tabular-nums">
+                  <TableCell className="font-mono font-semibold tabular-nums financial-value">
                     {formatAmount(p.amount)}
                   </TableCell>
                   <TableCell>
                     <Badge variant={methodVariant[p.method] ?? "secondary"}>
-                      {methodLabels[p.method] ?? p.method}
+                      {methodLabel(p.method)}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-sm">
+                  <TableCell className="text-sm tabular-nums">
                     {formatDate(p.paymentDate)}
                   </TableCell>
-                  <TableCell className="text-center text-sm">
-                    {p._count.allocations}
+                  <TableCell className="text-center text-sm tabular-nums">
+                    {formatInteger(p._count.allocations)}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground truncate max-w-[140px]">
-                    {p.referenceNumber || "—"}
+                    {p.referenceNumber || t("emDash")}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {p.creator.fullName}
@@ -232,18 +236,25 @@ export function PaymentList() {
       </div>
 
       {total > pageSize && (
-        <div className="flex items-center justify-center gap-4 pt-2">
+        <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
           <Button
             variant="outline"
             size="sm"
             disabled={page <= 1}
             onClick={() => setPage((p) => p - 1)}
           >
-            <ChevronRight className="h-4 w-4" />
-            السابق
+            {isRtl ? (
+              <ChevronRight className="h-4 w-4" />
+            ) : (
+              <ChevronLeft className="h-4 w-4" />
+            )}
+            {t("previous")}
           </Button>
-          <span className="text-sm text-muted-foreground">
-            صفحة {page} من {totalPages}
+          <span className="text-sm text-muted-foreground tabular-nums">
+            {t("pageOf", {
+              page: formatInteger(page),
+              totalPages: formatInteger(totalPages),
+            })}
           </span>
           <Button
             variant="outline"
@@ -251,8 +262,12 @@ export function PaymentList() {
             disabled={page >= totalPages}
             onClick={() => setPage((p) => p + 1)}
           >
-            التالي
-            <ChevronLeft className="h-4 w-4" />
+            {t("next")}
+            {isRtl ? (
+              <ChevronLeft className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
           </Button>
         </div>
       )}

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { useLocale, useTranslations } from "next-intl";
 import { sessionHasPermission } from "@/lib/client-permissions";
 import { toast } from "sonner";
 import {
@@ -34,6 +35,8 @@ import {
 } from "lucide-react";
 import { defaultOperationalDateInput } from "@/lib/operational-day";
 import { RegisterBilletReceiptDialog } from "@/components/billet/register-billet-receipt-dialog";
+import { getTextDirection, type Locale } from "@/i18n/config";
+import { formatDecimal, formatInteger } from "@/lib/number-format";
 
 interface ReceiptItem {
   id: number;
@@ -48,26 +51,31 @@ interface ReceiptItem {
   contract: { contractNumber: string; supplierName: string };
 }
 
-const statusMap: Record<
+const statusVariant: Record<
   string,
-  { label: string; variant: "default" | "secondary" | "destructive" | "outline" }
+  "default" | "secondary" | "destructive" | "outline"
 > = {
-  Registered: { label: "مسجّلة", variant: "outline" },
-  Loaded: { label: "وُزنت محمّلة", variant: "secondary" },
-  Unloading: { label: "قيد التفريغ", variant: "secondary" },
-  AwaitingExit: { label: "بانتظار الخروج", variant: "secondary" },
-  Completed: { label: "مكتملة", variant: "default" },
-  Cancelled: { label: "ملغاة", variant: "destructive" },
+  Registered: "outline",
+  Loaded: "secondary",
+  Unloading: "secondary",
+  AwaitingExit: "secondary",
+  Completed: "default",
+  Cancelled: "destructive",
 };
 
-function formatKg(value: string | null): string {
+function formatKgDisplay(value: string | null): string {
   if (value == null) return "—";
   const n = Number(value);
   if (!Number.isFinite(n)) return "—";
-  return n.toLocaleString("en-US", { maximumFractionDigits: 1 });
+  return formatDecimal(n, 1);
 }
 
 export function BilletReceiptList() {
+  const t = useTranslations("billet");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+  const isRtl = dir === "rtl";
   const { data: session } = useSession();
   const canRegister = sessionHasPermission(session, "billet.receipt.register");
   const router = useRouter();
@@ -87,6 +95,9 @@ export function BilletReceiptList() {
   const todayOperationalDate = defaultOperationalDateInput();
   const isTodaySelected = operationalDate === todayOperationalDate;
 
+  const statusLabel = (code: string) =>
+    tEnums(`billetReceiptStatus.${code}` as "billetReceiptStatus.Registered");
+
   const fetchReceipts = useCallback(async () => {
     setLoading(true);
     try {
@@ -104,11 +115,11 @@ export function BilletReceiptList() {
         setAnalyticsStartDate(json.analyticsStartDate ?? null);
       }
     } catch {
-      toast.error("خطأ في جلب سجلات الاستلام");
+      toast.error(t("receipts.errorLoad"));
     } finally {
       setLoading(false);
     }
-  }, [plateNumber, status, operationalDate, page]);
+  }, [plateNumber, status, operationalDate, page, t]);
 
   useEffect(() => {
     setPage(1);
@@ -130,13 +141,13 @@ export function BilletReceiptList() {
               htmlFor="billet-plate-search"
               className="text-xs font-medium text-muted-foreground"
             >
-              بحث
+              {t("receipts.search")}
             </label>
             <div className="relative">
               <Search className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 id="billet-plate-search"
-                placeholder="بحث برقم اللوحة..."
+                placeholder={t("receipts.searchPlatePlaceholder")}
                 className="ps-9"
                 value={plateNumber}
                 onChange={(e) => setPlateNumber(e.target.value)}
@@ -145,19 +156,21 @@ export function BilletReceiptList() {
           </div>
 
           <div className="flex w-full flex-col gap-1.5 sm:w-[11rem]">
-            <label className="text-xs font-medium text-muted-foreground">الحالة</label>
+            <label className="text-xs font-medium text-muted-foreground">
+              {t("receipts.status")}
+            </label>
             <Select value={status} onValueChange={(v) => setStatus(v ?? "")}>
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="كل الحالات" />
+                <SelectValue placeholder={t("receipts.allStatuses")} />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">كل الحالات</SelectItem>
-                <SelectItem value="Registered">مسجّلة</SelectItem>
-                <SelectItem value="Loaded">وُزنت محمّلة</SelectItem>
-                <SelectItem value="Unloading">قيد التفريغ</SelectItem>
-                <SelectItem value="AwaitingExit">بانتظار الخروج</SelectItem>
-                <SelectItem value="Completed">مكتملة</SelectItem>
-                <SelectItem value="Cancelled">ملغاة</SelectItem>
+              <SelectContent dir={dir}>
+                <SelectItem value="">{t("receipts.allStatuses")}</SelectItem>
+                <SelectItem value="Registered">{statusLabel("Registered")}</SelectItem>
+                <SelectItem value="Loaded">{statusLabel("Loaded")}</SelectItem>
+                <SelectItem value="Unloading">{statusLabel("Unloading")}</SelectItem>
+                <SelectItem value="AwaitingExit">{statusLabel("AwaitingExit")}</SelectItem>
+                <SelectItem value="Completed">{statusLabel("Completed")}</SelectItem>
+                <SelectItem value="Cancelled">{statusLabel("Cancelled")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -168,9 +181,11 @@ export function BilletReceiptList() {
                 htmlFor="billet-operational-date"
                 className="text-xs font-medium text-muted-foreground"
               >
-                يوم التشغيل
+                {t("receipts.operationalDay")}
               </label>
-              <span className="text-[11px] text-muted-foreground">(08:00 ← 08:00)</span>
+              <span className="text-[11px] text-muted-foreground">
+                {t("receipts.operationalDayHint")}
+              </span>
             </div>
             <div className="flex items-center gap-2">
               <Input
@@ -188,7 +203,7 @@ export function BilletReceiptList() {
                 onClick={() => setOperationalDate(defaultOperationalDateInput())}
               >
                 <CalendarDays className="h-4 w-4 me-1" />
-                اليوم
+                {t("receipts.today")}
               </Button>
             </div>
           </div>
@@ -198,14 +213,16 @@ export function BilletReceiptList() {
               variant="secondary"
               className="h-10 shrink-0 px-3 text-sm tabular-nums"
             >
-              {loading ? "…" : `${total.toLocaleString("ar-SY")} سجل`}
+              {loading
+                ? "…"
+                : t("receipts.recordsCount", { total: formatInteger(total) })}
             </Badge>
           )}
 
           {canRegister && (
             <Button className="shrink-0" onClick={() => setDialogOpen(true)}>
               <Plus className="h-4 w-4 me-1" />
-              تسجيل استلام
+              {t("receipts.registerReceipt")}
             </Button>
           )}
         </div>
@@ -215,13 +232,27 @@ export function BilletReceiptList() {
         <Table className="w-full min-w-[820px]">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-28 text-start">رقم الاستلام</TableHead>
-              <TableHead className="w-40 max-w-40 text-start">المورّد</TableHead>
-              <TableHead className="w-28 text-start">النوع</TableHead>
-              <TableHead className="w-32 text-start">اللوحة</TableHead>
-              <TableHead className="w-32 text-start">السائق</TableHead>
-              <TableHead className="w-28 text-start">الصافي (كغ)</TableHead>
-              <TableHead className="w-24 text-center">الحالة</TableHead>
+              <TableHead className="w-28 text-start">
+                {t("receipts.columns.receiptNumber")}
+              </TableHead>
+              <TableHead className="w-40 max-w-40 text-start">
+                {t("receipts.columns.supplier")}
+              </TableHead>
+              <TableHead className="w-28 text-start">
+                {t("receipts.columns.type")}
+              </TableHead>
+              <TableHead className="w-32 text-start">
+                {t("receipts.columns.plate")}
+              </TableHead>
+              <TableHead className="w-32 text-start">
+                {t("receipts.columns.driver")}
+              </TableHead>
+              <TableHead className="w-28 text-start">
+                {t("receipts.columns.netKg")}
+              </TableHead>
+              <TableHead className="w-24 text-center">
+                {t("receipts.columns.status")}
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -241,14 +272,14 @@ export function BilletReceiptList() {
                   <div className="flex flex-col items-center gap-2">
                     <Truck className="h-8 w-8 opacity-40" />
                     {plateNumber || status
-                      ? "لا توجد نتائج"
-                      : "لا توجد سجلات في يوم التشغيل المحدد"}
+                      ? t("receipts.emptyNoResults")
+                      : t("receipts.emptyNoRecordsForDay")}
                   </div>
                 </TableCell>
               </TableRow>
             ) : (
               receipts.map((r) => {
-                const st = statusMap[r.status] || statusMap.Registered;
+                const variant = statusVariant[r.status] || statusVariant.Registered;
                 return (
                   <TableRow
                     key={r.id}
@@ -265,19 +296,23 @@ export function BilletReceiptList() {
                     </TableCell>
                     <TableCell className="text-start">
                       {r.isPriorWithdrawal ? (
-                        <Badge variant="secondary">سحب سابق</Badge>
+                        <Badge variant="secondary">
+                          {t("receipts.typePriorWithdrawal")}
+                        </Badge>
                       ) : (
-                        <span className="text-xs text-muted-foreground">استلام</span>
+                        <span className="text-xs text-muted-foreground">
+                          {t("receipts.typeReceipt")}
+                        </span>
                       )}
                     </TableCell>
                     <TableCell className="text-start">{r.plateNumber}</TableCell>
                     <TableCell className="text-start truncate">{r.driverName}</TableCell>
                     <TableCell className="text-start tabular-nums">
-                      {formatKg(r.netWeightKg)}
+                      {formatKgDisplay(r.netWeightKg)}
                     </TableCell>
                     <TableCell className="text-center">
                       <div className="flex justify-center">
-                        <Badge variant={st.variant}>{st.label}</Badge>
+                        <Badge variant={variant}>{statusLabel(r.status)}</Badge>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -291,7 +326,11 @@ export function BilletReceiptList() {
       {total > pageSize && (
         <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground">
-            صفحة {page} من {totalPages} — {total} سجل
+            {t("receipts.pageOf", {
+              page: formatInteger(page),
+              totalPages: formatInteger(totalPages),
+              total: formatInteger(total),
+            })}
           </p>
           <div className="flex gap-2">
             <Button
@@ -299,16 +338,26 @@ export function BilletReceiptList() {
               size="icon-sm"
               disabled={page <= 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
+              aria-label={t("previous")}
             >
-              <ChevronRight className="h-4 w-4" />
+              {isRtl ? (
+                <ChevronRight className="h-4 w-4" />
+              ) : (
+                <ChevronLeft className="h-4 w-4" />
+              )}
             </Button>
             <Button
               variant="outline"
               size="icon-sm"
               disabled={page >= totalPages}
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              aria-label={t("next")}
             >
-              <ChevronLeft className="h-4 w-4" />
+              {isRtl ? (
+                <ChevronLeft className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )}
             </Button>
           </div>
         </div>
