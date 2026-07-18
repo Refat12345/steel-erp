@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -21,6 +22,7 @@ import {
   type CustomerCreateInput,
 } from "@/lib/validators/customer";
 import { Loader2 } from "lucide-react";
+import { getTextDirection, type Locale } from "@/i18n/config";
 
 const EMPTY_CUSTOMER_FORM: CustomerCreateInput = {
   fullName: "",
@@ -56,6 +58,9 @@ export function CustomerFormDialog({
   onSuccess,
   editData,
 }: CustomerFormDialogProps) {
+  const t = useTranslations("contracts");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
   const [loading, setLoading] = useState(false);
   const isEdit = !!editData;
 
@@ -103,7 +108,7 @@ export function CustomerFormDialog({
       const json = await res.json();
 
       if (!json.success) {
-        toast.error(json.error || "حدث خطأ");
+        toast.error(json.error || t("errorGeneric"));
         return;
       }
 
@@ -111,12 +116,12 @@ export function CustomerFormDialog({
         toast.warning(json.data.phoneWarning);
       }
 
-      toast.success(isEdit ? "تم تحديث العميل" : "تم إنشاء العميل بنجاح");
+      toast.success(isEdit ? t("customerUpdated") : t("customerCreated"));
       reset();
       onSuccess();
       onOpenChange(false);
     } catch {
-      toast.error("حدث خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setLoading(false);
     }
@@ -124,76 +129,110 @@ export function CustomerFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent dir={dir} className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "تعديل عميل" : "إضافة عميل جديد"}</DialogTitle>
+          <DialogTitle>
+            {isEdit ? t("editCustomerTitle") : t("addCustomerTitle")}
+          </DialogTitle>
           <DialogDescription>
-            {isEdit ? "تعديل بيانات العميل" : "تسجيل عميل جديد في النظام"}
+            {isEdit ? t("editCustomerDesc") : t("addCustomerDesc")}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="fullName">الاسم الكامل *</Label>
+              <Label htmlFor="fullName">{t("fullNameRequired")}</Label>
               <Input id="fullName" {...register("fullName")} />
               {errors.fullName && (
-                <p className="text-xs text-destructive">{errors.fullName.message}</p>
+                <p className="text-xs text-destructive">
+                  {errors.fullName.message}
+                </p>
               )}
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="fatherName">اسم الأب *</Label>
+              <Label htmlFor="fatherName">{t("fatherNameRequired")}</Label>
               <Input id="fatherName" {...register("fatherName")} />
               {errors.fatherName && (
-                <p className="text-xs text-destructive">{errors.fatherName.message}</p>
+                <p className="text-xs text-destructive">
+                  {errors.fatherName.message}
+                </p>
               )}
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="nationalId">الرقم الوطني *</Label>
-              <Input id="nationalId" {...register("nationalId")} dir="ltr" className="text-left" />
+              <Label htmlFor="nationalId">{t("nationalIdRequired")}</Label>
+              <Input
+                id="nationalId"
+                {...register("nationalId")}
+                dir="ltr"
+                className="text-start"
+              />
               {errors.nationalId && (
-                <p className="text-xs text-destructive">{errors.nationalId.message}</p>
+                <p className="text-xs text-destructive">
+                  {errors.nationalId.message}
+                </p>
               )}
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="phonePrimary">الهاتف الأساسي *</Label>
-              <Input id="phonePrimary" {...register("phonePrimary")} dir="ltr" className="text-left" />
+              <Label htmlFor="phonePrimary">{t("phonePrimaryRequired")}</Label>
+              <Input
+                id="phonePrimary"
+                {...register("phonePrimary")}
+                dir="ltr"
+                className="text-start"
+              />
               {errors.phonePrimary && (
-                <p className="text-xs text-destructive">{errors.phonePrimary.message}</p>
+                <p className="text-xs text-destructive">
+                  {errors.phonePrimary.message}
+                </p>
               )}
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="phoneSecondary">الهاتف الثانوي</Label>
-              <Input id="phoneSecondary" {...register("phoneSecondary")} dir="ltr" className="text-left" />
+              <Label htmlFor="phoneSecondary">{t("phoneSecondary")}</Label>
+              <Input
+                id="phoneSecondary"
+                {...register("phoneSecondary")}
+                dir="ltr"
+                className="text-start"
+              />
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="commercialRegistration">السجل التجاري</Label>
-              <Input id="commercialRegistration" {...register("commercialRegistration")} dir="ltr" className="text-left" />
+              <Label htmlFor="commercialRegistration">
+                {t("commercialRegistration")}
+              </Label>
+              <Input
+                id="commercialRegistration"
+                {...register("commercialRegistration")}
+                dir="ltr"
+                className="text-start"
+              />
             </div>
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="companyAddress">عنوان الشركة *</Label>
+            <Label htmlFor="companyAddress">{t("companyAddressRequired")}</Label>
             <Input id="companyAddress" {...register("companyAddress")} />
             {errors.companyAddress && (
-              <p className="text-xs text-destructive">{errors.companyAddress.message}</p>
+              <p className="text-xs text-destructive">
+                {errors.companyAddress.message}
+              </p>
             )}
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="notes">ملاحظات</Label>
+            <Label htmlFor="notes">{t("notes")}</Label>
             <Textarea id="notes" {...register("notes")} rows={2} />
           </div>
 
           <DialogFooter>
             <Button type="submit" disabled={loading}>
               {loading && <Loader2 className="animate-spin" />}
-              {isEdit ? "حفظ التعديلات" : "إضافة العميل"}
+              {isEdit ? t("saveChanges") : t("addCustomerSubmit")}
             </Button>
           </DialogFooter>
         </form>

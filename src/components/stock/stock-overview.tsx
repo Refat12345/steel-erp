@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
   Tabs,
@@ -22,10 +23,11 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RefreshCw, MapPin, Warehouse, Layers, Ruler } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatDecimal } from "@/lib/number-format";
+import { getTextDirection, type Locale } from "@/i18n/config";
 import {
   SEGMENT_META,
-  segmentUnitLabel,
-  unitLabel,
+  SEGMENT_ORDER,
   type Segment,
   type StockUnit,
 } from "./stock-shared";
@@ -57,19 +59,23 @@ interface LocationBalance {
 }
 
 const BUNDLE_SEGMENTS: Segment[] = ["GENERAL", "GOVERNORATES", "ISOLATION"];
-const SEGMENT_ORDER: Segment[] = ["GENERAL", "GOVERNORATES", "ISOLATION", "SHORTBAR"];
 
 function fmt(n: number): string {
-  return n.toLocaleString("en-US", { maximumFractionDigits: 3 });
+  return formatDecimal(n, 3);
 }
 
 /** One yard's live schematic map — tiles driven by grid coords, colored by
  *  segment, showing the current balance on each site. */
 function LiveYardMap({ locations }: { locations: LocationBalance[] }) {
+  const t = useTranslations("stock");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+
   if (locations.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-        لا توجد مواقع نشطة في هذه الساحة
+        {t("noActiveLocationsInYard")}
       </div>
     );
   }
@@ -89,16 +95,20 @@ function LiveYardMap({ locations }: { locations: LocationBalance[] }) {
       >
         {locations.map((l) => {
           const meta = SEGMENT_META[l.segment];
+          const segmentLabel = tEnums(`stockSegment.${l.segment}`);
           const empty = l.totalQuantity === 0 && (l.totalTons ?? 0) === 0;
           // Label from the PRIMARY-unit lines only (the parallel tonnage line
           // mirrors the same size, so it would just duplicate the name).
           const primaryLines = l.lines.filter((ln) => ln.unit === l.unit && ln.quantity !== 0);
           const sizeLabel =
             primaryLines.length > 2
-              ? `${primaryLines.length} مقاسات`
+              ? t("sizesCount", { count: primaryLines.length })
               : primaryLines.length > 0
-                ? primaryLines.map((ln) => ln.sizeName ?? "قصائر").join("، ")
-                : l.expectedSize?.displayName ?? segmentUnitLabel(l.segment);
+                ? primaryLines.map((ln) => ln.sizeName ?? t("shortbar")).join(", ")
+                : l.expectedSize?.displayName ??
+                  (l.segment === "SHORTBAR"
+                    ? t("segmentUnitByTons")
+                    : t("segmentUnitByBundles"));
           return (
             <div
               key={l.locationId}
@@ -111,7 +121,7 @@ function LiveYardMap({ locations }: { locations: LocationBalance[] }) {
                 gridColumn: `${l.gridCol} / span ${l.gridSpan}`,
                 gridRow: `${l.gridRow}`,
               }}
-              title={`${l.nameAr} — ${meta.label}`}
+              title={`${l.nameAr} — ${segmentLabel}`}
             >
               <div className="flex items-center justify-between gap-1">
                 <span className="font-mono text-xs font-bold leading-none">{l.code}</span>
@@ -119,25 +129,25 @@ function LiveYardMap({ locations }: { locations: LocationBalance[] }) {
               </div>
               <div
                 className="mt-1 text-base font-bold leading-none tabular-nums"
-                dir="rtl"
+                dir={dir}
               >
                 {empty ? (
-                  <span className="text-xs font-normal opacity-60">فارغ</span>
+                  <span className="text-xs font-normal opacity-60">{t("empty")}</span>
                 ) : (
                   <>
                     {fmt(l.totalQuantity)}
                     <span className="ms-0.5 text-[10px] font-normal opacity-70">
-                      {unitLabel(l.unit)}
+                      {tEnums(`stockUnit.${l.unit}`)}
                     </span>
                     {l.isDualUnit && (l.totalTons ?? 0) > 0 && (
                       <span className="ms-1 text-[10px] font-normal opacity-70">
-                        / {fmt(l.totalTons ?? 0)} طن
+                        {t("withTons", { tons: fmt(l.totalTons ?? 0) })}
                       </span>
                     )}
                   </>
                 )}
               </div>
-              <div className="mt-0.5 truncate text-[10px] opacity-75" dir="rtl">
+              <div className="mt-0.5 truncate text-[10px] opacity-75" dir={dir}>
                 {sizeLabel}
               </div>
             </div>
@@ -149,6 +159,9 @@ function LiveYardMap({ locations }: { locations: LocationBalance[] }) {
 }
 
 export function StockOverview() {
+  const t = useTranslations("stock");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
   const [balances, setBalances] = useState<LocationBalance[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeYard, setActiveYard] = useState<string>("");
@@ -159,13 +172,13 @@ export function StockOverview() {
       const res = await fetch("/api/stock/balances");
       const json = await res.json();
       if (json.success) setBalances(json.data as LocationBalance[]);
-      else toast.error(json.error || "خطأ في جلب الأرصدة");
+      else toast.error(json.error || t("errorLoadBalances"));
     } catch {
-      toast.error("خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void fetchData();
@@ -241,8 +254,8 @@ export function StockOverview() {
         bySize.set(key, row);
       }
     }
-    return [...bySize.values()].sort((a, b) => a.sizeName.localeCompare(b.sizeName, "ar"));
-  }, [balances]);
+    return [...bySize.values()].sort((a, b) => a.sizeName.localeCompare(b.sizeName, locale));
+  }, [balances, locale]);
 
   const shortbarTotal = useMemo(
     () =>
@@ -278,13 +291,17 @@ export function StockOverview() {
               <CardContent className="p-3">
                 <div className="flex items-center gap-1.5 text-xs font-medium">
                   <span className={cn("h-2 w-2 rounded-full", meta.dot)} />
-                  {meta.label}
+                  {tEnums(`stockSegment.${s.segment}`)}
                 </div>
                 <div className="mt-1.5 text-xl font-bold tabular-nums">
                   {fmt(s.total)}{" "}
-                  <span className="text-xs font-normal opacity-70">{unitLabel(s.unit)}</span>
+                  <span className="text-xs font-normal opacity-70">
+                    {tEnums(`stockUnit.${s.unit}`)}
+                  </span>
                 </div>
-                <div className="text-[11px] opacity-70">{s.occupied} موقع مشغول</div>
+                <div className="text-[11px] opacity-70">
+                  {t("occupiedSites", { count: s.occupied })}
+                </div>
               </CardContent>
             </Card>
           );
@@ -296,11 +313,11 @@ export function StockOverview() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2 text-base">
             <MapPin className="h-4 w-4" />
-            خريطة الساحات — الأرصدة الحيّة
+            {t("liveYardMapTitle")}
           </CardTitle>
           <Button variant="outline" size="sm" onClick={() => void fetchData()}>
             <RefreshCw className="h-4 w-4" />
-            تحديث
+            {t("refresh")}
           </Button>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -308,7 +325,7 @@ export function StockOverview() {
             {SEGMENT_ORDER.map((s) => (
               <div key={s} className="flex items-center gap-1.5">
                 <span className={cn("h-2.5 w-2.5 rounded-full", SEGMENT_META[s].dot)} />
-                {SEGMENT_META[s].label}
+                {tEnums(`stockSegment.${s}`)}
               </div>
             ))}
           </div>
@@ -316,7 +333,7 @@ export function StockOverview() {
           {yards.length === 0 ? (
             <div className="rounded-lg border border-dashed p-10 text-center text-muted-foreground">
               <Warehouse className="mx-auto mb-2 h-8 w-8 opacity-40" />
-              لا توجد مواقع مضبوطة
+              {t("noLocationsConfigured")}
             </div>
           ) : (
             <Tabs value={activeYard} onValueChange={(v) => setActiveYard(v as string)}>
@@ -345,25 +362,25 @@ export function StockOverview() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Ruler className="h-4 w-4" />
-            الإجمالي حسب المقاس (ربطات)
+            {t("sizeBreakdownTitle")}
           </CardTitle>
         </CardHeader>
         <CardContent>
           {sizeBreakdown.length === 0 ? (
             <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-              لا توجد أرصدة ربطات بعد
+              {t("noBundleBalancesYet")}
             </div>
           ) : (
             <div className="rounded-lg border overflow-x-auto">
               <Table className="min-w-[560px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-start">المقاس</TableHead>
-                    <TableHead className="w-28 text-center">نخب أول عام</TableHead>
-                    <TableHead className="w-28 text-center">نخب أول محافظات</TableHead>
-                    <TableHead className="w-24 text-center">نخب ثاني</TableHead>
-                    <TableHead className="w-24 text-center">إجمالي الربطات</TableHead>
-                    <TableHead className="w-24 text-center">الطن</TableHead>
+                    <TableHead className="text-start">{t("colSize")}</TableHead>
+                    <TableHead className="w-28 text-center">{t("colGeneral")}</TableHead>
+                    <TableHead className="w-28 text-center">{t("colGovernorates")}</TableHead>
+                    <TableHead className="w-24 text-center">{t("colSecondGrade")}</TableHead>
+                    <TableHead className="w-24 text-center">{t("colTotalBundles")}</TableHead>
+                    <TableHead className="w-24 text-center">{t("colTons")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -371,19 +388,19 @@ export function StockOverview() {
                     <TableRow key={r.sizeName}>
                       <TableCell className="text-start font-medium">{r.sizeName}</TableCell>
                       <TableCell className="text-center tabular-nums">
-                        {r.GENERAL ? fmt(r.GENERAL) : "—"}
+                        {r.GENERAL ? fmt(r.GENERAL) : t("emDash")}
                       </TableCell>
                       <TableCell className="text-center tabular-nums">
-                        {r.GOVERNORATES ? fmt(r.GOVERNORATES) : "—"}
+                        {r.GOVERNORATES ? fmt(r.GOVERNORATES) : t("emDash")}
                       </TableCell>
                       <TableCell className="text-center tabular-nums">
-                        {r.ISOLATION ? fmt(r.ISOLATION) : "—"}
+                        {r.ISOLATION ? fmt(r.ISOLATION) : t("emDash")}
                       </TableCell>
                       <TableCell className="text-center font-semibold tabular-nums">
                         {fmt(r.total)}
                       </TableCell>
                       <TableCell className="text-center tabular-nums text-muted-foreground">
-                        {r.tons ? fmt(r.tons) : "—"}
+                        {r.tons ? fmt(r.tons) : t("emDash")}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -394,15 +411,16 @@ export function StockOverview() {
           {shortbarTotal > 0 && (
             <div className="mt-3 flex items-center gap-2 rounded-lg border bg-emerald-50 p-3 text-sm text-emerald-900">
               <Layers className="h-4 w-4" />
-              إجمالي القصائر:{" "}
-              <span className="font-bold tabular-nums">{fmt(shortbarTotal)}</span> طن
+              {t("shortbarTotal")}{" "}
+              <span className="font-bold tabular-nums">{fmt(shortbarTotal)}</span>{" "}
+              {t("tonsSuffix")}
             </div>
           )}
         </CardContent>
       </Card>
 
       <p className="text-center text-xs text-muted-foreground">
-        {grandOccupied} موقع مشغول من أصل {balances.length}
+        {t("occupiedOfTotal", { occupied: grandOccupied, total: balances.length })}
       </p>
     </div>
   );

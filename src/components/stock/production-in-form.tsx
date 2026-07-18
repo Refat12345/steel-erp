@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,16 +19,17 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { createClientIdempotencyKey } from "@/lib/browser-idempotency-key";
+import { formatDecimal, formatInteger } from "@/lib/number-format";
+import { formatDateTime } from "@/lib/date-format";
+import { getTextDirection, type Locale } from "@/i18n/config";
 import { Loader2, PackagePlus, ClipboardList } from "lucide-react";
 import {
-  gradeLabel,
-  unitLabel,
   segmentTrackedUnits,
   isDualUnitSegment,
   naturalShiftOf,
   inShiftGraceWindow,
   previousShiftOf,
-  SHIFT_LABEL,
+  SHIFT_VALUES,
   type ShiftValue,
   type Segment,
   type StockUnit,
@@ -47,26 +49,6 @@ interface TodayEntry {
 }
 
 type EntryMode = "production" | "opening";
-
-const MODE_CONFIG: Record<
-  EntryMode,
-  { endpoint: string; title: string; submit: string; success: string; icon: typeof PackagePlus }
-> = {
-  production: {
-    endpoint: "/api/stock/movements",
-    title: "تسجيل دخول إنتاج",
-    submit: "تسجيل الدخول",
-    success: "تم تسجيل دخول الإنتاج",
-    icon: PackagePlus,
-  },
-  opening: {
-    endpoint: "/api/stock/opening-balance",
-    title: "إدخال رصيد افتتاحي",
-    submit: "تسجيل الرصيد الافتتاحي",
-    success: "تم تسجيل الرصيد الافتتاحي",
-    icon: ClipboardList,
-  },
-};
 
 interface LocationOption {
   id: number;
@@ -102,8 +84,21 @@ export function ProductionInForm({
   /** Counting units the current user may enter (from their permissions). */
   allowedUnits?: StockUnit[];
 }) {
-  const config = MODE_CONFIG[mode];
-  const Icon = config.icon;
+  const t = useTranslations("stock");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+
+  const endpoint =
+    mode === "production" ? "/api/stock/movements" : "/api/stock/opening-balance";
+  const title =
+    mode === "production" ? t("productionInFormTitle") : t("openingBalanceFormTitle");
+  const submitLabel =
+    mode === "production" ? t("productionInSubmit") : t("openingBalanceSubmit");
+  const successMsg =
+    mode === "production" ? t("productionInSuccess") : t("openingBalanceSuccess");
+  const Icon = mode === "production" ? PackagePlus : ClipboardList;
+
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [sizes, setSizes] = useState<SizeOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -120,8 +115,8 @@ export function ProductionInForm({
   // toggle appears/disappears on time even if the page stays open for hours.
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 30_000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(timer);
   }, []);
 
   // Shift grace window: within 30 min after a boundary (08:00 / 20:00) the
@@ -172,15 +167,15 @@ export function ProductionInForm({
             ),
           );
         } else {
-          toast.error(json.error || "خطأ في جلب المواقع");
+          toast.error(json.error || t("errorLoadLocations"));
         }
       } catch {
-        toast.error("خطأ في الاتصال");
+        toast.error(t("errorConnection"));
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [t]);
 
   const selected = useMemo(
     () => locations.find((l) => String(l.id) === locationId) ?? null,
@@ -203,7 +198,7 @@ export function ProductionInForm({
 
   // Feed grouped by work shift, with per-shift totals for a quick sanity read.
   const shiftGroups = useMemo(() => {
-    return (["MORNING", "EVENING"] as const).map((s) => {
+    return SHIFT_VALUES.map((s) => {
       const entries = todayEntries.filter((e) => e.shift === s);
       const bundles = entries
         .filter((e) => e.unit === "BUNDLE")
@@ -229,6 +224,11 @@ export function ProductionInForm({
     [sizes],
   );
 
+  function gradeLabel(grade: "FIRST" | "SECOND" | null): string {
+    if (grade === "FIRST" || grade === "SECOND") return tEnums(`grade.${grade}`);
+    return t("emDash");
+  }
+
   function handleLocationChange(v: string | null) {
     const value = v ?? "";
     setLocationId(value);
@@ -247,24 +247,24 @@ export function ProductionInForm({
     e.preventDefault();
     if (!selected) return;
     if (enterableUnits.length === 0) {
-      toast.error("لا تملك صلاحية الإدخال لهذا الموقع");
+      toast.error(t("noEntryPermissionToast"));
       return;
     }
     if (!effectiveUnit) {
-      toast.error("اختر وحدة الإدخال (ربطات أو طن)");
+      toast.error(t("selectEntryUnitToast"));
       return;
     }
     const qty = Number(quantity);
     if (!Number.isFinite(qty) || qty <= 0) {
-      toast.error("الكمية يجب أن تكون أكبر من صفر");
+      toast.error(t("qtyMustBePositive"));
       return;
     }
     if (isBundle && !Number.isInteger(qty)) {
-      toast.error("عدد الربطات يجب أن يكون عدداً صحيحاً");
+      toast.error(t("bundlesMustBeInteger"));
       return;
     }
     if (needsSize && !sizeId) {
-      toast.error("المقاس مطلوب لهذا الموقع");
+      toast.error(t("sizeRequiredForLocation"));
       return;
     }
 
@@ -280,7 +280,7 @@ export function ProductionInForm({
 
     setSubmitting(true);
     try {
-      const res = await fetch(config.endpoint, {
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -297,16 +297,16 @@ export function ProductionInForm({
       });
       const json = await res.json();
       if (!json.success) {
-        toast.error(json.error || "تعذّر تسجيل العملية");
+        toast.error(json.error || t("errorSaveOperation"));
         return;
       }
       if (json.data?.warning) toast.warning(json.data.warning);
-      toast.success(config.success);
+      toast.success(successMsg);
       setQuantity("");
       setReason("");
       void fetchToday();
     } catch {
-      toast.error("خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setSubmitting(false);
     }
@@ -316,222 +316,230 @@ export function ProductionInForm({
     return <Skeleton className="h-96 w-full max-w-lg" />;
   }
 
+  const previousShiftLabel = tEnums(
+    `stockShift.${previousShiftOf(naturalShiftOf(now))}`,
+  );
+  const currentShiftLabel = tEnums(`stockShift.${naturalShiftOf(now)}`);
+
   return (
     <div className="flex max-w-lg flex-col gap-4">
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Icon className="h-4 w-4" />
-          {config.title}
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-1.5">
-            <Label>الموقع *</Label>
-            <Select items={locationItems} value={locationId} onValueChange={handleLocationChange}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="اختر موقع المخزون" />
-              </SelectTrigger>
-              <SelectContent>
-                {locations.map((l) => (
-                  <SelectItem key={l.id} value={String(l.id)}>
-                    <span>
-                      {l.nameAr}
-                      <span className="ms-1 text-xs text-muted-foreground">
-                        ({l.yardNameAr})
-                      </span>
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {selected && (
-            <div className="flex flex-wrap gap-1.5">
-              <Badge variant="secondary" className="text-[10px]">
-                النخب: {gradeLabel(selected.allowedGrade)}
-              </Badge>
-              <Badge variant="secondary" className="text-[10px]">
-                {isDualUnitSegment(selected.segment) ? "مبروم — ربطات وطن" : "قصائر — بالطن"}
-              </Badge>
-            </div>
-          )}
-
-          {selected && enterableUnits.length === 0 && (
-            <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              لا تملك صلاحية الإدخال لهذا الموقع بالوحدة المتاحة.
-            </p>
-          )}
-
-          {/* Unit toggle — only when the user may enter more than one unit here */}
-          {enterableUnits.length > 1 && (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Icon className="h-4 w-4" />
+            {title}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
-              <Label>وحدة الإدخال *</Label>
-              <div className="flex gap-2">
-                {enterableUnits.map((u) => (
-                  <Button
-                    key={u}
-                    type="button"
-                    variant={effectiveUnit === u ? "default" : "outline"}
-                    className={cn("flex-1")}
-                    onClick={() => {
-                      setUnit(u);
-                      setQuantity("");
-                    }}
-                  >
-                    {u === "BUNDLE" ? "ربطات" : "طن"}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {needsSize && effectiveUnit && (
-            <div className="space-y-1.5">
-              <Label>المقاس *</Label>
-              <Select items={sizeItems} value={sizeId} onValueChange={(v) => setSizeId(v ?? "")}>
+              <Label>{t("locationRequired")}</Label>
+              <Select items={locationItems} value={locationId} onValueChange={handleLocationChange}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="اختر المقاس" />
+                  <SelectValue placeholder={t("selectStockLocation")} />
                 </SelectTrigger>
-                <SelectContent>
-                  {sizes.map((s) => (
-                    <SelectItem key={s.id} value={String(s.id)}>
-                      {s.displayName}
+                <SelectContent dir={dir}>
+                  {locations.map((l) => (
+                    <SelectItem key={l.id} value={String(l.id)}>
+                      <span>
+                        {l.nameAr}
+                        <span className="ms-1 text-xs text-muted-foreground">
+                          ({l.yardNameAr})
+                        </span>
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-          )}
 
-          {effectiveUnit && (
-            <div className="space-y-1.5">
-              <Label htmlFor="quantity">
-                {isBundle ? "عدد الربطات *" : "الكمية (طن) *"}
-              </Label>
-              <Input
-                id="quantity"
-                type="number"
-                min={0}
-                step={isBundle ? 1 : 0.001}
-                value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
-                dir="ltr"
-                className="text-left"
-                disabled={!selected}
-              />
-              <p className="text-xs text-muted-foreground">
-                الوحدة: {unitLabel(effectiveUnit)}
-              </p>
-            </div>
-          )}
-
-          <div className="space-y-1.5">
-            <Label htmlFor="reason">ملاحظة (اختياري)</Label>
-            <Textarea
-              id="reason"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              rows={2}
-            />
-          </div>
-
-          {/* Shift assignment — visible only during the 30-min grace window
-              after a shift boundary (08:00 / 20:00). */}
-          {inGrace && (
-            <div className="space-y-1.5 rounded-md border border-amber-300 bg-amber-50 p-3">
-              <Label className="text-amber-900">لأي وردية يعود هذا الإدخال؟</Label>
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant={graceShift === "previous" ? "default" : "outline"}
-                  className="flex-1"
-                  onClick={() => setGraceShift("previous")}
-                >
-                  {SHIFT_LABEL[previousShiftOf(naturalShiftOf(now))]}
-                </Button>
-                <Button
-                  type="button"
-                  variant={graceShift === "current" ? "default" : "outline"}
-                  className="flex-1"
-                  onClick={() => setGraceShift("current")}
-                >
-                  {SHIFT_LABEL[naturalShiftOf(now)]}
-                </Button>
+            {selected && (
+              <div className="flex flex-wrap gap-1.5">
+                <Badge variant="secondary" className="text-[10px]">
+                  {t("gradeBadge", { grade: gradeLabel(selected.allowedGrade) })}
+                </Badge>
+                <Badge variant="secondary" className="text-[10px]">
+                  {isDualUnitSegment(selected.segment)
+                    ? t("rebarDualUnit")
+                    : t("shortbarByTon")}
+                </Badge>
               </div>
-              <p className="text-xs text-amber-800">
-                بدأت وردية جديدة قبل قليل — إذا كان الإدخال يخص الوردية المنتهية اتركه على
-                «{SHIFT_LABEL[previousShiftOf(naturalShiftOf(now))]}».
+            )}
+
+            {selected && enterableUnits.length === 0 && (
+              <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                {t("noEntryPermissionForLocation")}
               </p>
-            </div>
-          )}
+            )}
 
-          <Button
-            type="submit"
-            disabled={submitting || !selected || !effectiveUnit || !quantity}
-          >
-            {submitting && <Loader2 className="animate-spin" />}
-            {config.submit}
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
-
-    {showToday && (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-sm">
-            <ClipboardList className="h-4 w-4" />
-            إدخالات اليوم التشغيلي (8ص – 8ص)
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {shiftGroups.map(({ shift: s, entries, bundles, tons }) => (
-            <div key={s}>
-              <div className="mb-1.5 flex items-center justify-between">
-                <h4 className="text-xs font-semibold">{SHIFT_LABEL[s]}</h4>
-                {entries.length > 0 && (
-                  <span className="text-[11px] text-muted-foreground tabular-nums">
-                    {bundles > 0 && `${bundles} ربطة`}
-                    {bundles > 0 && tons > 0 && " · "}
-                    {tons > 0 && `${tons} طن`}
-                  </span>
-                )}
-              </div>
-              {entries.length === 0 ? (
-                <p className="text-xs text-muted-foreground">لا إدخالات بعد.</p>
-              ) : (
-                <ul className="divide-y text-xs">
-                  {entries.map((e) => (
-                    <li key={e.id} className="flex items-center justify-between gap-2 py-1.5">
-                      <span className="min-w-0 truncate">
-                        <span className="font-medium">{e.locationNameAr}</span>
-                        {e.sizeName && (
-                          <span className="ms-1 text-muted-foreground">· {e.sizeName}</span>
-                        )}
-                      </span>
-                      <span className="shrink-0 tabular-nums">
-                        {e.quantity} {unitLabel(e.unit)}
-                      </span>
-                      <span className="shrink-0 text-muted-foreground">
-                        {new Date(e.createdAt).toLocaleTimeString("ar", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                        {" · "}
-                        {e.createdBy}
-                      </span>
-                    </li>
+            {/* Unit toggle — only when the user may enter more than one unit here */}
+            {enterableUnits.length > 1 && (
+              <div className="space-y-1.5">
+                <Label>{t("entryUnitRequired")}</Label>
+                <div className="flex gap-2">
+                  {enterableUnits.map((u) => (
+                    <Button
+                      key={u}
+                      type="button"
+                      variant={effectiveUnit === u ? "default" : "outline"}
+                      className={cn("flex-1")}
+                      onClick={() => {
+                        setUnit(u);
+                        setQuantity("");
+                      }}
+                    >
+                      {u === "BUNDLE" ? t("unitBundles") : t("unitTons")}
+                    </Button>
                   ))}
-                </ul>
-              )}
+                </div>
+              </div>
+            )}
+
+            {needsSize && effectiveUnit && (
+              <div className="space-y-1.5">
+                <Label>{t("sizeRequired")}</Label>
+                <Select items={sizeItems} value={sizeId} onValueChange={(v) => setSizeId(v ?? "")}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder={t("selectSize")} />
+                  </SelectTrigger>
+                  <SelectContent dir={dir}>
+                    {sizes.map((s) => (
+                      <SelectItem key={s.id} value={String(s.id)}>
+                        {s.displayName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {effectiveUnit && (
+              <div className="space-y-1.5">
+                <Label htmlFor="quantity">
+                  {isBundle ? t("bundleCountRequired") : t("quantityTonsRequired")}
+                </Label>
+                <Input
+                  id="quantity"
+                  type="number"
+                  min={0}
+                  step={isBundle ? 1 : 0.001}
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                  dir="ltr"
+                  className="text-start"
+                  disabled={!selected}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t("unitLabel", { unit: tEnums(`stockUnit.${effectiveUnit}`) })}
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="reason">{t("notesOptional")}</Label>
+              <Textarea
+                id="reason"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                rows={2}
+              />
             </div>
-          ))}
+
+            {/* Shift assignment — visible only during the 30-min grace window
+                after a shift boundary (08:00 / 20:00). */}
+            {inGrace && (
+              <div className="space-y-1.5 rounded-md border border-amber-300 bg-amber-50 p-3">
+                <Label className="text-amber-900">{t("shiftWhich")}</Label>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant={graceShift === "previous" ? "default" : "outline"}
+                    className="flex-1"
+                    onClick={() => setGraceShift("previous")}
+                  >
+                    {previousShiftLabel}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={graceShift === "current" ? "default" : "outline"}
+                    className="flex-1"
+                    onClick={() => setGraceShift("current")}
+                  >
+                    {currentShiftLabel}
+                  </Button>
+                </div>
+                <p className="text-xs text-amber-800">
+                  {t("shiftGraceHint", { shift: previousShiftLabel })}
+                </p>
+              </div>
+            )}
+
+            <Button
+              type="submit"
+              disabled={submitting || !selected || !effectiveUnit || !quantity}
+            >
+              {submitting && <Loader2 className="animate-spin" />}
+              {submitLabel}
+            </Button>
+          </form>
         </CardContent>
       </Card>
-    )}
+
+      {showToday && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <ClipboardList className="h-4 w-4" />
+              {t("todayEntriesTitle")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {shiftGroups.map(({ shift: s, entries, bundles, tons }) => (
+              <div key={s}>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <h4 className="text-xs font-semibold">
+                    {tEnums(`stockShift.${s}`)}
+                  </h4>
+                  {entries.length > 0 && (
+                    <span className="text-[11px] text-muted-foreground tabular-nums">
+                      {bundles > 0 && t("shiftBundles", { count: formatInteger(bundles) })}
+                      {bundles > 0 && tons > 0 && " · "}
+                      {tons > 0 && t("shiftTons", { count: formatDecimal(tons, 3) })}
+                    </span>
+                  )}
+                </div>
+                {entries.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">{t("noEntriesYet")}</p>
+                ) : (
+                  <ul className="divide-y text-xs">
+                    {entries.map((e) => (
+                      <li
+                        key={e.id}
+                        className="flex items-center justify-between gap-2 py-1.5"
+                      >
+                        <span className="min-w-0 truncate">
+                          <span className="font-medium">{e.locationNameAr}</span>
+                          {e.sizeName && (
+                            <span className="ms-1 text-muted-foreground">· {e.sizeName}</span>
+                          )}
+                        </span>
+                        <span className="shrink-0 tabular-nums">
+                          {e.quantity} {tEnums(`stockUnit.${e.unit}`)}
+                        </span>
+                        <span className="shrink-0 text-muted-foreground" dir="ltr">
+                          {formatDateTime(e.createdAt).split(" ")[1] ?? ""}
+                          {" · "}
+                          {e.createdBy}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

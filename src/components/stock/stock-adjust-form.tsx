@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,8 +18,9 @@ import {
 } from "@/components/ui/select";
 import { Loader2, ClipboardCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatDecimal } from "@/lib/number-format";
+import { getTextDirection, type Locale } from "@/i18n/config";
 import {
-  unitLabel,
   isDualUnitSegment,
   type Segment,
   type StockUnit,
@@ -46,10 +48,15 @@ interface LocationBalance {
 }
 
 function fmt(n: number): string {
-  return n.toLocaleString("en-US", { maximumFractionDigits: 3 });
+  return formatDecimal(n, 3);
 }
 
 export function StockAdjustForm() {
+  const t = useTranslations("stock");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+
   const [balances, setBalances] = useState<LocationBalance[]>([]);
   const [sizes, setSizes] = useState<SizeOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,7 +78,7 @@ export function StockAdjustForm() {
       const balJson = await balRes.json();
       const locJson = await locRes.json();
       if (balJson.success) setBalances(balJson.data as LocationBalance[]);
-      else toast.error(balJson.error || "خطأ في جلب الأرصدة");
+      else toast.error(balJson.error || t("errorLoadBalances"));
       if (locJson.success) {
         setSizes(
           (locJson.data.sizes as (SizeOption & { isBundleType: boolean })[]).filter(
@@ -80,11 +87,11 @@ export function StockAdjustForm() {
         );
       }
     } catch {
-      toast.error("خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void fetchData();
@@ -151,27 +158,27 @@ export function StockAdjustForm() {
     e.preventDefault();
     if (!selected) return;
     if (!effectiveUnit) {
-      toast.error("اختر وحدة التصحيح (ربطات أو طن)");
+      toast.error(t("selectAdjustUnitToast"));
       return;
     }
     if (parsedActual == null || !Number.isFinite(parsedActual) || parsedActual < 0) {
-      toast.error("أدخل الكمية الفعلية (صفر أو أكثر)");
+      toast.error(t("enterActualQuantity"));
       return;
     }
     if (needsSize && !sizeId) {
-      toast.error("المقاس مطلوب لهذا الموقع");
+      toast.error(t("sizeRequiredForLocation"));
       return;
     }
     if (isBundle && !Number.isInteger(parsedActual)) {
-      toast.error("عدد الربطات يجب أن يكون عدداً صحيحاً");
+      toast.error(t("bundlesMustBeInteger"));
       return;
     }
     if (reason.trim().length < 5) {
-      toast.error("اذكر سبب التصحيح (5 أحرف على الأقل)");
+      toast.error(t("adjustReasonMinLength"));
       return;
     }
     if (delta === 0) {
-      toast.error("لا يوجد فرق — الرصيد الفعلي يطابق رصيد النظام");
+      toast.error(t("noDelta"));
       return;
     }
 
@@ -190,18 +197,17 @@ export function StockAdjustForm() {
       });
       const json = await res.json();
       if (!json.success) {
-        toast.error(json.error || "تعذّر تسجيل التصحيح");
+        toast.error(json.error || t("errorAdjust"));
         return;
       }
       const d = json.data as { delta: number };
-      toast.success(
-        `تم التصحيح — الفرق المسجّل: ${d.delta > 0 ? "+" : ""}${fmt(d.delta)}`,
-      );
+      const deltaStr = `${d.delta > 0 ? "+" : ""}${fmt(d.delta)}`;
+      toast.success(t("adjustSuccess", { delta: deltaStr }));
       setActual("");
       setReason("");
       await fetchData();
     } catch {
-      toast.error("خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setSubmitting(false);
     }
@@ -216,18 +222,18 @@ export function StockAdjustForm() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <ClipboardCheck className="h-4 w-4" />
-          تصحيح جرد
+          {t("adjustFormTitle")}
         </CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <Label>الموقع *</Label>
+            <Label>{t("locationRequired")}</Label>
             <Select items={locationItems} value={locationId} onValueChange={handleLocationChange}>
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="اختر موقع المخزون" />
+                <SelectValue placeholder={t("selectStockLocation")} />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent dir={dir}>
                 {balances.map((b) => (
                   <SelectItem key={b.locationId} value={String(b.locationId)}>
                     <span className="flex w-full items-center justify-between gap-3">
@@ -238,7 +244,7 @@ export function StockAdjustForm() {
                         </span>
                       </span>
                       <span className="text-xs tabular-nums text-muted-foreground" dir="ltr">
-                        {fmt(b.totalQuantity)} {unitLabel(b.unit)}
+                        {fmt(b.totalQuantity)} {tEnums(`stockUnit.${b.unit}`)}
                       </span>
                     </span>
                   </SelectItem>
@@ -249,7 +255,7 @@ export function StockAdjustForm() {
 
           {selected && dual && (
             <div className="space-y-1.5">
-              <Label>وحدة التصحيح *</Label>
+              <Label>{t("adjustUnitRequired")}</Label>
               <div className="flex gap-2">
                 {(["BUNDLE", "TON"] as StockUnit[]).map((u) => (
                   <Button
@@ -262,7 +268,7 @@ export function StockAdjustForm() {
                       setActual("");
                     }}
                   >
-                    {u === "BUNDLE" ? "ربطات" : "طن"}
+                    {u === "BUNDLE" ? t("unitBundles") : t("unitTons")}
                   </Button>
                 ))}
               </div>
@@ -271,12 +277,12 @@ export function StockAdjustForm() {
 
           {needsSize && effectiveUnit && (
             <div className="space-y-1.5">
-              <Label>المقاس *</Label>
+              <Label>{t("sizeRequired")}</Label>
               <Select items={sizeItems} value={sizeId} onValueChange={(v) => setSizeId(v ?? "")}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="اختر المقاس" />
+                  <SelectValue placeholder={t("selectSize")} />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent dir={dir}>
                   {sizes.map((s) => {
                     const line = selected?.lines.find(
                       (l) => l.unit === effectiveUnit && l.sizeId === s.id,
@@ -304,9 +310,9 @@ export function StockAdjustForm() {
 
           {currentQty != null && selected && effectiveUnit && (
             <div className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-              رصيد النظام الحالي:{" "}
+              {t("systemBalance")}{" "}
               <span className="font-semibold text-foreground tabular-nums">
-                {fmt(currentQty)} {unitLabel(effectiveUnit)}
+                {fmt(currentQty)} {tEnums(`stockUnit.${effectiveUnit}`)}
               </span>
             </div>
           )}
@@ -314,7 +320,7 @@ export function StockAdjustForm() {
           {effectiveUnit && (
             <div className="space-y-1.5">
               <Label htmlFor="actual">
-                {isBundle ? "العدد الفعلي المعدود (ربطات) *" : "الكمية الفعلية (طن) *"}
+                {isBundle ? t("actualBundleCountRequired") : t("actualQuantityTonsRequired")}
               </Label>
               <Input
                 id="actual"
@@ -324,7 +330,7 @@ export function StockAdjustForm() {
                 value={actual}
                 onChange={(e) => setActual(e.target.value)}
                 dir="ltr"
-                className="text-left"
+                className="text-start"
                 disabled={!selected || (needsSize && !sizeId)}
               />
             </div>
@@ -339,23 +345,23 @@ export function StockAdjustForm() {
                   : "border-rose-300 bg-rose-50 text-rose-900",
               )}
             >
-              الفرق الذي سيُسجَّل:{" "}
+              {t("deltaPreview")}{" "}
               <span className="font-bold tabular-nums" dir="ltr">
                 {delta > 0 ? "+" : ""}
                 {fmt(delta)}
               </span>{" "}
-              {effectiveUnit ? unitLabel(effectiveUnit) : ""}
+              {effectiveUnit ? tEnums(`stockUnit.${effectiveUnit}`) : ""}
             </div>
           )}
 
           <div className="space-y-1.5">
-            <Label htmlFor="reason">سبب التصحيح *</Label>
+            <Label htmlFor="reason">{t("adjustReasonRequired")}</Label>
             <Textarea
               id="reason"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               rows={2}
-              placeholder="مثال: جرد فعلي بتاريخ اليوم — فرق عدّ"
+              placeholder={t("adjustReasonPlaceholder")}
             />
           </div>
 
@@ -370,7 +376,7 @@ export function StockAdjustForm() {
             }
           >
             {submitting && <Loader2 className="animate-spin" />}
-            تسجيل التصحيح
+            {t("submitAdjustment")}
           </Button>
         </form>
       </CardContent>

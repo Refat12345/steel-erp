@@ -2,8 +2,10 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { sessionHasPermission } from "@/lib/client-permissions";
+import { formatInteger } from "@/lib/number-format";
 import {
   Table,
   TableBody,
@@ -17,7 +19,15 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CustomerFormDialog } from "./customer-form-dialog";
-import { Plus, Search, Pencil, UserCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Plus,
+  Search,
+  Pencil,
+  UserCircle,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
+import { getTextDirection, type Locale } from "@/i18n/config";
 
 interface Customer {
   id: number;
@@ -36,6 +46,9 @@ interface Customer {
 }
 
 export function CustomerList() {
+  const t = useTranslations("contracts");
+  const locale = useLocale() as Locale;
+  const isRtl = getTextDirection(locale) === "rtl";
   const { data: session } = useSession();
   const canCreateCustomer = sessionHasPermission(session, "contract.create");
   const canEditCustomer = sessionHasPermission(session, "contract.edit");
@@ -45,6 +58,7 @@ export function CustomerList() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const pageSize = 25;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
 
@@ -62,11 +76,11 @@ export function CustomerList() {
         setTotal(json.total);
       }
     } catch {
-      toast.error("خطأ في جلب بيانات العملاء");
+      toast.error(t("errorLoadCustomers"));
     } finally {
       setLoading(false);
     }
-  }, [search, page]);
+  }, [search, page, t]);
 
   useEffect(() => {
     setPage(1);
@@ -88,44 +102,53 @@ export function CustomerList() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0 max-w-full">
       {/* Toolbar */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-0 max-w-sm">
+          <Search className="absolute end-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="بحث بالاسم أو الرقم الوطني أو الهاتف..."
+            placeholder={t("searchCustomerPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pr-9"
+            className="pe-9"
           />
         </div>
         {canCreateCustomer && (
           <Button onClick={handleAdd} size="sm">
             <Plus className="h-4 w-4" />
-            إضافة عميل
+            {t("addCustomer")}
           </Button>
         )}
       </div>
 
       {/* Table */}
-      <div className="rounded-lg border overflow-x-auto">
+      <div className="rounded-lg border min-w-0">
         <Table className="min-w-[640px]">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-24 text-start">الرمز</TableHead>
-              <TableHead className="text-start">الاسم</TableHead>
-              <TableHead className="text-start">اسم الأب</TableHead>
-              <TableHead dir="ltr" className="w-[10.5rem] max-w-[10.5rem] text-start">
-                الرقم الوطني
+              <TableHead className="w-24 text-start">{t("columns.code")}</TableHead>
+              <TableHead className="text-start">{t("columns.fullName")}</TableHead>
+              <TableHead className="text-start">
+                {t("columns.fatherName")}
+              </TableHead>
+              <TableHead
+                dir="ltr"
+                className="w-[10.5rem] max-w-[10.5rem] text-start"
+              >
+                {t("columns.nationalId")}
               </TableHead>
               <TableHead dir="ltr" className="w-36 max-w-36 text-start">
-                الهاتف
+                {t("columns.phone")}
               </TableHead>
-              <TableHead className="w-20 text-center">العقود</TableHead>
-              <TableHead className="min-w-[5rem] text-center">الحالة</TableHead>
+              <TableHead className="w-20 text-center">
+                {t("columns.contractsCount")}
+              </TableHead>
+              <TableHead className="min-w-[5rem] text-center">
+                {t("columns.status")}
+              </TableHead>
               {canEditCustomer && (
-                <TableHead className="w-16 text-center" aria-label="تعديل" />
+                <TableHead className="w-16 text-center" aria-label={t("edit")} />
               )}
             </TableRow>
           </TableHeader>
@@ -133,11 +156,13 @@ export function CustomerList() {
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: canEditCustomer ? 8 : 7 }).map((_, j) => (
-                    <TableCell key={j}>
-                      <Skeleton className="h-4 w-full" />
-                    </TableCell>
-                  ))}
+                  {Array.from({ length: canEditCustomer ? 8 : 7 }).map(
+                    (_, j) => (
+                      <TableCell key={j}>
+                        <Skeleton className="h-4 w-full" />
+                      </TableCell>
+                    ),
+                  )}
                 </TableRow>
               ))
             ) : customers.length === 0 ? (
@@ -149,18 +174,22 @@ export function CustomerList() {
                   <div className="flex flex-col items-center gap-2">
                     <UserCircle className="h-8 w-8 opacity-40" />
                     {search
-                      ? "لا توجد نتائج"
+                      ? t("emptyNoResults")
                       : canCreateCustomer
-                        ? "لا يوجد عملاء — أضف أول عميل"
-                        : "لا يوجد عملاء"}
+                        ? t("emptyNoCustomersCreate")
+                        : t("emptyNoCustomers")}
                   </div>
                 </TableCell>
               </TableRow>
             ) : (
               customers.map((c) => (
                 <TableRow key={c.id}>
-                  <TableCell className="text-start font-mono text-xs">{c.code}</TableCell>
-                  <TableCell className="text-start font-medium">{c.fullName}</TableCell>
+                  <TableCell className="text-start font-mono text-xs">
+                    {c.code}
+                  </TableCell>
+                  <TableCell className="text-start font-medium">
+                    {c.fullName}
+                  </TableCell>
                   <TableCell className="text-start">{c.fatherName}</TableCell>
                   <TableCell
                     dir="ltr"
@@ -168,13 +197,18 @@ export function CustomerList() {
                   >
                     {c.nationalId}
                   </TableCell>
-                  <TableCell dir="ltr" className="w-36 max-w-36 text-start text-xs tabular-nums">
+                  <TableCell
+                    dir="ltr"
+                    className="w-36 max-w-36 text-start text-xs tabular-nums"
+                  >
                     {c.phonePrimary}
                   </TableCell>
-                  <TableCell className="text-center">{c._count.contracts}</TableCell>
+                  <TableCell className="text-center tabular-nums">
+                    {formatInteger(c._count.contracts)}
+                  </TableCell>
                   <TableCell className="text-center">
                     <Badge variant={c.isActive ? "default" : "secondary"}>
-                      {c.isActive ? "نشط" : "معطّل"}
+                      {c.isActive ? t("customerActive") : t("customerInactive")}
                     </Badge>
                   </TableCell>
                   {canEditCustomer && (
@@ -183,6 +217,7 @@ export function CustomerList() {
                         variant="ghost"
                         size="icon-sm"
                         onClick={() => handleEdit(c)}
+                        title={t("edit")}
                       >
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
@@ -195,29 +230,39 @@ export function CustomerList() {
         </Table>
       </div>
 
-      {/* Pagination */}
       {total > pageSize && (
-        <div className="flex items-center justify-center gap-4 pt-2">
+        <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
           <Button
             variant="outline"
             size="sm"
             disabled={page <= 1}
             onClick={() => setPage((p) => p - 1)}
           >
-            <ChevronRight className="h-4 w-4" />
-            السابق
+            {isRtl ? (
+              <ChevronRight className="h-4 w-4" />
+            ) : (
+              <ChevronLeft className="h-4 w-4" />
+            )}
+            {t("previous")}
           </Button>
-          <span className="text-sm text-muted-foreground">
-            صفحة {page} من {Math.ceil(total / pageSize)}
+          <span className="text-sm text-muted-foreground tabular-nums">
+            {t("pageOf", {
+              page: formatInteger(page),
+              totalPages: formatInteger(totalPages),
+            })}
           </span>
           <Button
             variant="outline"
             size="sm"
-            disabled={page >= Math.ceil(total / pageSize)}
+            disabled={page >= totalPages}
             onClick={() => setPage((p) => p + 1)}
           >
-            التالي
-            <ChevronLeft className="h-4 w-4" />
+            {t("next")}
+            {isRtl ? (
+              <ChevronLeft className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
           </Button>
         </div>
       )}

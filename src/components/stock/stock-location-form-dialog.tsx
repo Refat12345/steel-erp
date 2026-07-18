@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -23,10 +24,9 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
+import { getTextDirection, type Locale } from "@/i18n/config";
 import {
-  SEGMENT_META,
-  segmentUnitLabel,
-  segmentGradeLabel,
+  SEGMENT_ORDER,
   type Segment,
   type YardOption,
   type SizeOption,
@@ -71,6 +71,10 @@ interface Props {
   defaultYardId?: number;
 }
 
+function segmentUnitKey(segment: Segment): "segmentUnitByTons" | "segmentUnitByBundles" {
+  return segment === "SHORTBAR" ? "segmentUnitByTons" : "segmentUnitByBundles";
+}
+
 export function StockLocationFormDialog({
   open,
   onOpenChange,
@@ -80,6 +84,11 @@ export function StockLocationFormDialog({
   editData,
   defaultYardId,
 }: Props) {
+  const t = useTranslations("stock");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [loading, setLoading] = useState(false);
   const isEdit = !!editData;
@@ -113,6 +122,12 @@ export function StockLocationFormDialog({
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  function segmentGradeLabel(segment: Segment): string {
+    if (segment === "SHORTBAR") return t("noGrade");
+    if (segment === "ISOLATION") return tEnums("grade.SECOND");
+    return tEnums("grade.FIRST");
+  }
+
   // Base UI's Select shows the raw value in the trigger unless items provided.
   const yardItems = useMemo(
     () => yards.map((y) => ({ value: String(y.id), label: y.nameAr })),
@@ -120,25 +135,25 @@ export function StockLocationFormDialog({
   );
   const segmentItems = useMemo(
     () =>
-      (Object.keys(SEGMENT_META) as Segment[]).map((s) => ({
+      SEGMENT_ORDER.map((s) => ({
         value: s,
-        label: SEGMENT_META[s].label,
+        label: tEnums(`stockSegment.${s}`),
       })),
-    [],
+    [tEnums],
   );
   const sizeItems = useMemo(
     () => [
-      { value: "", label: "بدون" },
+      { value: "", label: t("none") },
       ...sizes.map((s) => ({ value: String(s.id), label: s.displayName })),
     ],
-    [sizes],
+    [sizes, t],
   );
   const statusItems = useMemo(
     () => [
-      { value: "active", label: "نشط" },
-      { value: "inactive", label: "موقوف" },
+      { value: "active", label: t("statusActive") },
+      { value: "inactive", label: t("statusInactive") },
     ],
-    [],
+    [t],
   );
 
   async function handleSubmit(e: React.FormEvent) {
@@ -192,14 +207,14 @@ export function StockLocationFormDialog({
       });
       const json = await res.json();
       if (!json.success) {
-        toast.error(json.error || "حدث خطأ");
+        toast.error(json.error || t("errorGeneric"));
         return;
       }
-      toast.success(isEdit ? "تم تحديث الموقع" : "تمت إضافة الموقع");
+      toast.success(isEdit ? t("locationUpdated") : t("locationCreated"));
       onSuccess();
       onOpenChange(false);
     } catch {
-      toast.error("حدث خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setLoading(false);
     }
@@ -207,20 +222,20 @@ export function StockLocationFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent dir={dir} className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "تعديل موقع" : "إضافة موقع"}</DialogTitle>
+          <DialogTitle>
+            {isEdit ? t("editLocationTitle") : t("addLocationTitle")}
+          </DialogTitle>
           <DialogDescription>
-            {isEdit
-              ? "الكود يُثبَّت بعد أول حركة؛ الاسم قابل للتعديل دائماً."
-              : "أضف موقعاً جديداً للساحة. تُشتق وحدة العدّ والنخب من التصنيف تلقائياً."}
+            {isEdit ? t("editLocationDesc") : t("addLocationDesc")}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label>الساحة *</Label>
+              <Label>{t("yardRequired")}</Label>
               <Select
                 items={yardItems}
                 value={form.yardId}
@@ -228,9 +243,9 @@ export function StockLocationFormDialog({
                 disabled={isEdit}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="اختر الساحة" />
+                  <SelectValue placeholder={t("selectYard")} />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent dir={dir}>
                   {yards.map((y) => (
                     <SelectItem key={y.id} value={String(y.id)}>
                       {y.nameAr}
@@ -241,36 +256,34 @@ export function StockLocationFormDialog({
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="code">الكود *</Label>
+              <Label htmlFor="code">{t("codeRequired")}</Label>
               <Input
                 id="code"
                 value={form.code}
                 onChange={(e) => set("code", e.target.value)}
                 dir="ltr"
-                className="text-left"
+                className="text-start"
                 disabled={isEdit && hasMovements}
               />
               {isEdit && hasMovements && (
-                <p className="text-xs text-muted-foreground">
-                  لا يمكن تعديل الكود لوجود حركات على الموقع
-                </p>
+                <p className="text-xs text-muted-foreground">{t("codeLockedHint")}</p>
               )}
             </div>
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="nameAr">الاسم الظاهر *</Label>
+            <Label htmlFor="nameAr">{t("displayNameRequired")}</Label>
             <Input
               id="nameAr"
               value={form.nameAr}
               onChange={(e) => set("nameAr", e.target.value)}
-              placeholder="مثال: A5 محافظات"
+              placeholder={t("displayNamePlaceholder")}
             />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label>التصنيف *</Label>
+              <Label>{t("segmentRequired")}</Label>
               <Select
                 items={segmentItems}
                 value={form.segment}
@@ -279,17 +292,17 @@ export function StockLocationFormDialog({
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
-                  {(Object.keys(SEGMENT_META) as Segment[]).map((s) => (
+                <SelectContent dir={dir}>
+                  {SEGMENT_ORDER.map((s) => (
                     <SelectItem key={s} value={s}>
-                      {SEGMENT_META[s].label}
+                      {tEnums(`stockSegment.${s}`)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <div className="flex flex-wrap gap-1.5 pt-1">
                 <Badge variant="secondary" className="text-[10px]">
-                  {segmentUnitLabel(form.segment)}
+                  {t(segmentUnitKey(form.segment))}
                 </Badge>
                 <Badge variant="secondary" className="text-[10px]">
                   {segmentGradeLabel(form.segment)}
@@ -298,17 +311,17 @@ export function StockLocationFormDialog({
             </div>
 
             <div className="space-y-1.5">
-              <Label>المقاس الاسترشادي</Label>
+              <Label>{t("indicativeSize")}</Label>
               <Select
                 items={sizeItems}
                 value={form.expectedSizeId}
                 onValueChange={(v) => set("expectedSizeId", v ?? "")}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="بدون" />
+                  <SelectValue placeholder={t("none")} />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">بدون</SelectItem>
+                <SelectContent dir={dir}>
+                  <SelectItem value="">{t("none")}</SelectItem>
                   {sizes.map((s) => (
                     <SelectItem key={s.id} value={String(s.id)}>
                       {s.displayName}
@@ -316,13 +329,13 @@ export function StockLocationFormDialog({
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">استرشادي فقط — لا يقيّد الإدخال</p>
+              <p className="text-xs text-muted-foreground">{t("indicativeSizeHint")}</p>
             </div>
           </div>
 
           <div className="grid gap-4 grid-cols-3">
             <div className="space-y-1.5">
-              <Label htmlFor="gridRow">الصف</Label>
+              <Label htmlFor="gridRow">{t("gridRow")}</Label>
               <Input
                 id="gridRow"
                 type="number"
@@ -334,7 +347,7 @@ export function StockLocationFormDialog({
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="gridCol">العمود</Label>
+              <Label htmlFor="gridCol">{t("gridCol")}</Label>
               <Input
                 id="gridCol"
                 type="number"
@@ -346,7 +359,7 @@ export function StockLocationFormDialog({
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="gridSpan">الامتداد</Label>
+              <Label htmlFor="gridSpan">{t("gridSpan")}</Label>
               <Input
                 id="gridSpan"
                 type="number"
@@ -358,14 +371,11 @@ export function StockLocationFormDialog({
               />
             </div>
           </div>
-          <p className="-mt-2 text-xs text-muted-foreground">
-            موضع الموقع على خريطة الساحة (الصف/العمود على الشبكة). الامتداد لعرض
-            مناطق أوسع كالقصائر.
-          </p>
+          <p className="-mt-2 text-xs text-muted-foreground">{t("gridHint")}</p>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="sortOrder">ترتيب العرض</Label>
+              <Label htmlFor="sortOrder">{t("sortOrder")}</Label>
               <Input
                 id="sortOrder"
                 type="number"
@@ -378,7 +388,7 @@ export function StockLocationFormDialog({
             </div>
             {isEdit && (
               <div className="space-y-1.5">
-                <Label>الحالة</Label>
+                <Label>{t("status")}</Label>
                 <Select
                   items={statusItems}
                   value={form.isActive ? "active" : "inactive"}
@@ -387,9 +397,9 @@ export function StockLocationFormDialog({
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="active">نشط</SelectItem>
-                    <SelectItem value="inactive">موقوف</SelectItem>
+                  <SelectContent dir={dir}>
+                    <SelectItem value="active">{t("statusActive")}</SelectItem>
+                    <SelectItem value="inactive">{t("statusInactive")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -397,7 +407,7 @@ export function StockLocationFormDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="notes">ملاحظات</Label>
+            <Label htmlFor="notes">{t("notes")}</Label>
             <Textarea
               id="notes"
               value={form.notes}
@@ -409,7 +419,7 @@ export function StockLocationFormDialog({
           <DialogFooter>
             <Button type="submit" disabled={loading || !form.code || !form.nameAr || !form.yardId}>
               {loading && <Loader2 className="animate-spin" />}
-              {isEdit ? "حفظ التعديلات" : "إضافة الموقع"}
+              {isEdit ? t("saveChanges") : t("addLocationSubmit")}
             </Button>
           </DialogFooter>
         </form>

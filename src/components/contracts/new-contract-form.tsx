@@ -5,11 +5,11 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { CustomerFormDialog } from "@/components/contracts/customer-form-dialog";
 import {
@@ -18,6 +18,7 @@ import {
 } from "@/lib/validators/contract";
 import { sessionHasPermission } from "@/lib/client-permissions";
 import { compressImage } from "@/lib/compress-image";
+import { formatInteger } from "@/lib/number-format";
 import {
   Loader2,
   Upload,
@@ -26,8 +27,10 @@ import {
   Plus,
   Search,
   ArrowRight,
+  ArrowLeft,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { getTextDirection, type Locale } from "@/i18n/config";
 
 interface CustomerOption {
   id: number;
@@ -37,6 +40,10 @@ interface CustomerOption {
 }
 
 export function NewContractForm() {
+  const t = useTranslations("contracts");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+  const BackIcon = dir === "rtl" ? ArrowRight : ArrowLeft;
   const { data: session, status: sessionStatus } = useSession();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -44,7 +51,9 @@ export function NewContractForm() {
 
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [customerSearch, setCustomerSearch] = useState("");
-  const [selectedCustomer, setSelectedCustomer] = useState<CustomerOption | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerOption | null>(
+    null,
+  );
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [customerDialogOpen, setCustomerDialogOpen] = useState(false);
 
@@ -105,7 +114,9 @@ export function NewContractForm() {
 
     setUploading(true);
     try {
-      const file = raw.type.startsWith("image/") ? await compressImage(raw) : raw;
+      const file = raw.type.startsWith("image/")
+        ? await compressImage(raw)
+        : raw;
       const formData = new FormData();
       formData.append("file", file);
       const res = await fetch("/api/upload", { method: "POST", body: formData });
@@ -121,9 +132,9 @@ export function NewContractForm() {
         name: json.data.fileName,
         size: json.data.fileSize,
       });
-      toast.success("تم رفع الملف بنجاح");
+      toast.success(t("uploadSuccess"));
     } catch {
-      toast.error("خطأ في رفع الملف");
+      toast.error(t("errorUpload"));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -132,7 +143,7 @@ export function NewContractForm() {
 
   const onSubmit = async (data: ContractCreateInput) => {
     if (!uploadedFile) {
-      toast.error("يجب رفع نسخة ممسوحة من العقد الموقّع");
+      toast.error(t("toastSignedRequired"));
       return;
     }
 
@@ -156,10 +167,10 @@ export function NewContractForm() {
         return;
       }
 
-      toast.success(`تم إنشاء العقد ${json.data.contractNumber} بنجاح`);
+      toast.success(t("createSuccess", { number: json.data.contractNumber }));
       router.push("/contracts");
     } catch {
-      toast.error("حدث خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setSubmitting(false);
     }
@@ -174,7 +185,7 @@ export function NewContractForm() {
 
   if (sessionStatus === "loading") {
     return (
-      <div className="mx-auto max-w-2xl space-y-6">
+      <div className="mx-auto w-full max-w-2xl space-y-6 min-w-0">
         <Skeleton className="h-10 w-64" />
         <Skeleton className="h-72 w-full" />
       </div>
@@ -183,16 +194,22 @@ export function NewContractForm() {
 
   if (!sessionHasPermission(session, "contract.create")) {
     return (
-      <div className="mx-auto max-w-2xl space-y-6">
+      <div className="mx-auto w-full max-w-2xl space-y-6 min-w-0">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon-sm" onClick={() => router.push("/contracts")}>
-            <ArrowRight className="h-4 w-4" />
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => router.push("/contracts")}
+          >
+            <BackIcon className="h-4 w-4" />
           </Button>
-          <h1 className="text-xl font-bold tracking-tight">عقد جديد</h1>
+          <h1 className="text-xl font-bold tracking-tight">
+            {t("newContractTitle")}
+          </h1>
         </div>
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            لا تملك صلاحية إنشاء عقد. تواصل مع المسؤول إذا كنت بحاجة للوصول.
+            {t("noCreatePermission")}
           </CardContent>
         </Card>
       </div>
@@ -200,16 +217,18 @@ export function NewContractForm() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="mx-auto w-full max-w-2xl space-y-6 min-w-0">
       {/* Header */}
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon-sm" onClick={() => router.back()}>
-          <ArrowRight className="h-4 w-4" />
+          <BackIcon className="h-4 w-4" />
         </Button>
         <div>
-          <h1 className="text-xl font-bold tracking-tight">عقد جديد</h1>
+          <h1 className="text-xl font-bold tracking-tight">
+            {t("newContractTitle")}
+          </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            إنشاء عقد بيع عام جديد
+            {t("newContractSubtitle")}
           </p>
         </div>
       </div>
@@ -218,13 +237,15 @@ export function NewContractForm() {
         {/* Customer Selection — overflow-visible + z-index so the list is not clipped by Card or covered by cards below */}
         <Card className="relative z-20 overflow-visible">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">العميل</CardTitle>
+            <CardTitle className="text-base">{t("customer")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 overflow-visible">
             {selectedCustomer ? (
               <div className="flex items-center justify-between rounded-lg border p-3 bg-muted/30">
-                <div>
-                  <p className="font-medium">{selectedCustomer.fullName}</p>
+                <div className="min-w-0">
+                  <p className="font-medium truncate">
+                    {selectedCustomer.fullName}
+                  </p>
                   <p className="text-xs text-muted-foreground">
                     {selectedCustomer.code} — {selectedCustomer.nationalId}
                   </p>
@@ -244,9 +265,9 @@ export function NewContractForm() {
             ) : (
               <div ref={customerComboRef} className="relative isolate">
                 <div className="relative">
-                  <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none z-10" />
+                  <Search className="absolute end-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none z-10" />
                   <Input
-                    placeholder="ابحث عن عميل بالاسم أو الرقم الوطني..."
+                    placeholder={t("searchCustomerCombo")}
                     value={customerSearch}
                     onChange={(e) => {
                       setCustomerSearch(e.target.value);
@@ -259,7 +280,7 @@ export function NewContractForm() {
                         setShowCustomerDropdown(false);
                       }
                     }}
-                    className="pr-9"
+                    className="pe-9"
                     autoComplete="off"
                     aria-expanded={showCustomerDropdown}
                     aria-haspopup="listbox"
@@ -272,7 +293,7 @@ export function NewContractForm() {
                   >
                     {customers.length === 0 ? (
                       <div className="px-3 py-4 text-center text-sm text-muted-foreground">
-                        لا توجد نتائج
+                        {t("emptyNoResults")}
                       </div>
                     ) : (
                       customers.map((c) => (
@@ -282,9 +303,11 @@ export function NewContractForm() {
                           role="option"
                           aria-selected={false}
                           onClick={() => selectCustomer(c)}
-                          className="flex w-full flex-col items-stretch gap-0.5 px-3 py-2.5 text-right text-sm transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+                          className="flex w-full flex-col items-stretch gap-0.5 px-3 py-2.5 text-start text-sm transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
                         >
-                          <span className="font-medium leading-snug">{c.fullName}</span>
+                          <span className="font-medium leading-snug">
+                            {c.fullName}
+                          </span>
                           <span className="text-xs text-muted-foreground">
                             {c.code}
                           </span>
@@ -309,7 +332,7 @@ export function NewContractForm() {
               className="gap-1.5"
             >
               <Plus className="h-3.5 w-3.5" />
-              عميل جديد
+              {t("newCustomer")}
             </Button>
           </CardContent>
         </Card>
@@ -317,9 +340,7 @@ export function NewContractForm() {
         {/* Attachment */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">
-              نسخة العقد الموقّع *
-            </CardTitle>
+            <CardTitle className="text-base">{t("signedCopyRequired")}</CardTitle>
           </CardHeader>
           <CardContent>
             {uploadedFile ? (
@@ -330,7 +351,9 @@ export function NewContractForm() {
                     {uploadedFile.name}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {(uploadedFile.size / 1024).toFixed(0)} كيلوبايت
+                    {t("fileSizeKb", {
+                      size: formatInteger(uploadedFile.size / 1024),
+                    })}
                   </p>
                 </div>
                 <Button
@@ -350,12 +373,10 @@ export function NewContractForm() {
                   <Upload className="h-8 w-8 text-muted-foreground" />
                 )}
                 <p className="text-sm text-muted-foreground">
-                  {uploading
-                    ? "جاري الرفع..."
-                    : "اضغط لرفع نسخة ممسوحة من العقد"}
+                  {uploading ? t("uploading") : t("uploadSignedHint")}
                 </p>
                 <p className="text-xs text-muted-foreground/70">
-                  PDF أو صورة أو Word — حد أقصى 10 ميغابايت
+                  {t("uploadFormatsHint")}
                 </p>
                 <input
                   ref={fileInputRef}
@@ -373,12 +394,12 @@ export function NewContractForm() {
         {/* Notes */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">ملاحظات</CardTitle>
+            <CardTitle className="text-base">{t("notes")}</CardTitle>
           </CardHeader>
           <CardContent>
             <Textarea
               {...register("notes")}
-              placeholder="ملاحظات إضافية (اختياري)"
+              placeholder={t("notesOptional")}
               rows={3}
             />
           </CardContent>
@@ -391,11 +412,11 @@ export function NewContractForm() {
             variant="outline"
             onClick={() => router.back()}
           >
-            إلغاء
+            {t("cancel")}
           </Button>
           <Button type="submit" disabled={submitting}>
             {submitting && <Loader2 className="animate-spin" />}
-            إنشاء العقد
+            {t("createContract")}
           </Button>
         </div>
       </form>

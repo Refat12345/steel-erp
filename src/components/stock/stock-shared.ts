@@ -39,60 +39,45 @@ export interface Yard {
 }
 
 interface SegmentMeta {
-  label: string;
   /** Tailwind classes for the schematic map tile. */
   tile: string;
   /** Tailwind classes for a small dot / badge accent. */
   dot: string;
 }
 
-/** Presentation metadata per segment (labels + map colors). */
+/** Presentation metadata per segment (map colors only — labels via enums.stockSegment). */
 export const SEGMENT_META: Record<Segment, SegmentMeta> = {
   GENERAL: {
-    label: "نخب أول عام",
     tile: "border-sky-300 bg-sky-50 text-sky-900",
     dot: "bg-sky-500",
   },
   GOVERNORATES: {
-    label: "نخب أول محافظات",
     tile: "border-amber-300 bg-amber-50 text-amber-900",
     dot: "bg-amber-500",
   },
   ISOLATION: {
-    label: "نخب ثاني (عزل)",
     tile: "border-rose-300 bg-rose-50 text-rose-900",
     dot: "bg-rose-500",
   },
   SHORTBAR: {
-    label: "قصائر (بالطن)",
     tile: "border-emerald-300 bg-emerald-50 text-emerald-900",
     dot: "bg-emerald-500",
   },
 };
 
-/** Client mirror of the server's segment → unit derivation (display only). */
-export function segmentUnitLabel(segment: Segment): string {
-  return segment === "SHORTBAR" ? "بالطن" : "بالربطات";
-}
-
-/** Client mirror of the server's segment → grade derivation (display only). */
-export function segmentGradeLabel(segment: Segment): string {
-  if (segment === "SHORTBAR") return "بدون نخب";
-  if (segment === "ISOLATION") return "نخب ثاني";
-  return "نخب أول";
-}
+export const SEGMENT_ORDER: Segment[] = [
+  "GENERAL",
+  "GOVERNORATES",
+  "ISOLATION",
+  "SHORTBAR",
+];
 
 export type StockUnit = "BUNDLE" | "TON";
 
-/** Singular counting-unit label for a quantity. */
-export function unitLabel(unit: StockUnit): string {
-  return unit === "TON" ? "طن" : "ربطة";
-}
-
 /**
  * Client mirror of the server's segment → tracked-units derivation. Rebar
- * (المبروم) tracks BOTH bundles and tons in parallel; short-bar (قصائر) tracks
- * tons only. Keep in sync with `trackedUnits` in `stock.service.ts`.
+ * tracks BOTH bundles and tons in parallel; short-bar tracks tons only.
+ * Keep in sync with `trackedUnits` in `stock.service.ts`.
  */
 export function segmentTrackedUnits(segment: Segment): StockUnit[] {
   return segment === "SHORTBAR" ? ["TON"] : ["BUNDLE", "TON"];
@@ -119,10 +104,7 @@ export type ShiftValue = "MORNING" | "EVENING";
 
 export const SHIFT_GRACE_MINUTES = 30;
 
-export const SHIFT_LABEL: Record<ShiftValue, string> = {
-  MORNING: "الوردية الصباحية (8ص–8م)",
-  EVENING: "الوردية المسائية (8م–8ص)",
-};
+export const SHIFT_VALUES: ShiftValue[] = ["MORNING", "EVENING"];
 
 /** Shift a timestamp naturally falls in: 08:00–20:00 MORNING, else EVENING. */
 export function naturalShiftOf(d: Date): ShiftValue {
@@ -148,17 +130,11 @@ export type MovementType =
   | "LOAD_OUT"
   | "ADJUSTMENT";
 
-export const MOVEMENT_TYPE_LABEL: Record<MovementType, string> = {
-  OPENING_BALANCE: "رصيد افتتاحي",
-  PRODUCTION_IN: "دخول إنتاج",
-  TRANSFER_OUT: "ترحيل خارج",
-  TRANSFER_IN: "ترحيل داخل",
-  LOAD_OUT: "خصم تحميل",
-  ADJUSTMENT: "تصحيح جرد",
-};
-
-export function gradeLabel(grade: "FIRST" | "SECOND" | null): string {
-  if (grade === "FIRST") return "نخب أول";
-  if (grade === "SECOND") return "نخب ثاني";
-  return "—";
-}
+export const MOVEMENT_TYPES: MovementType[] = [
+  "OPENING_BALANCE",
+  "PRODUCTION_IN",
+  "TRANSFER_OUT",
+  "TRANSFER_IN",
+  "LOAD_OUT",
+  "ADJUSTMENT",
+];

@@ -3,6 +3,7 @@
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  ArrowLeft,
   ArrowRight,
   AlertTriangle,
   ExternalLink,
@@ -37,6 +39,8 @@ import {
 } from "lucide-react";
 import { sessionHasPermission } from "@/lib/client-permissions";
 import { formatDate } from "@/lib/date-format";
+import { formatAmount, formatDecimal } from "@/lib/number-format";
+import { getTextDirection, type Locale } from "@/i18n/config";
 
 interface CatalogSize {
   id: number;
@@ -91,6 +95,36 @@ const SHORTBAR_SCRAP_CODES = new Set([
   "scrap",
 ]);
 
+const KIND_VALUES = [
+  "REBAR",
+  "SHORTBAR_1_4M",
+  "SHORTBAR_4_12M",
+  "SCRAP",
+  "BILLET_WIRE",
+  "REBAR_UNDER_70CM",
+  "BILLET_SCRAP_10M",
+  "SCRAP_50CM_1M",
+] as const;
+
+const STATUS_VALUES = [
+  "draft",
+  "approved",
+  "in_progress",
+  "completed",
+  "cancelled",
+] as const;
+
+const STATUS_VARIANTS: Record<
+  string,
+  "default" | "secondary" | "destructive"
+> = {
+  draft: "secondary",
+  approved: "default",
+  in_progress: "default",
+  completed: "secondary",
+  cancelled: "destructive",
+};
+
 function sizesForKind(kind: string, sizes: CatalogSize[]): CatalogSize[] {
   if (kind === "REBAR") {
     return sizes.filter(
@@ -121,63 +155,17 @@ function sizesForKind(kind: string, sizes: CatalogSize[]): CatalogSize[] {
   return [];
 }
 
-const kindLabels: Record<string, string> = {
-  REBAR: "مبروم",
-  SHORTBAR_1_4M: "قصائر 1–4 م",
-  SHORTBAR_4_12M: "قصائر 4–12 م",
-  SCRAP: "خردة",
-  BILLET_WIRE: "أسلاك تربيط",
-  REBAR_UNDER_70CM: "مبروم أقل من 70 سم",
-  BILLET_SCRAP_10M: "بيلت خردة 10m",
-  SCRAP_50CM_1M: "سكراب من 50 سم إلى 1 م",
-};
-
-const gradeLabels: Record<string, string> = {
-  FIRST: "نخب أول",
-  SECOND: "نخب ثاني",
-};
-
-const settlementLabels: Record<string, string> = {
-  CREDIT: "آجل",
-  PAYMENT_PLAN: "نظام دفعات",
-};
-
-const statusMap: Record<
-  string,
-  { label: string; variant: "default" | "secondary" | "destructive" }
-> = {
-  draft: { label: "مسودة", variant: "secondary" },
-  approved: { label: "معتمد", variant: "default" },
-  in_progress: { label: "قيد التنفيذ", variant: "default" },
-  completed: { label: "مكتمل", variant: "secondary" },
-  cancelled: { label: "ملغى", variant: "destructive" },
-};
-
-function formatKindDisplay(kind: string, grade: string | null): string {
-  const k = kindLabels[kind] ?? kind;
-  if (!grade) return k;
-  const g = gradeLabels[grade] ?? grade;
-  return `${k} (${g})`;
-}
-
-function formatQtyTons(v: string | number): string {
-  const n = typeof v === "string" ? parseFloat(v) : v;
-  if (Number.isNaN(n)) return "—";
-  return n.toLocaleString("ar-SA", { maximumFractionDigits: 3 });
-}
-
-function formatMoney(v: string | number): string {
-  const n = typeof v === "string" ? parseFloat(v) : v;
-  if (Number.isNaN(n)) return "—";
-  return n.toLocaleString("ar-SA", { maximumFractionDigits: 2 });
-}
-
 export default function SalesOrderDetailPage({
   params,
 }: {
   params: Promise<{ orderNumber: string }>;
 }) {
   const { orderNumber } = use(params);
+  const t = useTranslations("salesOrders");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+  const BackIcon = dir === "rtl" ? ArrowRight : ArrowLeft;
   const router = useRouter();
   const { data: session, status: sessionStatus } = useSession();
 
@@ -194,6 +182,40 @@ export default function SalesOrderDetailPage({
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelSaving, setCancelSaving] = useState(false);
+
+  const formatKindDisplay = useCallback(
+    (kind: string, grade: string | null): string => {
+      const k = (KIND_VALUES as readonly string[]).includes(kind)
+        ? tEnums(`materialKind.${kind as (typeof KIND_VALUES)[number]}`)
+        : kind;
+      if (!grade) return k;
+      const g =
+        grade === "FIRST" || grade === "SECOND"
+          ? tEnums(`grade.${grade}`)
+          : grade;
+      return t("kindWithGrade", { kind: k, grade: g });
+    },
+    [t, tEnums],
+  );
+
+  const statusLabel = useCallback(
+    (status: string): string => {
+      return (STATUS_VALUES as readonly string[]).includes(status)
+        ? tEnums(`salesOrderStatus.${status as (typeof STATUS_VALUES)[number]}`)
+        : status;
+    },
+    [tEnums],
+  );
+
+  const settlementLabel = useCallback(
+    (mode: string): string => {
+      if (mode === "CREDIT" || mode === "PAYMENT_PLAN") {
+        return tEnums(`settlementMode.${mode}`);
+      }
+      return mode;
+    },
+    [tEnums],
+  );
 
   const loadOrder = useCallback(async () => {
     const res = await fetch(`/api/sales-orders/${encodeURIComponent(orderNumber)}`);
@@ -237,7 +259,7 @@ export default function SalesOrderDetailPage({
       next[row.id] = existing ? String(existing.pricePerTon) : "";
     }
     setPriceInputs(next);
-  }, [order?.orderNumber, order?.kind, order?.items, catalogSizes]);
+  }, [order, catalogSizes]);
 
   const pricingSizes = useMemo(() => {
     if (!order) return [];
@@ -275,7 +297,7 @@ export default function SalesOrderDetailPage({
       .filter((x) => !Number.isNaN(x.pricePerTon) && x.pricePerTon > 0);
 
     if (items.length === 0) {
-      toast.error("أدخل سعراً صالحاً لبند واحد على الأقل");
+      toast.error(t("toastEnterValidPrice"));
       return;
     }
 
@@ -291,13 +313,13 @@ export default function SalesOrderDetailPage({
       );
       const json = await res.json();
       if (json.success) {
-        toast.success("تم حفظ أسعار البنود");
+        toast.success(t("toastPricesSaved"));
         await loadOrder();
       } else {
-        toast.error(json.error ?? "تعذر حفظ الأسعار");
+        toast.error(json.error ?? t("toastErrorSavePrices"));
       }
     } catch {
-      toast.error("خطأ في الاتصال");
+      toast.error(t("toastErrorConnection"));
     } finally {
       setSavingPrices(false);
     }
@@ -305,7 +327,7 @@ export default function SalesOrderDetailPage({
 
   const submitApprove = async () => {
     if (!approveReason.trim()) {
-      toast.error("أدخل سبب الاعتماد");
+      toast.error(t("toastEnterApproveReason"));
       return;
     }
     setApproveSaving(true);
@@ -323,15 +345,15 @@ export default function SalesOrderDetailPage({
       );
       const json = await res.json();
       if (json.success) {
-        toast.success("تم اعتماد أمر البيع");
+        toast.success(t("toastApproved"));
         setApproveOpen(false);
         setApproveReason("");
         await loadOrder();
       } else {
-        toast.error(json.error ?? "تعذر الاعتماد");
+        toast.error(json.error ?? t("toastErrorApprove"));
       }
     } catch {
-      toast.error("خطأ في الاتصال");
+      toast.error(t("toastErrorConnection"));
     } finally {
       setApproveSaving(false);
     }
@@ -339,7 +361,7 @@ export default function SalesOrderDetailPage({
 
   const submitCancel = async () => {
     if (!cancelReason.trim()) {
-      toast.error("يجب إدخال سبب الإلغاء");
+      toast.error(t("toastEnterCancelReason"));
       return;
     }
     setCancelSaving(true);
@@ -357,15 +379,15 @@ export default function SalesOrderDetailPage({
       );
       const json = await res.json();
       if (json.success) {
-        toast.success("تم إلغاء أمر البيع");
+        toast.success(t("toastCancelled"));
         setCancelOpen(false);
         setCancelReason("");
         await loadOrder();
       } else {
-        toast.error(json.error ?? "تعذر الإلغاء");
+        toast.error(json.error ?? t("toastErrorCancel"));
       }
     } catch {
-      toast.error("خطأ في الاتصال");
+      toast.error(t("toastErrorConnection"));
     } finally {
       setCancelSaving(false);
     }
@@ -385,18 +407,17 @@ export default function SalesOrderDetailPage({
     return (
       <div className="flex flex-col items-center justify-center h-64 gap-4">
         <AlertTriangle className="h-12 w-12 text-muted-foreground" />
-        <p className="text-muted-foreground">أمر البيع غير موجود</p>
+        <p className="text-muted-foreground">{t("notFound")}</p>
         <Button variant="outline" onClick={() => router.push("/sales-orders")}>
-          العودة لأوامر البيع
+          {t("backToList")}
         </Button>
       </div>
     );
   }
 
-  const st = statusMap[order.status] ?? {
-    label: order.status,
-    variant: "secondary" as const,
-  };
+  const stVariant = STATUS_VARIANTS[order.status] ?? "secondary";
+  const qtyFormatted = formatDecimal(order.totalQtyTons, 3);
+  const toleranceFormatted = formatDecimal(order.toleranceValue, 3);
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -407,7 +428,7 @@ export default function SalesOrderDetailPage({
             size="icon-sm"
             onClick={() => router.push("/sales-orders")}
           >
-            <ArrowRight className="h-4 w-4" />
+            <BackIcon className="h-4 w-4" />
           </Button>
           <div>
             <h1 className="text-xl font-bold tracking-tight font-mono">
@@ -419,7 +440,7 @@ export default function SalesOrderDetailPage({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={st.variant}>{st.label}</Badge>
+          <Badge variant={stVariant}>{statusLabel(order.status)}</Badge>
           {canApprove && (
             <Button
               size="sm"
@@ -427,7 +448,7 @@ export default function SalesOrderDetailPage({
               onClick={() => setApproveOpen(true)}
             >
               <CheckCircle2 className="h-3.5 w-3.5" />
-              اعتماد
+              {t("approve")}
             </Button>
           )}
           {canCancel && (
@@ -438,7 +459,7 @@ export default function SalesOrderDetailPage({
               onClick={() => setCancelOpen(true)}
             >
               <Ban className="h-3.5 w-3.5" />
-              إلغاء
+              {t("cancel")}
             </Button>
           )}
         </div>
@@ -446,7 +467,9 @@ export default function SalesOrderDetailPage({
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">العقد والعميل</CardTitle>
+          <CardTitle className="text-base">
+            {t("sectionContractCustomer")}
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -458,9 +481,9 @@ export default function SalesOrderDetailPage({
               }
             >
               {order.contractNumber}
-              <ExternalLink className="h-3.5 w-3.5 mr-1" />
+              <ExternalLink className="h-3.5 w-3.5 ms-1" />
             </Button>
-            <span className="text-muted-foreground">—</span>
+            <span className="text-muted-foreground">{t("emDash")}</span>
             <span className="font-medium">{order.contract.customer.fullName}</span>
           </div>
           <p className="text-sm text-muted-foreground">
@@ -471,60 +494,60 @@ export default function SalesOrderDetailPage({
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">تفاصيل الأمر</CardTitle>
+          <CardTitle className="text-base">{t("sectionDetails")}</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-2 text-sm">
           <div>
-            <span className="text-muted-foreground">نمط التسوية</span>
+            <span className="text-muted-foreground">{t("settlementMode")}</span>
             <p className="font-medium">
-              {settlementLabels[order.settlementMode] ?? order.settlementMode}
+              {settlementLabel(order.settlementMode)}
             </p>
           </div>
           {order.settlementMode === "CREDIT" && order.paymentDeadlineDays != null && (
             <div>
-              <span className="text-muted-foreground">مهلة السداد</span>
+              <span className="text-muted-foreground">{t("paymentDeadline")}</span>
               <p className="font-medium tabular-nums">
-                {order.paymentDeadlineDays} يوم
+                {t("daysValue", { days: order.paymentDeadlineDays })}
               </p>
             </div>
           )}
           <div>
-            <span className="text-muted-foreground">الكمية الإجمالية</span>
-            <p className="font-medium tabular-nums">
-              {formatQtyTons(order.totalQtyTons)} طن
+            <span className="text-muted-foreground">{t("totalQty")}</span>
+            <p className="font-medium tabular-nums weight-value">
+              {t("tonsValue", { value: qtyFormatted })}
             </p>
           </div>
           <div>
-            <span className="text-muted-foreground">السماحية</span>
-            <p className="font-medium">
+            <span className="text-muted-foreground">{t("tolerance")}</span>
+            <p className="font-medium weight-value">
               {order.toleranceType === "percentage"
-                ? `${formatQtyTons(order.toleranceValue)} %`
-                : `${formatQtyTons(order.toleranceValue)} طن`}
+                ? t("tolerancePctValue", { value: toleranceFormatted })
+                : t("toleranceTonsValue", { value: toleranceFormatted })}
             </p>
           </div>
           {order.specialRatioPct != null && order.kind === "REBAR" && (
             <div>
-              <span className="text-muted-foreground">النسبة الخاصة 8+10مم</span>
-              <p className="font-medium tabular-nums">
-                {formatMoney(order.specialRatioPct)} %
+              <span className="text-muted-foreground">
+                {t("specialRatioLabel")}
+              </span>
+              <p className="font-medium tabular-nums weight-value">
+                {t("percentValue", {
+                  value: formatAmount(order.specialRatioPct),
+                })}
               </p>
             </div>
           )}
           <div>
-            <span className="text-muted-foreground">تاريخ الأمر</span>
-            <p className="font-medium">
-              {formatDate(order.orderDate)}
-            </p>
+            <span className="text-muted-foreground">{t("orderDate")}</span>
+            <p className="font-medium">{formatDate(order.orderDate)}</p>
           </div>
           <div>
-            <span className="text-muted-foreground">تاريخ التسليم المتوقع</span>
-            <p className="font-medium">
-              {formatDate(order.deliveryDate)}
-            </p>
+            <span className="text-muted-foreground">{t("deliveryDate")}</span>
+            <p className="font-medium">{formatDate(order.deliveryDate)}</p>
           </div>
           {order.notes && (
             <div className="sm:col-span-2">
-              <span className="text-muted-foreground">ملاحظات</span>
+              <span className="text-muted-foreground">{t("notes")}</span>
               <p className="font-medium whitespace-pre-wrap">{order.notes}</p>
             </div>
           )}
@@ -533,7 +556,7 @@ export default function SalesOrderDetailPage({
 
       <Card>
         <CardHeader className="pb-3 flex flex-row items-center justify-between gap-2">
-          <CardTitle className="text-base">بنود الأسعار</CardTitle>
+          <CardTitle className="text-base">{t("sectionPriceItems")}</CardTitle>
           {canEditPrices && (
             <Button
               size="sm"
@@ -542,13 +565,13 @@ export default function SalesOrderDetailPage({
               className="gap-2"
             >
               {savingPrices && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              حفظ الأسعار
+              {t("savePrices")}
             </Button>
           )}
         </CardHeader>
         <CardContent className="space-y-4">
           {order.items.length === 0 && !canEditPrices && (
-            <p className="text-sm text-muted-foreground">لا توجد أسعار مثبتة بعد</p>
+            <p className="text-sm text-muted-foreground">{t("noPricesYet")}</p>
           )}
 
           {(order.items.length > 0 || canEditPrices) && (
@@ -556,9 +579,9 @@ export default function SalesOrderDetailPage({
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>القياس</TableHead>
-                    <TableHead className="text-left w-40">
-                      السعر للطن (ل.س)
+                    <TableHead>{t("columns.size")}</TableHead>
+                    <TableHead className="text-start w-40">
+                      {t("columns.pricePerTon")}
                     </TableHead>
                   </TableRow>
                 </TableHeader>
@@ -574,7 +597,7 @@ export default function SalesOrderDetailPage({
                               type="number"
                               min={0}
                               step="any"
-                              className="tabular-nums"
+                              className="tabular-nums financial-value"
                               value={priceInputs[sz.id] ?? ""}
                               onChange={(e) =>
                                 setPriceInputs((prev) => ({
@@ -591,7 +614,7 @@ export default function SalesOrderDetailPage({
                         .sort((a, b) =>
                           a.size.displayName.localeCompare(
                             b.size.displayName,
-                            "ar",
+                            locale,
                           ),
                         )
                         .map((row) => (
@@ -599,8 +622,8 @@ export default function SalesOrderDetailPage({
                             <TableCell className="font-medium">
                               {row.size.displayName}
                             </TableCell>
-                            <TableCell className="tabular-nums">
-                              {formatMoney(row.pricePerTon)}
+                            <TableCell className="tabular-nums financial-value">
+                              {formatAmount(row.pricePerTon)}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -611,52 +634,48 @@ export default function SalesOrderDetailPage({
 
           {!canEditPrices && order.items.length > 0 && (
             <p className="text-xs text-muted-foreground">
-              عرض فقط — لا يمكن تعديل الأسعار في هذه الحالة أو لعدم امتلاكك الصلاحية
+              {t("pricesReadOnlyHint")}
             </p>
           )}
         </CardContent>
       </Card>
 
       <Dialog open={approveOpen} onOpenChange={setApproveOpen}>
-        <DialogContent>
+        <DialogContent dir={dir}>
           <DialogHeader>
-            <DialogTitle>اعتماد أمر البيع</DialogTitle>
-            <DialogDescription>
-              سيتم تغيير الحالة إلى «معتمد». أدخل سبباً موجزاً للسجل.
-            </DialogDescription>
+            <DialogTitle>{t("approveTitle")}</DialogTitle>
+            <DialogDescription>{t("approveDescription")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="approveReason">السبب</Label>
+            <Label htmlFor="approveReason">{t("reason")}</Label>
             <Textarea
               id="approveReason"
               value={approveReason}
               onChange={(e) => setApproveReason(e.target.value)}
-              placeholder="مثال: مطابقة للعقد"
+              placeholder={t("approveReasonPlaceholder")}
               rows={3}
             />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setApproveOpen(false)}>
-              إلغاء
+              {t("cancel")}
             </Button>
             <Button onClick={submitApprove} disabled={approveSaving} className="gap-2">
               {approveSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-              اعتماد
+              {t("approve")}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
-        <DialogContent>
+        <DialogContent dir={dir}>
           <DialogHeader>
-            <DialogTitle>إلغاء أمر البيع</DialogTitle>
-            <DialogDescription>
-              لا يمكن التراجع عن الإلغاء. أدخل السبب للسجل.
-            </DialogDescription>
+            <DialogTitle>{t("cancelTitle")}</DialogTitle>
+            <DialogDescription>{t("cancelDescription")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="cancelReason">سبب الإلغاء *</Label>
+            <Label htmlFor="cancelReason">{t("cancelReasonRequired")}</Label>
             <Textarea
               id="cancelReason"
               value={cancelReason}
@@ -666,7 +685,7 @@ export default function SalesOrderDetailPage({
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCancelOpen(false)}>
-              رجوع
+              {t("back")}
             </Button>
             <Button
               variant="destructive"
@@ -675,7 +694,7 @@ export default function SalesOrderDetailPage({
               className="gap-2"
             >
               {cancelSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-              تأكيد الإلغاء
+              {t("confirmCancel")}
             </Button>
           </DialogFooter>
         </DialogContent>
