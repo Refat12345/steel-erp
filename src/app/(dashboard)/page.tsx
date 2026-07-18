@@ -76,6 +76,7 @@ export default async function DashboardPage() {
 
   const dateStr = formatDate(new Date());
   const tBrand = await getTranslations("brand");
+  const tDashboard = await getTranslations("dashboard");
   const userName = session?.user.name ?? "";
 
   return (
@@ -135,7 +136,7 @@ export default async function DashboardPage() {
       <div className="animate-in fade-in-0 duration-500 delay-75 flex items-center gap-3">
         <LayoutDashboard className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-          لوحة المؤشرات
+          {tDashboard("title")}
         </span>
         <div className="h-px flex-1 bg-border" />
       </div>

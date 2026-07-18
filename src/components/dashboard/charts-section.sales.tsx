@@ -20,6 +20,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   BarChart,
   Bar,
@@ -37,7 +38,6 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  TrendingUp,
   Users,
   FileText,
   ShoppingCart,
@@ -146,36 +146,42 @@ function AmountTooltip({ active, payload, label }: { active?: boolean; payload?:
 }
 
 function CountTooltip({ active, payload, label }: { active?: boolean; payload?: {value: number}[]; label?: string }) {
+  const t = useTranslations("dashboard");
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-md text-xs">
       <p className="font-semibold text-foreground mb-1">{label}</p>
       <p className="text-muted-foreground">
-        <span className="font-bold text-primary">{payload[0].value}</span> أمر
+        <span className="font-bold text-primary">{payload[0].value}</span>{" "}
+        {t("units.order")}
       </p>
     </div>
   );
 }
 
 function TonsTooltip({ active, payload, label }: { active?: boolean; payload?: {value: number}[]; label?: string }) {
+  const t = useTranslations("dashboard");
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-md text-xs">
       <p className="font-semibold text-foreground mb-1">{label}</p>
       <p className="text-muted-foreground">
-        <span className="font-bold text-primary">{formatCurrency(payload[0].value)}</span> طن
+        <span className="font-bold text-primary">{formatCurrency(payload[0].value)}</span>{" "}
+        {t("units.tons")}
       </p>
     </div>
   );
 }
 
 function PieTooltip({ active, payload }: { active?: boolean; payload?: {name: string; value: number}[] }) {
+  const t = useTranslations("dashboard");
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-md text-xs">
       <p className="font-semibold text-foreground">{payload[0].name}</p>
       <p className="text-muted-foreground">
-        <span className="font-bold text-primary">{payload[0].value}</span> أمر
+        <span className="font-bold text-primary">{payload[0].value}</span>{" "}
+        {t("units.order")}
       </p>
     </div>
   );
@@ -247,6 +253,7 @@ function ChartSkeleton({ h = 260 }: { h?: number }) {
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 export function ChartsSection() {
+  const t = useTranslations("dashboard");
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -262,36 +269,40 @@ export function ChartsSection() {
   const kpis = stats?.kpis;
   const kpiCards = [
     {
-      title: "إجمالي الدفعات المحصّلة",
+      title: t("kpis.totalPayments"),
       value: kpis ? formatAmount(kpis.totalPaymentsAmount) : "—",
-      sub: kpis ? `${formatCurrency(kpis.totalPaymentsAmount)} — كامل الفترة` : "كامل الفترة",
+      sub: kpis
+        ? t("kpis.totalPaymentsSub", {
+            amount: formatCurrency(kpis.totalPaymentsAmount),
+          })
+        : t("kpis.fullPeriod"),
       icon: Banknote,
       color: "oklch(0.390 0.130 232)",
       colorBg: "oklch(0.390 0.130 232 / 12%)",
       colorRing: "oklch(0.390 0.130 232 / 25%)",
     },
     {
-      title: "أوامر البيع النشطة",
+      title: t("kpis.activeOrders"),
       value: kpis ? String(kpis.activeOrders) : "—",
-      sub: "معتمدة + قيد التنفيذ",
+      sub: t("kpis.activeOrdersSub"),
       icon: ShoppingCart,
       color: "oklch(0.720 0.150 65)",
       colorBg: "oklch(0.720 0.150 65 / 14%)",
       colorRing: "oklch(0.720 0.150 65 / 28%)",
     },
     {
-      title: "العقود النشطة",
+      title: t("kpis.activeContracts"),
       value: kpis ? String(kpis.activeContracts) : "—",
-      sub: "عقود سارية المفعول",
+      sub: t("kpis.activeContractsSub"),
       icon: FileText,
       color: "oklch(0.630 0.155 152)",
       colorBg: "oklch(0.630 0.155 152 / 12%)",
       colorRing: "oklch(0.630 0.155 152 / 25%)",
     },
     {
-      title: "إجمالي العملاء",
+      title: t("kpis.totalCustomers"),
       value: kpis ? String(kpis.totalCustomers) : "—",
-      sub: "عملاء نشطون في النظام",
+      sub: t("kpis.totalCustomersSub"),
       icon: Users,
       color: "oklch(0.610 0.210 0)",
       colorBg: "oklch(0.610 0.210 0 / 12%)",
@@ -311,20 +322,20 @@ export function ChartsSection() {
       </div>
 
       {/* ── Chart Row 1: Payments Timeline + Orders by Status ─────────── */}
-      <SectionLabel icon={Activity} label="الدفعات وأوامر البيع" />
+      <SectionLabel icon={Activity} label={t("sections.paymentsOrders")} />
 
       <div className="grid gap-6 lg:grid-cols-5">
         {/* Payments area chart — wider */}
         <Card className="col-span-3 shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold">الدفعات المحصّلة — آخر 30 يوم</CardTitle>
-            <p className="text-xs text-muted-foreground">المبلغ اليومي بالدولار</p>
+            <CardTitle className="text-sm font-semibold">{t("charts.paymentsTimeline")}</CardTitle>
+            <p className="text-xs text-muted-foreground">{t("charts.paymentsTimelineSub")}</p>
           </CardHeader>
           <CardContent>
             {loading ? (
               <ChartSkeleton />
             ) : !stats?.paymentsTimeline.length ? (
-              <div className="flex h-52 items-center justify-center text-xs text-muted-foreground">لا توجد دفعات في آخر 30 يوم</div>
+              <div className="flex h-52 items-center justify-center text-xs text-muted-foreground">{t("empty.noPayments30d")}</div>
             ) : (
               <ResponsiveContainer width="100%" height={240}>
                 <AreaChart data={stats.paymentsTimeline} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -348,8 +359,8 @@ export function ChartsSection() {
         {/* Orders by status donut — narrower */}
         <Card className="col-span-2 shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold">أوامر البيع حسب الحالة</CardTitle>
-            <p className="text-xs text-muted-foreground">توزيع جميع الأوامر</p>
+            <CardTitle className="text-sm font-semibold">{t("charts.ordersByStatus")}</CardTitle>
+            <p className="text-xs text-muted-foreground">{t("charts.ordersByStatusSub")}</p>
           </CardHeader>
           <CardContent className="flex flex-col items-center">
             {loading ? (
@@ -391,14 +402,14 @@ export function ChartsSection() {
       </div>
 
       {/* ── Chart Row 2: Tons by Kind + Top Customers ─────────────────── */}
-      <SectionLabel icon={BarChart2} label="البضاعة والعملاء" />
+      <SectionLabel icon={BarChart2} label={t("sections.goodsCustomers")} />
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Total tons by kind */}
         <Card className="shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold">الكميات المتعاقد عليها بالطن</CardTitle>
-            <p className="text-xs text-muted-foreground">أوامر معتمدة + قيد التنفيذ + مكتملة</p>
+            <CardTitle className="text-sm font-semibold">{t("charts.contractedTons")}</CardTitle>
+            <p className="text-xs text-muted-foreground">{t("charts.contractedTonsSub")}</p>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -428,14 +439,14 @@ export function ChartsSection() {
         {/* Top 5 customers by payment */}
         <Card className="shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold">أكبر 5 عملاء دفعاً</CardTitle>
-            <p className="text-xs text-muted-foreground">إجمالي الدفعات المحصّلة بالدولار</p>
+            <CardTitle className="text-sm font-semibold">{t("charts.topPayingCustomers")}</CardTitle>
+            <p className="text-xs text-muted-foreground">{t("charts.topPayingCustomersSub")}</p>
           </CardHeader>
           <CardContent>
             {loading ? (
               <ChartSkeleton />
             ) : !stats?.topCustomers.length ? (
-              <div className="flex h-52 items-center justify-center text-xs text-muted-foreground">لا توجد بيانات دفعات</div>
+              <div className="flex h-52 items-center justify-center text-xs text-muted-foreground">{t("empty.noPaymentData")}</div>
             ) : (
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart
@@ -463,14 +474,14 @@ export function ChartsSection() {
       </div>
 
       {/* ── Chart Row 3: Orders by Kind + Payment Methods ─────────────── */}
-      <SectionLabel icon={PieIcon} label="توزيع الأنواع وطرق الدفع" />
+      <SectionLabel icon={PieIcon} label={t("sections.kindsPayments")} />
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Orders count by kind */}
         <Card className="shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold">عدد أوامر البيع حسب النوع</CardTitle>
-            <p className="text-xs text-muted-foreground">جميع الأوامر في النظام</p>
+            <CardTitle className="text-sm font-semibold">{t("charts.ordersByKind")}</CardTitle>
+            <p className="text-xs text-muted-foreground">{t("charts.ordersByKindSub")}</p>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -496,14 +507,14 @@ export function ChartsSection() {
         {/* Payment method breakdown */}
         <Card className="shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold">الدفعات حسب طريقة السداد</CardTitle>
-            <p className="text-xs text-muted-foreground">إجمالي المبالغ بالدولار</p>
+            <CardTitle className="text-sm font-semibold">{t("charts.paymentsByMethod")}</CardTitle>
+            <p className="text-xs text-muted-foreground">{t("charts.paymentsByMethodSub")}</p>
           </CardHeader>
           <CardContent className="flex flex-col items-center">
             {loading ? (
               <ChartSkeleton h={220} />
             ) : !stats?.paymentsByMethod.length ? (
-              <div className="flex h-52 items-center justify-center text-xs text-muted-foreground">لا توجد دفعات</div>
+              <div className="flex h-52 items-center justify-center text-xs text-muted-foreground">{t("empty.noPayments")}</div>
             ) : (
               <>
                 <ResponsiveContainer width="100%" height={170}>
@@ -536,7 +547,9 @@ export function ChartsSection() {
                       <div className="flex items-center gap-2">
                         <span className="h-2 w-2 rounded-full shrink-0" style={{ background: METHOD_COLORS[m.method] ?? "#94a3b8" }} />
                         <span className="text-muted-foreground">{m.label}</span>
-                        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{m.count} دفعة</span>
+                        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          {t("paymentCount", { count: m.count })}
+                        </span>
                       </div>
                       <span className="font-semibold tabular-nums">{formatCurrency(m.total)} $</span>
                     </div>
