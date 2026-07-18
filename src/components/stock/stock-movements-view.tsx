@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
   Table,
@@ -28,10 +29,11 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatDecimal } from "@/lib/number-format";
+import { formatDateTime } from "@/lib/date-format";
+import { getTextDirection, type Locale } from "@/i18n/config";
 import {
-  MOVEMENT_TYPE_LABEL,
-  gradeLabel,
-  unitLabel,
+  MOVEMENT_TYPES,
   type MovementType,
   type Segment,
   type StockUnit,
@@ -74,21 +76,16 @@ interface Movement {
 }
 
 function fmt(n: number): string {
-  return n.toLocaleString("en-US", { maximumFractionDigits: 3 });
-}
-
-function formatDateTime(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleString("ar-SY", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatDecimal(n, 3);
 }
 
 export function StockMovementsView() {
+  const t = useTranslations("stock");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+  const isRtl = dir === "rtl";
+
   const [balances, setBalances] = useState<LocationBalance[]>([]);
   const [balancesLoading, setBalancesLoading] = useState(true);
 
@@ -106,13 +103,13 @@ export function StockMovementsView() {
       const res = await fetch("/api/stock/balances");
       const json = await res.json();
       if (json.success) setBalances(json.data as LocationBalance[]);
-      else toast.error(json.error || "خطأ في جلب الأرصدة");
+      else toast.error(json.error || t("errorLoadBalances"));
     } catch {
-      toast.error("خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setBalancesLoading(false);
     }
-  }, []);
+  }, [t]);
 
   const fetchMovements = useCallback(async () => {
     setMovLoading(true);
@@ -128,14 +125,14 @@ export function StockMovementsView() {
         setMovements(json.data as Movement[]);
         setTotal(json.total as number);
       } else {
-        toast.error(json.error || "خطأ في جلب الحركات");
+        toast.error(json.error || t("errorLoadMovements"));
       }
     } catch {
-      toast.error("خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setMovLoading(false);
     }
-  }, [locationFilter, typeFilter, page]);
+  }, [locationFilter, typeFilter, page, t]);
 
   useEffect(() => {
     void fetchBalances();
@@ -154,19 +151,24 @@ export function StockMovementsView() {
 
   // Base UI's Select shows the raw value in the trigger unless items provided.
   const locationFilterItems = [
-    { value: "", label: "كل المواقع" },
+    { value: "", label: t("allLocations") },
     ...balances.map((b) => ({
       value: String(b.locationId),
       label: b.nameAr,
     })),
   ];
   const typeFilterItems = [
-    { value: "", label: "كل الأنواع" },
-    ...(Object.keys(MOVEMENT_TYPE_LABEL) as MovementType[]).map((t) => ({
-      value: t,
-      label: MOVEMENT_TYPE_LABEL[t],
+    { value: "", label: t("allTypes") },
+    ...MOVEMENT_TYPES.map((type) => ({
+      value: type,
+      label: tEnums(`stockMovementType.${type}`),
     })),
   ];
+
+  function gradeLabel(grade: "FIRST" | "SECOND" | null): string {
+    if (grade === "FIRST" || grade === "SECOND") return tEnums(`grade.${grade}`);
+    return t("emDash");
+  }
 
   return (
     <div className="space-y-6">
@@ -175,7 +177,7 @@ export function StockMovementsView() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Boxes className="h-4 w-4" />
-            الأرصدة الحالية
+            {t("currentBalances")}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -183,17 +185,17 @@ export function StockMovementsView() {
             <Skeleton className="h-40 w-full" />
           ) : nonZero.length === 0 ? (
             <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-              لا توجد أرصدة بعد — سجّل دخول إنتاج أو رصيداً افتتاحياً
+              {t("noBalancesYet")}
             </div>
           ) : (
             <div className="rounded-lg border overflow-x-auto">
               <Table className="min-w-[640px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-start">الموقع</TableHead>
-                    <TableHead className="text-start">الساحة</TableHead>
-                    <TableHead className="text-start">التفصيل</TableHead>
-                    <TableHead className="w-32 text-center">الإجمالي</TableHead>
+                    <TableHead className="text-start">{t("colLocation")}</TableHead>
+                    <TableHead className="text-start">{t("colYard")}</TableHead>
+                    <TableHead className="text-start">{t("colDetail")}</TableHead>
+                    <TableHead className="w-32 text-center">{t("colTotal")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -207,24 +209,29 @@ export function StockMovementsView() {
                       </TableCell>
                       <TableCell className="text-start text-xs">
                         {b.lines.length === 0
-                          ? "—"
+                          ? t("emDash")
                           : b.lines
-                              .map(
-                                (l) =>
-                                  `${l.sizeName ?? "قصائر"}${
-                                    l.grade ? ` (${gradeLabel(l.grade)})` : ""
-                                  }: ${fmt(l.quantity)} ${unitLabel(l.unit)}`,
+                              .map((l) =>
+                                t("balanceLine", {
+                                  size: l.sizeName ?? t("shortbar"),
+                                  gradePart: l.grade
+                                    ? t("gradePart", { grade: gradeLabel(l.grade) })
+                                    : "",
+                                  qty: fmt(l.quantity),
+                                  unit: tEnums(`stockUnit.${l.unit}`),
+                                }),
                               )
-                              .join("، ")}
+                              .join(", ")}
                       </TableCell>
                       <TableCell className="text-center tabular-nums font-semibold">
                         {fmt(b.totalQuantity)}{" "}
                         <span className="text-xs font-normal text-muted-foreground">
-                          {unitLabel(b.unit)}
+                          {tEnums(`stockUnit.${b.unit}`)}
                         </span>
                         {b.isDualUnit && (b.totalTons ?? 0) > 0 && (
                           <span className="text-xs font-normal text-muted-foreground">
-                            {" "}/ {fmt(b.totalTons ?? 0)} طن
+                            {" "}
+                            {t("withTons", { tons: fmt(b.totalTons ?? 0) })}
                           </span>
                         )}
                       </TableCell>
@@ -242,7 +249,7 @@ export function StockMovementsView() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <ScrollText className="h-4 w-4" />
-            سجل الحركات
+            {t("movementLog")}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -253,10 +260,10 @@ export function StockMovementsView() {
               onValueChange={(v) => setLocationFilter(v ?? "")}
             >
               <SelectTrigger className="w-52">
-                <SelectValue placeholder="كل المواقع" />
+                <SelectValue placeholder={t("allLocations")} />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">كل المواقع</SelectItem>
+              <SelectContent dir={dir}>
+                <SelectItem value="">{t("allLocations")}</SelectItem>
                 {balances.map((b) => (
                   <SelectItem key={b.locationId} value={String(b.locationId)}>
                     {b.nameAr}
@@ -270,13 +277,13 @@ export function StockMovementsView() {
               onValueChange={(v) => setTypeFilter(v ?? "")}
             >
               <SelectTrigger className="w-40">
-                <SelectValue placeholder="كل الأنواع" />
+                <SelectValue placeholder={t("allTypes")} />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">كل الأنواع</SelectItem>
-                {(Object.keys(MOVEMENT_TYPE_LABEL) as MovementType[]).map((t) => (
-                  <SelectItem key={t} value={t}>
-                    {MOVEMENT_TYPE_LABEL[t]}
+              <SelectContent dir={dir}>
+                <SelectItem value="">{t("allTypes")}</SelectItem>
+                {MOVEMENT_TYPES.map((type) => (
+                  <SelectItem key={type} value={type}>
+                    {tEnums(`stockMovementType.${type}`)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -287,12 +294,12 @@ export function StockMovementsView() {
             <Table className="min-w-[760px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-36 text-start">التاريخ</TableHead>
-                  <TableHead className="text-start">الموقع</TableHead>
-                  <TableHead className="w-28 text-start">النوع</TableHead>
-                  <TableHead className="text-start">المقاس/النخب</TableHead>
-                  <TableHead className="w-28 text-center">الكمية</TableHead>
-                  <TableHead className="text-start">بواسطة</TableHead>
+                  <TableHead className="w-36 text-start">{t("colDate")}</TableHead>
+                  <TableHead className="text-start">{t("colLocation")}</TableHead>
+                  <TableHead className="w-28 text-start">{t("colType")}</TableHead>
+                  <TableHead className="text-start">{t("colSizeGrade")}</TableHead>
+                  <TableHead className="w-28 text-center">{t("colQuantity")}</TableHead>
+                  <TableHead className="text-start">{t("colBy")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -309,7 +316,7 @@ export function StockMovementsView() {
                 ) : movements.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
-                      لا توجد حركات
+                      {t("noMovements")}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -323,12 +330,14 @@ export function StockMovementsView() {
                       </TableCell>
                       <TableCell className="text-start">
                         <Badge variant="secondary" className="text-[10px]">
-                          {MOVEMENT_TYPE_LABEL[m.type]}
+                          {tEnums(`stockMovementType.${m.type}`)}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-start text-xs">
-                        {m.sizeName ?? "قصائر"}
-                        {m.grade ? ` · ${gradeLabel(m.grade)}` : ""}
+                        {m.sizeName ?? t("shortbar")}
+                        {m.grade
+                          ? t("gradeDot", { grade: gradeLabel(m.grade) })
+                          : ""}
                       </TableCell>
                       <TableCell
                         className={cn(
@@ -352,7 +361,7 @@ export function StockMovementsView() {
           {total > pageSize && (
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
-                صفحة {page} من {totalPages} — {total} حركة
+                {t("pageOfMovements", { page, totalPages, total })}
               </p>
               <div className="flex gap-2">
                 <Button
@@ -361,7 +370,11 @@ export function StockMovementsView() {
                   disabled={page <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                 >
-                  <ChevronRight className="h-4 w-4" />
+                  {isRtl ? (
+                    <ChevronRight className="h-4 w-4" />
+                  ) : (
+                    <ChevronLeft className="h-4 w-4" />
+                  )}
                 </Button>
                 <Button
                   variant="outline"
@@ -369,7 +382,11 @@ export function StockMovementsView() {
                   disabled={page >= totalPages}
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 >
-                  <ChevronLeft className="h-4 w-4" />
+                  {isRtl ? (
+                    <ChevronLeft className="h-4 w-4" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4" />
+                  )}
                 </Button>
               </div>
             </div>

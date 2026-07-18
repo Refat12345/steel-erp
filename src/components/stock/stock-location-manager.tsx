@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
   Tabs,
@@ -21,11 +22,11 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, Pencil, Trash2, Warehouse, MapPin } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getTextDirection, type Locale } from "@/i18n/config";
 import { StockLocationFormDialog } from "./stock-location-form-dialog";
 import {
   SEGMENT_META,
-  segmentUnitLabel,
-  segmentGradeLabel,
+  SEGMENT_ORDER,
   type Segment,
   type Yard,
   type StockLocation,
@@ -49,13 +50,22 @@ function normalizeYard(y: ApiYard): Yard {
   };
 }
 
+function segmentUnitKey(segment: Segment): "segmentUnitByTons" | "segmentUnitByBundles" {
+  return segment === "SHORTBAR" ? "segmentUnitByTons" : "segmentUnitByBundles";
+}
+
 /** Schematic grid preview of one yard, driven by gridRow/gridCol/gridSpan. */
 function YardMap({ yard }: { yard: Yard }) {
+  const t = useTranslations("stock");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+
   const active = yard.locations.filter((l) => l.isActive);
   if (active.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-        لا توجد مواقع نشطة في هذه الساحة
+        {t("noActiveLocationsInYard")}
       </div>
     );
   }
@@ -75,6 +85,7 @@ function YardMap({ yard }: { yard: Yard }) {
       >
         {active.map((l) => {
           const meta = SEGMENT_META[l.segment];
+          const segmentLabel = tEnums(`stockSegment.${l.segment}`);
           return (
             <div
               key={l.id}
@@ -86,16 +97,18 @@ function YardMap({ yard }: { yard: Yard }) {
                 gridColumn: `${l.gridCol} / span ${l.gridSpan}`,
                 gridRow: `${l.gridRow}`,
               }}
-              title={`${l.nameAr} — ${SEGMENT_META[l.segment].label}`}
+              title={`${l.nameAr} — ${segmentLabel}`}
             >
               <div className="font-mono text-sm font-bold leading-tight">
                 {l.code}
               </div>
-              <div className="truncate text-[10px] opacity-80" dir="rtl">
+              <div className="truncate text-[10px] opacity-80" dir={dir}>
                 {l.nameAr}
               </div>
               <div className="text-[10px] font-medium opacity-70">
-                {l.expectedSize ? l.expectedSize.displayName : segmentUnitLabel(l.segment)}
+                {l.expectedSize
+                  ? l.expectedSize.displayName
+                  : t(segmentUnitKey(l.segment))}
               </div>
             </div>
           );
@@ -106,12 +119,13 @@ function YardMap({ yard }: { yard: Yard }) {
 }
 
 function SegmentLegend() {
+  const tEnums = useTranslations("enums");
   return (
     <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-      {(Object.keys(SEGMENT_META) as Segment[]).map((s) => (
+      {SEGMENT_ORDER.map((s) => (
         <div key={s} className="flex items-center gap-1.5">
           <span className={cn("h-2.5 w-2.5 rounded-full", SEGMENT_META[s].dot)} />
-          {SEGMENT_META[s].label}
+          {tEnums(`stockSegment.${s}`)}
         </div>
       ))}
     </div>
@@ -119,6 +133,9 @@ function SegmentLegend() {
 }
 
 export function StockLocationManager() {
+  const t = useTranslations("stock");
+  const tEnums = useTranslations("enums");
+
   const [yards, setYards] = useState<Yard[]>([]);
   const [sizes, setSizes] = useState<SizeOption[]>([]);
   const [canManage, setCanManage] = useState(false);
@@ -145,14 +162,14 @@ export function StockLocationManager() {
               : "",
         );
       } else {
-        toast.error(json.error || "خطأ في جلب المواقع");
+        toast.error(json.error || t("errorLoadLocations"));
       }
     } catch {
-      toast.error("خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void fetchData();
@@ -170,8 +187,8 @@ export function StockLocationManager() {
   async function handleDelete(loc: StockLocation) {
     const warnDeactivate = loc.movementCount > 0;
     const message = warnDeactivate
-      ? `الموقع «${loc.nameAr}» عليه حركات — سيتم إيقافه (لا حذف). متابعة؟`
-      : `حذف الموقع «${loc.nameAr}» نهائياً؟`;
+      ? t("confirmDeactivate", { name: loc.nameAr })
+      : t("confirmDelete", { name: loc.nameAr });
     if (!window.confirm(message)) return;
     try {
       const res = await fetch(`/api/stock/locations/${loc.id}`, {
@@ -179,14 +196,22 @@ export function StockLocationManager() {
       });
       const json = await res.json();
       if (!json.success) {
-        toast.error(json.error || "تعذّر الحذف");
+        toast.error(json.error || t("errorDelete"));
         return;
       }
-      toast.success(json.data?.deactivated ? "تم إيقاف الموقع" : "تم حذف الموقع");
+      toast.success(
+        json.data?.deactivated ? t("locationDeactivated") : t("locationDeleted"),
+      );
       void fetchData();
     } catch {
-      toast.error("خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     }
+  }
+
+  function segmentGradeLabel(segment: Segment): string {
+    if (segment === "SHORTBAR") return t("noGrade");
+    if (segment === "ISOLATION") return tEnums("grade.SECOND");
+    return tEnums("grade.FIRST");
   }
 
   const yardOptions = yards.map((y) => ({ id: y.id, code: y.code, nameAr: y.nameAr }));
@@ -208,7 +233,7 @@ export function StockLocationManager() {
         {canManage && (
           <Button size="sm" onClick={handleAdd}>
             <Plus className="h-4 w-4" />
-            إضافة موقع
+            {t("addLocation")}
           </Button>
         )}
       </div>
@@ -216,7 +241,7 @@ export function StockLocationManager() {
       {yards.length === 0 ? (
         <div className="rounded-lg border border-dashed p-10 text-center text-muted-foreground">
           <Warehouse className="mx-auto mb-2 h-8 w-8 opacity-40" />
-          لا توجد ساحات مضبوطة
+          {t("noYardsConfigured")}
         </div>
       ) : (
         <Tabs value={activeYard} onValueChange={(v) => setActiveYard(v as string)}>
@@ -236,7 +261,7 @@ export function StockLocationManager() {
               <div>
                 <div className="mb-2 flex items-center gap-1.5 text-sm font-medium">
                   <MapPin className="h-4 w-4 text-muted-foreground" />
-                  خريطة الساحة التخطيطية
+                  {t("yardSchematicMap")}
                 </div>
                 <YardMap yard={y} />
               </div>
@@ -245,16 +270,16 @@ export function StockLocationManager() {
                 <Table className="min-w-[820px]">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-20 text-start">الكود</TableHead>
-                      <TableHead className="text-start">الاسم</TableHead>
-                      <TableHead className="w-32 text-start">التصنيف</TableHead>
-                      <TableHead className="w-20 text-center">العدّ</TableHead>
-                      <TableHead className="w-20 text-center">النخب</TableHead>
-                      <TableHead className="w-28 text-start">المقاس</TableHead>
-                      <TableHead className="w-24 text-center">الموضع</TableHead>
-                      <TableHead className="w-20 text-center">الحالة</TableHead>
+                      <TableHead className="w-20 text-start">{t("colCode")}</TableHead>
+                      <TableHead className="text-start">{t("colName")}</TableHead>
+                      <TableHead className="w-32 text-start">{t("colSegment")}</TableHead>
+                      <TableHead className="w-20 text-center">{t("colCounting")}</TableHead>
+                      <TableHead className="w-20 text-center">{t("colGrade")}</TableHead>
+                      <TableHead className="w-28 text-start">{t("colSize")}</TableHead>
+                      <TableHead className="w-24 text-center">{t("colPosition")}</TableHead>
+                      <TableHead className="w-20 text-center">{t("colStatus")}</TableHead>
                       {canManage && (
-                        <TableHead className="w-24 text-center" aria-label="إجراءات" />
+                        <TableHead className="w-24 text-center" aria-label={t("actions")} />
                       )}
                     </TableRow>
                   </TableHeader>
@@ -265,7 +290,7 @@ export function StockLocationManager() {
                           colSpan={canManage ? 9 : 8}
                           className="h-24 text-center text-muted-foreground"
                         >
-                          لا توجد مواقع في هذه الساحة
+                          {t("noLocationsInYard")}
                         </TableCell>
                       </TableRow>
                     ) : (
@@ -283,17 +308,19 @@ export function StockLocationManager() {
                                   SEGMENT_META[l.segment].dot,
                                 )}
                               />
-                              <span className="text-xs">{SEGMENT_META[l.segment].label}</span>
+                              <span className="text-xs">
+                                {tEnums(`stockSegment.${l.segment}`)}
+                              </span>
                             </span>
                           </TableCell>
                           <TableCell className="text-center text-xs">
-                            {segmentUnitLabel(l.segment)}
+                            {t(segmentUnitKey(l.segment))}
                           </TableCell>
                           <TableCell className="text-center text-xs">
                             {segmentGradeLabel(l.segment)}
                           </TableCell>
                           <TableCell className="text-start text-xs">
-                            {l.expectedSize ? l.expectedSize.displayName : "—"}
+                            {l.expectedSize ? l.expectedSize.displayName : t("emDash")}
                           </TableCell>
                           <TableCell className="text-center text-xs tabular-nums" dir="ltr">
                             r{l.gridRow}·c{l.gridCol}
@@ -301,7 +328,7 @@ export function StockLocationManager() {
                           </TableCell>
                           <TableCell className="text-center">
                             <Badge variant={l.isActive ? "default" : "secondary"}>
-                              {l.isActive ? "نشط" : "موقوف"}
+                              {l.isActive ? t("statusActive") : t("statusInactive")}
                             </Badge>
                           </TableCell>
                           {canManage && (
@@ -311,7 +338,7 @@ export function StockLocationManager() {
                                   variant="ghost"
                                   size="icon-sm"
                                   onClick={() => handleEdit(l)}
-                                  aria-label="تعديل"
+                                  aria-label={t("edit")}
                                 >
                                   <Pencil className="h-3.5 w-3.5" />
                                 </Button>
@@ -319,7 +346,7 @@ export function StockLocationManager() {
                                   variant="ghost"
                                   size="icon-sm"
                                   onClick={() => handleDelete(l)}
-                                  aria-label="حذف"
+                                  aria-label={t("delete")}
                                 >
                                   <Trash2 className="h-3.5 w-3.5 text-destructive" />
                                 </Button>

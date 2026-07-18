@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,9 +17,10 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { Loader2, ArrowLeftRight, MoveRight } from "lucide-react";
+import { formatDecimal } from "@/lib/number-format";
+import { getTextDirection, type Locale } from "@/i18n/config";
 import {
   SEGMENT_META,
-  unitLabel,
   segmentEnforcesOneSize,
   type Segment,
   type StockUnit,
@@ -45,10 +47,15 @@ interface LocationBalance {
 }
 
 function fmt(n: number): string {
-  return n.toLocaleString("en-US", { maximumFractionDigits: 3 });
+  return formatDecimal(n, 3);
 }
 
 export function StockTransferForm() {
+  const t = useTranslations("stock");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+
   const [balances, setBalances] = useState<LocationBalance[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -66,13 +73,13 @@ export function StockTransferForm() {
       const res = await fetch("/api/stock/balances");
       const json = await res.json();
       if (json.success) setBalances(json.data as LocationBalance[]);
-      else toast.error(json.error || "خطأ في جلب الأرصدة");
+      else toast.error(json.error || t("errorLoadBalances"));
     } catch {
-      toast.error("خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void fetchData();
@@ -153,19 +160,17 @@ export function StockTransferForm() {
           ? b.lines.some((l) => l.unit === "BUNDLE" && l.sizeId === selectedSizeId && l.quantity > 0)
           : false;
         const empty = b.totalQuantity === 0;
+        let reasonLabel = "";
+        if (sameSize) reasonLabel = t("destSameSize");
+        else if (empty)
+          reasonLabel =
+            b.segment === source.segment ? t("destEmptySameSegment") : t("destEmpty");
+        else if (otherSize) reasonLabel = t("destOccupiedOtherSize");
         return {
           loc: b,
           blocked: otherSize,
           suggested: empty || sameSize,
-          reasonLabel: sameSize
-            ? "نفس المقاس"
-            : empty
-              ? b.segment === source.segment
-                ? "فارغ · نفس النخب"
-                : "فارغ"
-              : otherSize
-                ? "مشغول بمقاس آخر"
-                : "",
+          reasonLabel,
         };
       })
       .sort((a, b) => {
@@ -173,7 +178,7 @@ export function StockTransferForm() {
         if (a.suggested !== b.suggested) return a.suggested ? -1 : 1;
         return a.loc.code.localeCompare(b.loc.code);
       });
-  }, [balances, source, isBundle, selectedSizeId]);
+  }, [balances, source, isBundle, selectedSizeId, t]);
 
   const dest = balances.find((b) => String(b.locationId) === destId) ?? null;
 
@@ -182,17 +187,17 @@ export function StockTransferForm() {
     () =>
       sourceOptions.map((b) => ({
         value: String(b.locationId),
-        label: `${b.nameAr} (${fmt(b.totalQuantity)} ${unitLabel(b.unit)})`,
+        label: `${b.nameAr} (${fmt(b.totalQuantity)} ${tEnums(`stockUnit.${b.unit}`)})`,
       })),
-    [sourceOptions],
+    [sourceOptions, tEnums],
   );
   const sizeLineItems = useMemo(
     () =>
       sourceLines.map((l) => ({
         value: String(l.sizeId),
-        label: l.sizeName ?? "—",
+        label: l.sizeName ?? t("emDash"),
       })),
-    [sourceLines],
+    [sourceLines, t],
   );
   const destItems = useMemo(
     () =>
@@ -213,30 +218,30 @@ export function StockTransferForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!source || !dest) {
-      toast.error("اختر الموقع المصدر والوجهة");
+      toast.error(t("selectSourceAndDest"));
       return;
     }
     const qty = Number(quantity);
     if (!qty || qty <= 0) {
-      toast.error("أدخل كمية صحيحة");
+      toast.error(t("enterValidQuantity"));
       return;
     }
     if (qty > available) {
-      toast.error(`الكمية أكبر من المتاح (${fmt(available)})`);
+      toast.error(t("qtyExceedsAvailable", { available: fmt(available) }));
       return;
     }
     if (isBundle && !Number.isInteger(qty)) {
-      toast.error("عدد الربطات يجب أن يكون عدداً صحيحاً");
+      toast.error(t("bundlesMustBeInteger"));
       return;
     }
     const tons = Number(quantityTons);
     if (isDual) {
       if (!tons || tons <= 0) {
-        toast.error("أدخل الوزن الفعلي المرحَّل (طن)");
+        toast.error(t("enterActualWeightTons"));
         return;
       }
       if (tons > availableTons) {
-        toast.error(`الوزن أكبر من المتاح (${fmt(availableTons)} طن)`);
+        toast.error(t("weightExceedsAvailable", { available: fmt(availableTons) }));
         return;
       }
     }
@@ -257,14 +262,14 @@ export function StockTransferForm() {
       });
       const json = await res.json();
       if (!json.success) {
-        toast.error(json.error || "تعذّر الترحيل");
+        toast.error(json.error || t("errorTransfer"));
         return;
       }
-      toast.success("تم الترحيل بنجاح");
+      toast.success(t("transferSuccess"));
       reset();
       await fetchData();
     } catch {
-      toast.error("خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setSubmitting(false);
     }
@@ -279,30 +284,30 @@ export function StockTransferForm() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <ArrowLeftRight className="h-4 w-4" />
-          ترحيل بين المواقع
+          {t("transferFormTitle")}
         </CardTitle>
       </CardHeader>
       <CardContent>
         {sourceOptions.length === 0 ? (
           <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-            لا توجد مواقع فيها رصيد للترحيل منها
+            {t("noSourceWithBalance")}
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Source */}
             <div className="space-y-1.5">
-              <Label>من موقع</Label>
+              <Label>{t("fromLocation")}</Label>
               <Select items={sourceItems} value={sourceId} onValueChange={(v) => setSourceId(v ?? "")}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="اختر الموقع المصدر" />
+                  <SelectValue placeholder={t("selectSourceLocation")} />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent dir={dir}>
                   {sourceOptions.map((b) => (
                     <SelectItem key={b.locationId} value={String(b.locationId)}>
                       <span className="flex w-full items-center justify-between gap-3">
                         <span>{b.nameAr}</span>
                         <span className="text-xs tabular-nums text-muted-foreground" dir="ltr">
-                          {fmt(b.totalQuantity)} {unitLabel(b.unit)}
+                          {fmt(b.totalQuantity)} {tEnums(`stockUnit.${b.unit}`)}
                         </span>
                       </span>
                     </SelectItem>
@@ -314,16 +319,16 @@ export function StockTransferForm() {
             {/* Size line (bundles with more than one size only) */}
             {isBundle && sourceLines.length > 1 && (
               <div className="space-y-1.5">
-                <Label>المقاس</Label>
+                <Label>{t("size")}</Label>
                 <Select items={sizeLineItems} value={sizeKey} onValueChange={(v) => setSizeKey(v ?? "")}>
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="اختر المقاس" />
+                    <SelectValue placeholder={t("selectSize")} />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent dir={dir}>
                     {sourceLines.map((l) => (
                       <SelectItem key={l.sizeId ?? "n"} value={String(l.sizeId)}>
                         <span className="flex w-full items-center justify-between gap-3">
-                          <span>{l.sizeName ?? "—"}</span>
+                          <span>{l.sizeName ?? t("emDash")}</span>
                           <span className="text-xs tabular-nums text-muted-foreground" dir="ltr">
                             {fmt(l.quantity)}
                           </span>
@@ -337,27 +342,24 @@ export function StockTransferForm() {
 
             {source && (
               <div className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                المتاح للترحيل:{" "}
+                {t("availableToTransfer")}{" "}
                 <span className="font-semibold text-foreground tabular-nums">
-                  {fmt(available)} {unitLabel(source.unit)}
+                  {fmt(available)} {tEnums(`stockUnit.${source.unit}`)}
                 </span>
                 {isDual && (
-                  <>
-                    {" "}·{" "}
-                    <span className="font-semibold text-foreground tabular-nums">
-                      {fmt(availableTons)} طن
-                    </span>
-                  </>
+                  <span className="font-semibold text-foreground tabular-nums">
+                    {t("availableTonsPart", { tons: fmt(availableTons) })}
+                  </span>
                 )}
                 {isBundle && sourceLines.length === 1 && sourceLines[0].sizeName && (
-                  <> · مقاس {sourceLines[0].sizeName}</>
+                  <>{t("sizeColon", { size: sourceLines[0].sizeName })}</>
                 )}
               </div>
             )}
 
             {/* Quantity (primary unit) */}
             <div className="space-y-1.5">
-              <Label>{isBundle ? "عدد الربطات" : "الكمية (طن)"}</Label>
+              <Label>{isBundle ? t("bundleCount") : t("quantityTons")}</Label>
               <Input
                 type="number"
                 inputMode="decimal"
@@ -366,14 +368,14 @@ export function StockTransferForm() {
                 max={available || undefined}
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
-                placeholder={isBundle ? "عدد الربطات" : "بالطن"}
+                placeholder={isBundle ? t("placeholderBundles") : t("placeholderTons")}
               />
             </div>
 
             {/* Actual weight for rebar (dual-unit) transfers */}
             {isDual && (
               <div className="space-y-1.5">
-                <Label>الوزن الفعلي المرحَّل (طن)</Label>
+                <Label>{t("actualWeightTons")}</Label>
                 <Input
                   type="number"
                   inputMode="decimal"
@@ -382,19 +384,19 @@ export function StockTransferForm() {
                   max={availableTons || undefined}
                   value={quantityTons}
                   onChange={(e) => setQuantityTons(e.target.value)}
-                  placeholder="بالطن"
+                  placeholder={t("placeholderTons")}
                 />
               </div>
             )}
 
             {/* Destination */}
             <div className="space-y-1.5">
-              <Label>إلى موقع</Label>
+              <Label>{t("toLocation")}</Label>
               <Select items={destItems} value={destId} onValueChange={(v) => setDestId(v ?? "")}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="اختر الموقع الوجهة" />
+                  <SelectValue placeholder={t("selectDestLocation")} />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent dir={dir}>
                   {destOptions.map((o) => (
                     <SelectItem
                       key={o.loc.locationId}
@@ -408,7 +410,7 @@ export function StockTransferForm() {
                         {o.loc.nameAr}
                         {o.suggested && (
                           <Badge variant="secondary" className="text-[10px]">
-                            مقترح
+                            {t("suggested")}
                           </Badge>
                         )}
                         {o.reasonLabel && (
@@ -430,9 +432,9 @@ export function StockTransferForm() {
                 <MoveRight className="h-4 w-4 text-muted-foreground" />
                 <span className="font-medium">{dest.code}</span>
                 <span className="tabular-nums font-semibold">
-                  {fmt(Number(quantity) || 0)} {unitLabel(source.unit)}
+                  {fmt(Number(quantity) || 0)} {tEnums(`stockUnit.${source.unit}`)}
                   {isDual && quantityTons && (
-                    <> / {fmt(Number(quantityTons) || 0)} طن</>
+                    <>{t("withTons", { tons: fmt(Number(quantityTons) || 0) })}</>
                   )}
                 </span>
               </div>
@@ -440,11 +442,11 @@ export function StockTransferForm() {
 
             {/* Reason */}
             <div className="space-y-1.5">
-              <Label>ملاحظة (اختياري)</Label>
+              <Label>{t("notesOptional")}</Label>
               <Input
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                placeholder="سبب الترحيل"
+                placeholder={t("transferReasonPlaceholder")}
                 maxLength={500}
               />
             </div>
@@ -456,7 +458,7 @@ export function StockTransferForm() {
               }
             >
               {submitting && <Loader2 className="animate-spin" />}
-              تنفيذ الترحيل
+              {t("executeTransfer")}
             </Button>
           </form>
         )}

@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { useLocale, useTranslations } from "next-intl";
 import { sessionHasPermission } from "@/lib/client-permissions";
 import { formatDate } from "@/lib/date-format";
+import { formatDecimal } from "@/lib/number-format";
 import { toast } from "sonner";
 import {
   Table,
@@ -33,6 +35,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
+import { getTextDirection, type Locale } from "@/i18n/config";
 
 export interface SalesOrder {
   orderNumber: string;
@@ -53,50 +56,42 @@ export interface SalesOrder {
   _count: { items: number };
 }
 
-const kindLabels: Record<string, string> = {
-  REBAR: "مبروم",
-  SHORTBAR_1_4M: "قصائر 1–4 م",
-  SHORTBAR_4_12M: "قصائر 4–12 م",
-  SCRAP: "خردة",
-  BILLET_WIRE: "أسلاك تربيط",
-  REBAR_UNDER_70CM: "مبروم أقل من 70 سم",
-  BILLET_SCRAP_10M: "بيلت خردة 10m",
-  SCRAP_50CM_1M: "سكراب من 50 سم إلى 1 م",
-};
-
-const gradeLabels: Record<string, string> = {
-  FIRST: "نخب أول",
-  SECOND: "نخب ثاني",
-};
-
-const statusMap: Record<
+const STATUS_VARIANTS: Record<
   string,
-  { label: string; variant: "default" | "secondary" | "destructive" }
+  "default" | "secondary" | "destructive"
 > = {
-  draft: { label: "مسودة", variant: "secondary" },
-  approved: { label: "معتمد", variant: "default" },
-  in_progress: { label: "قيد التنفيذ", variant: "default" },
-  completed: { label: "مكتمل", variant: "secondary" },
-  cancelled: { label: "ملغى", variant: "destructive" },
+  draft: "secondary",
+  approved: "default",
+  in_progress: "default",
+  completed: "secondary",
+  cancelled: "destructive",
 };
 
-function formatKindDisplay(kind: string, grade: string | null): string {
-  const k = kindLabels[kind] ?? kind;
-  if (!grade) return k;
-  const g = gradeLabels[grade] ?? grade;
-  return `${k} (${g})`;
-}
+const STATUS_FILTER_VALUES = [
+  "draft",
+  "approved",
+  "in_progress",
+  "completed",
+  "cancelled",
+] as const;
 
-function formatQtyTons(value: string): string {
-  const n = Number(value);
-  if (Number.isNaN(n)) return value;
-  return n.toLocaleString("ar-SA", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 3,
-  });
-}
+const KIND_FILTER_VALUES = [
+  "REBAR",
+  "SHORTBAR_1_4M",
+  "SHORTBAR_4_12M",
+  "SCRAP",
+  "BILLET_WIRE",
+  "REBAR_UNDER_70CM",
+  "BILLET_SCRAP_10M",
+  "SCRAP_50CM_1M",
+] as const;
 
 export function SalesOrderList() {
+  const t = useTranslations("salesOrders");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+  const isRtl = dir === "rtl";
   const { data: session } = useSession();
   const canCreateSalesOrder = sessionHasPermission(session, "salesorder.create");
   const router = useRouter();
@@ -112,6 +107,32 @@ export function SalesOrderList() {
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(total / pageSize)),
     [total, pageSize],
+  );
+
+  const formatKindDisplay = useCallback(
+    (kind: string, grade: string | null): string => {
+      const k = (KIND_FILTER_VALUES as readonly string[]).includes(kind)
+        ? tEnums(`materialKind.${kind as (typeof KIND_FILTER_VALUES)[number]}`)
+        : kind;
+      if (!grade) return k;
+      const g =
+        grade === "FIRST" || grade === "SECOND"
+          ? tEnums(`grade.${grade}`)
+          : grade;
+      return t("kindWithGrade", { kind: k, grade: g });
+    },
+    [t, tEnums],
+  );
+
+  const statusLabel = useCallback(
+    (status: string): string => {
+      return (STATUS_FILTER_VALUES as readonly string[]).includes(status)
+        ? tEnums(
+            `salesOrderStatus.${status as (typeof STATUS_FILTER_VALUES)[number]}`,
+          )
+        : status;
+    },
+    [tEnums],
   );
 
   const fetchOrders = useCallback(async () => {
@@ -130,11 +151,11 @@ export function SalesOrderList() {
         setTotal(json.total);
       }
     } catch {
-      toast.error("خطأ في جلب بيانات أوامر البيع");
+      toast.error(t("errorLoad"));
     } finally {
       setLoading(false);
     }
-  }, [search, page, statusFilter, kindFilter]);
+  }, [search, page, statusFilter, kindFilter, t]);
 
   useEffect(() => {
     const timer = setTimeout(fetchOrders, 300);
@@ -145,15 +166,15 @@ export function SalesOrderList() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative min-w-[200px] flex-1 max-w-sm">
-          <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute end-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="بحث برقم الأمر أو اسم العميل..."
+            placeholder={t("searchPlaceholder")}
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
               setPage(1);
             }}
-            className="pr-9"
+            className="pe-9"
           />
         </div>
         <Select
@@ -164,15 +185,15 @@ export function SalesOrderList() {
           }}
         >
           <SelectTrigger size="sm" className="min-w-[160px]">
-            <SelectValue placeholder="الحالة" />
+            <SelectValue placeholder={t("statusPlaceholder")} />
           </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">كل الحالات</SelectItem>
-            <SelectItem value="draft">مسودة</SelectItem>
-            <SelectItem value="approved">معتمد</SelectItem>
-            <SelectItem value="in_progress">قيد التنفيذ</SelectItem>
-            <SelectItem value="completed">مكتمل</SelectItem>
-            <SelectItem value="cancelled">ملغى</SelectItem>
+          <SelectContent dir={dir}>
+            <SelectItem value="all">{t("allStatuses")}</SelectItem>
+            {STATUS_FILTER_VALUES.map((value) => (
+              <SelectItem key={value} value={value}>
+                {tEnums(`salesOrderStatus.${value}`)}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <Select
@@ -183,24 +204,21 @@ export function SalesOrderList() {
           }}
         >
           <SelectTrigger size="sm" className="min-w-[180px]">
-            <SelectValue placeholder="النوع" />
+            <SelectValue placeholder={t("kindPlaceholder")} />
           </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">كل الأنواع</SelectItem>
-            <SelectItem value="REBAR">مبروم</SelectItem>
-            <SelectItem value="SHORTBAR_1_4M">قصائر 1–4 م</SelectItem>
-            <SelectItem value="SHORTBAR_4_12M">قصائر 4–12 م</SelectItem>
-            <SelectItem value="SCRAP">خردة</SelectItem>
-            <SelectItem value="BILLET_WIRE">أسلاك تربيط</SelectItem>
-            <SelectItem value="REBAR_UNDER_70CM">مبروم أقل من 70 سم</SelectItem>
-            <SelectItem value="BILLET_SCRAP_10M">بيلت خردة 10m</SelectItem>
-            <SelectItem value="SCRAP_50CM_1M">سكراب من 50 سم إلى 1 م</SelectItem>
+          <SelectContent dir={dir}>
+            <SelectItem value="all">{t("allKinds")}</SelectItem>
+            {KIND_FILTER_VALUES.map((value) => (
+              <SelectItem key={value} value={value}>
+                {tEnums(`materialKind.${value}`)}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         {canCreateSalesOrder && (
           <Button onClick={() => router.push("/sales-orders/new")} size="sm">
             <Plus className="h-4 w-4" />
-            أمر بيع جديد
+            {t("newSalesOrder")}
           </Button>
         )}
       </div>
@@ -209,13 +227,15 @@ export function SalesOrderList() {
         <Table className="min-w-[700px]">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-32">رقم الأمر</TableHead>
-              <TableHead>العميل</TableHead>
-              <TableHead className="min-w-[140px]">النوع</TableHead>
-              <TableHead className="w-28">الكمية (طن)</TableHead>
-              <TableHead className="w-28">الحالة</TableHead>
-              <TableHead className="w-24 text-center">بنود الأسعار</TableHead>
-              <TableHead className="w-36">تاريخ الإنشاء</TableHead>
+              <TableHead className="w-32">{t("columns.orderNumber")}</TableHead>
+              <TableHead>{t("columns.customer")}</TableHead>
+              <TableHead className="min-w-[140px]">{t("columns.kind")}</TableHead>
+              <TableHead className="w-28">{t("columns.qtyTons")}</TableHead>
+              <TableHead className="w-28">{t("columns.status")}</TableHead>
+              <TableHead className="w-24 text-center">
+                {t("columns.priceItems")}
+              </TableHead>
+              <TableHead className="w-36">{t("columns.createdAt")}</TableHead>
               <TableHead className="w-16" />
             </TableRow>
           </TableHeader>
@@ -239,18 +259,14 @@ export function SalesOrderList() {
                   <div className="flex flex-col items-center gap-2">
                     <ClipboardList className="h-8 w-8 opacity-40" />
                     {search || statusFilter !== "all" || kindFilter !== "all"
-                      ? "لا توجد نتائج"
-                      : "لا توجد أوامر بيع — أنشئ أمرًا جديدًا"}
+                      ? t("emptyNoResults")
+                      : t("emptyNoOrders")}
                   </div>
                 </TableCell>
               </TableRow>
             ) : (
               orders.map((o) => {
-                const st =
-                  statusMap[o.status] ?? {
-                    label: o.status,
-                    variant: "secondary" as const,
-                  };
+                const variant = STATUS_VARIANTS[o.status] ?? "secondary";
                 return (
                   <TableRow key={o.orderNumber}>
                     <TableCell className="font-mono font-semibold">
@@ -262,11 +278,11 @@ export function SalesOrderList() {
                     <TableCell className="text-sm">
                       {formatKindDisplay(o.kind, o.grade)}
                     </TableCell>
-                    <TableCell className="font-mono text-sm tabular-nums">
-                      {formatQtyTons(o.totalQtyTons)}
+                    <TableCell className="font-mono text-sm tabular-nums weight-value">
+                      {formatDecimal(o.totalQtyTons, 3)}
                     </TableCell>
                     <TableCell>
-                      <Badge variant={st.variant}>{st.label}</Badge>
+                      <Badge variant={variant}>{statusLabel(o.status)}</Badge>
                     </TableCell>
                     <TableCell className="text-center">
                       {o._count.items}
@@ -301,11 +317,15 @@ export function SalesOrderList() {
             disabled={page <= 1}
             onClick={() => setPage((p) => p - 1)}
           >
-            <ChevronRight className="h-4 w-4" />
-            السابق
+            {isRtl ? (
+              <ChevronRight className="h-4 w-4" />
+            ) : (
+              <ChevronLeft className="h-4 w-4" />
+            )}
+            {t("previous")}
           </Button>
           <span className="text-sm text-muted-foreground">
-            صفحة {page} من {totalPages}
+            {t("pageOf", { page, totalPages })}
           </span>
           <Button
             variant="outline"
@@ -313,8 +333,12 @@ export function SalesOrderList() {
             disabled={page >= totalPages}
             onClick={() => setPage((p) => p + 1)}
           >
-            التالي
-            <ChevronLeft className="h-4 w-4" />
+            {t("next")}
+            {isRtl ? (
+              <ChevronLeft className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
           </Button>
         </div>
       )}

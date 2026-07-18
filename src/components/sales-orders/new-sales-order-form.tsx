@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { ArrowRight, Loader2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -25,6 +26,8 @@ import {
   type SalesOrderCreateInput,
 } from "@/lib/validators/sales-order";
 import { sessionHasPermission } from "@/lib/client-permissions";
+import { formatDecimal } from "@/lib/number-format";
+import { getTextDirection, type Locale } from "@/i18n/config";
 
 interface ContractOption {
   contractNumber: string;
@@ -37,6 +40,17 @@ interface ContractOption {
   };
 }
 
+const KIND_VALUES = [
+  "REBAR",
+  "SHORTBAR_1_4M",
+  "SHORTBAR_4_12M",
+  "SCRAP",
+  "BILLET_WIRE",
+  "REBAR_UNDER_70CM",
+  "BILLET_SCRAP_10M",
+  "SCRAP_50CM_1M",
+] as const;
+
 function todayISO(): string {
   const d = new Date();
   const y = d.getFullYear();
@@ -46,6 +60,11 @@ function todayISO(): string {
 }
 
 export function NewSalesOrderForm() {
+  const t = useTranslations("salesOrders");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+  const BackIcon = dir === "rtl" ? ArrowRight : ArrowLeft;
   const { data: session, status: sessionStatus } = useSession();
   const router = useRouter();
   const [contracts, setContracts] = useState<ContractOption[]>([]);
@@ -101,7 +120,7 @@ export function NewSalesOrderForm() {
           setContracts(json.data as ContractOption[]);
         }
       } catch {
-        if (!cancelled) toast.error("تعذر تحميل قائمة العقود");
+        if (!cancelled) toast.error(t("errorLoadContracts"));
       } finally {
         if (!cancelled) setContractsLoading(false);
       }
@@ -109,7 +128,7 @@ export function NewSalesOrderForm() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (kind !== "REBAR") {
@@ -130,10 +149,10 @@ export function NewSalesOrderForm() {
 
   const maxAllowedTons = useMemo(() => {
     const q = Number(totalQtyTons);
-    const t = Number(toleranceValue);
-    if (Number.isNaN(q) || Number.isNaN(t)) return null;
-    if (toleranceType === "percentage") return q * (1 + t / 100);
-    return q + t;
+    const tVal = Number(toleranceValue);
+    if (Number.isNaN(q) || Number.isNaN(tVal)) return null;
+    if (toleranceType === "percentage") return q * (1 + tVal / 100);
+    return q + tVal;
   }, [totalQtyTons, toleranceValue, toleranceType]);
 
   const onSubmit = async (data: SalesOrderCreateInput) => {
@@ -159,16 +178,16 @@ export function NewSalesOrderForm() {
       const json = await res.json();
 
       if (!json.success) {
-        toast.error(json.error ?? "حدث خطأ");
+        toast.error(json.error ?? t("errorGeneric"));
         return;
       }
 
       toast.success(
-        `تم إنشاء أمر البيع ${json.data.orderNumber as string} بنجاح`,
+        t("createSuccess", { number: json.data.orderNumber as string }),
       );
       router.push("/sales-orders");
     } catch {
-      toast.error("حدث خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setSubmitting(false);
     }
@@ -188,13 +207,13 @@ export function NewSalesOrderForm() {
       <div className="mx-auto max-w-2xl space-y-6">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon-sm" onClick={() => router.push("/sales-orders")}>
-            <ArrowRight className="h-4 w-4" />
+            <BackIcon className="h-4 w-4" />
           </Button>
-          <h1 className="text-xl font-bold tracking-tight">أمر بيع جديد</h1>
+          <h1 className="text-xl font-bold tracking-tight">{t("newTitle")}</h1>
         </div>
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            لا تملك صلاحية إنشاء أمر بيع. تواصل مع المسؤول إذا كنت بحاجة للوصول.
+            {t("noCreatePermission")}
           </CardContent>
         </Card>
       </div>
@@ -205,12 +224,12 @@ export function NewSalesOrderForm() {
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon-sm" onClick={() => router.back()}>
-          <ArrowRight className="h-4 w-4" />
+          <BackIcon className="h-4 w-4" />
         </Button>
         <div>
-          <h1 className="text-xl font-bold tracking-tight">أمر بيع جديد</h1>
+          <h1 className="text-xl font-bold tracking-tight">{t("newTitle")}</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            إنشاء أمر بيع جديد تحت عقد ساري
+            {t("newSubtitle")}
           </p>
         </div>
       </div>
@@ -218,11 +237,11 @@ export function NewSalesOrderForm() {
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">العقد</CardTitle>
+            <CardTitle className="text-base">{t("sectionContract")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="space-y-2">
-              <Label htmlFor="contractNumber">رقم العقد</Label>
+              <Label htmlFor="contractNumber">{t("contractNumber")}</Label>
               <Select
                 value={contractNumber || undefined}
                 onValueChange={(v) =>
@@ -237,11 +256,11 @@ export function NewSalesOrderForm() {
                 >
                   <SelectValue
                     placeholder={
-                      contractsLoading ? "جاري التحميل..." : "اختر عقداً سارياً"
+                      contractsLoading ? t("loading") : t("selectActiveContract")
                     }
                   />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent dir={dir}>
                   {contracts.map((c) => (
                     <SelectItem key={c.contractNumber} value={c.contractNumber}>
                       {c.contractNumber} — {c.customer.fullName}
@@ -272,11 +291,13 @@ export function NewSalesOrderForm() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">نوع أمر البيع والتسوية</CardTitle>
+            <CardTitle className="text-base">
+              {t("sectionKindSettlement")}
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label>نوع الأمر</Label>
+              <Label>{t("orderKind")}</Label>
               <Select
                 value={kind}
                 onValueChange={(v) =>
@@ -284,17 +305,14 @@ export function NewSalesOrderForm() {
                 }
               >
                 <SelectTrigger className="w-full min-w-0">
-                  <SelectValue placeholder="اختر النوع" />
+                  <SelectValue placeholder={t("selectKind")} />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="REBAR">مبروم</SelectItem>
-                  <SelectItem value="SHORTBAR_1_4M">قصائر 1–4 م</SelectItem>
-                  <SelectItem value="SHORTBAR_4_12M">قصائر 4–12 م</SelectItem>
-                  <SelectItem value="SCRAP">خردة</SelectItem>
-                  <SelectItem value="BILLET_WIRE">أسلاك تربيط</SelectItem>
-                  <SelectItem value="REBAR_UNDER_70CM">مبروم أقل من 70 سم</SelectItem>
-                  <SelectItem value="BILLET_SCRAP_10M">بيلت خردة 10m</SelectItem>
-                  <SelectItem value="SCRAP_50CM_1M">سكراب من 50 سم إلى 1 م</SelectItem>
+                <SelectContent dir={dir}>
+                  {KIND_VALUES.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {tEnums(`materialKind.${value}`)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               {errors.kind && (
@@ -304,7 +322,7 @@ export function NewSalesOrderForm() {
 
             {kind === "REBAR" && (
               <div className="space-y-2">
-                <Label>النخب</Label>
+                <Label>{t("grade")}</Label>
                 <Select
                   value={watch("grade") ?? undefined}
                   onValueChange={(v) =>
@@ -315,11 +333,15 @@ export function NewSalesOrderForm() {
                     className="w-full min-w-0"
                     aria-invalid={!!errors.grade}
                   >
-                    <SelectValue placeholder="اختر النخب" />
+                    <SelectValue placeholder={t("selectGrade")} />
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="FIRST">نخب أول</SelectItem>
-                    <SelectItem value="SECOND">نخب ثاني</SelectItem>
+                  <SelectContent dir={dir}>
+                    <SelectItem value="FIRST">
+                      {tEnums("grade.FIRST")}
+                    </SelectItem>
+                    <SelectItem value="SECOND">
+                      {tEnums("grade.SECOND")}
+                    </SelectItem>
                   </SelectContent>
                 </Select>
                 {errors.grade && (
@@ -331,7 +353,7 @@ export function NewSalesOrderForm() {
             )}
 
             <div className="space-y-2">
-              <Label>نمط التسوية</Label>
+              <Label>{t("settlementMode")}</Label>
               <Select
                 value={settlementMode}
                 onValueChange={(v) =>
@@ -342,11 +364,15 @@ export function NewSalesOrderForm() {
                 }
               >
                 <SelectTrigger className="w-full min-w-0">
-                  <SelectValue placeholder="اختر نمط التسوية" />
+                  <SelectValue placeholder={t("selectSettlement")} />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="CREDIT">آجل</SelectItem>
-                  <SelectItem value="PAYMENT_PLAN">نظام دفعات</SelectItem>
+                <SelectContent dir={dir}>
+                  <SelectItem value="CREDIT">
+                    {tEnums("settlementMode.CREDIT")}
+                  </SelectItem>
+                  <SelectItem value="PAYMENT_PLAN">
+                    {tEnums("settlementMode.PAYMENT_PLAN")}
+                  </SelectItem>
                 </SelectContent>
               </Select>
               {errors.settlementMode && (
@@ -358,7 +384,9 @@ export function NewSalesOrderForm() {
 
             {settlementMode === "CREDIT" && (
               <div className="space-y-2">
-                <Label htmlFor="paymentDeadlineDays">مهلة السداد (أيام)</Label>
+                <Label htmlFor="paymentDeadlineDays">
+                  {t("paymentDeadlineDays")}
+                </Label>
                 <Input
                   id="paymentDeadlineDays"
                   type="number"
@@ -381,11 +409,13 @@ export function NewSalesOrderForm() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">الكمية والسماحية</CardTitle>
+            <CardTitle className="text-base">
+              {t("sectionQtyTolerance")}
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="totalQtyTons">الكمية الإجمالية (طن)</Label>
+              <Label htmlFor="totalQtyTons">{t("totalQtyTons")}</Label>
               <Input
                 id="totalQtyTons"
                 type="number"
@@ -402,7 +432,7 @@ export function NewSalesOrderForm() {
             </div>
 
             <div className="space-y-2">
-              <Label>نوع السماحية</Label>
+              <Label>{t("toleranceType")}</Label>
               <Select
                 value={toleranceType}
                 onValueChange={(v) =>
@@ -415,9 +445,13 @@ export function NewSalesOrderForm() {
                 <SelectTrigger className="w-full min-w-0">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="percentage">نسبة مئوية</SelectItem>
-                  <SelectItem value="weight">وزن بالطن</SelectItem>
+                <SelectContent dir={dir}>
+                  <SelectItem value="percentage">
+                    {tEnums("toleranceType.percentage")}
+                  </SelectItem>
+                  <SelectItem value="weight">
+                    {tEnums("toleranceType.weight")}
+                  </SelectItem>
                 </SelectContent>
               </Select>
               {errors.toleranceType && (
@@ -430,8 +464,8 @@ export function NewSalesOrderForm() {
             <div className="space-y-2">
               <Label htmlFor="toleranceValue">
                 {toleranceType === "percentage"
-                  ? "نسبة السماحية (%)"
-                  : "وزن السماحية (طن)"}
+                  ? t("tolerancePctLabel")
+                  : t("toleranceWeightLabel")}
               </Label>
               <Input
                 id="toleranceValue"
@@ -450,9 +484,7 @@ export function NewSalesOrderForm() {
 
             {kind === "REBAR" && (
               <div className="space-y-2">
-                <Label htmlFor="specialRatioPct">
-                  النسبة الخاصة 8مم+10مم (%)
-                </Label>
+                <Label htmlFor="specialRatioPct">{t("specialRatioPct")}</Label>
                 <Input
                   id="specialRatioPct"
                   type="number"
@@ -471,16 +503,15 @@ export function NewSalesOrderForm() {
             )}
 
             <p className="text-sm text-muted-foreground">
-              الحد الأقصى المسموح:{" "}
+              {t("maxAllowed")}
               {maxAllowedTons != null ? (
-                <span className="font-medium text-foreground tabular-nums">
-                  {maxAllowedTons.toLocaleString("ar-SA", {
-                    maximumFractionDigits: 3,
-                  })}{" "}
-                  طن
+                <span className="font-medium text-foreground tabular-nums weight-value">
+                  {t("maxAllowedTons", {
+                    value: formatDecimal(maxAllowedTons, 3),
+                  })}
                 </span>
               ) : (
-                <span className="text-muted-foreground">—</span>
+                <span className="text-muted-foreground">{t("emDash")}</span>
               )}
             </p>
           </CardContent>
@@ -488,11 +519,11 @@ export function NewSalesOrderForm() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">التواريخ</CardTitle>
+            <CardTitle className="text-base">{t("sectionDates")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="orderDate">تاريخ الأمر</Label>
+              <Label htmlFor="orderDate">{t("orderDate")}</Label>
               <Input id="orderDate" type="date" {...register("orderDate")} />
               {errors.orderDate && (
                 <p className="text-xs text-destructive">
@@ -501,7 +532,7 @@ export function NewSalesOrderForm() {
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="deliveryDate">تاريخ التسليم المتوقع</Label>
+              <Label htmlFor="deliveryDate">{t("deliveryDate")}</Label>
               <Input id="deliveryDate" type="date" {...register("deliveryDate")} />
               {errors.deliveryDate && (
                 <p className="text-xs text-destructive">
@@ -514,12 +545,12 @@ export function NewSalesOrderForm() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">ملاحظات</CardTitle>
+            <CardTitle className="text-base">{t("sectionNotes")}</CardTitle>
           </CardHeader>
           <CardContent>
             <Textarea
               {...register("notes")}
-              placeholder="ملاحظات إضافية (اختياري)"
+              placeholder={t("notesOptional")}
               rows={3}
             />
             {errors.notes && (
@@ -534,11 +565,11 @@ export function NewSalesOrderForm() {
             variant="outline"
             onClick={() => router.back()}
           >
-            إلغاء
+            {t("cancel")}
           </Button>
           <Button type="submit" disabled={submitting} className="gap-2">
             {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-            إنشاء أمر البيع
+            {t("createSubmit")}
           </Button>
         </div>
       </form>
