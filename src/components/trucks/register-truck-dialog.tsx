@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -22,10 +23,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Trash2, Plus } from "lucide-react";
 import { createClientIdempotencyKey } from "@/lib/browser-idempotency-key";
-import { GRADE_LABELS } from "@/lib/truck-grade";
 import { sizeCodeSupportsGrade, sizeCodeToKind } from "@/lib/material-kind";
 import type { SalesOrderGrade } from "@prisma/client";
 import { DestinationSelect } from "@/components/destinations/destination-select";
+import { getTextDirection, type Locale } from "@/i18n/config";
 
 interface Customer {
   id: number;
@@ -56,9 +57,16 @@ interface Props {
   onSuccess: () => void;
 }
 
+const GRADES: SalesOrderGrade[] = ["FIRST", "SECOND"];
+
 let rowKeyCounter = 0;
 
 export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
+  const t = useTranslations("trucks");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+
   const [customerId, setCustomerId] = useState("");
   const [destinationId, setDestinationId] = useState<number | null>(null);
   const [plateNumber, setPlateNumber] = useState("");
@@ -86,11 +94,11 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
       if (custJson.success) setCustomers(custJson.data || []);
       if (sizeJson.success) setSizes(sizeJson.data || []);
     } catch {
-      toast.error("خطأ في تحميل البيانات المرجعية");
+      toast.error(t("errorRefData"));
     } finally {
       setLoadingRef(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (open) fetchReferenceData();
@@ -177,11 +185,11 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
     e.preventDefault();
 
     if (!customerId) {
-      toast.error("يرجى اختيار الزبون");
+      toast.error(t("toastSelectCustomer"));
       return;
     }
     if (!plateNumber.trim() || !driverName.trim()) {
-      toast.error("رقم اللوحة واسم السائق مطلوبان");
+      toast.error(t("toastPlateDriverRequired"));
       return;
     }
 
@@ -195,14 +203,14 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
     for (const r of requestItems.filter((x) => x.sizeCode)) {
       const sz = sizes.find((s) => s.code === r.sizeCode);
       if (!sz) {
-        toast.error("قياس غير صالح، أعد تحميل الصفحة والمحاولة");
+        toast.error(t("toastInvalidSize"));
         return;
       }
       const grade =
         isRebarLoad && r.grade && sizeCodeSupportsGrade(r.sizeCode) ? r.grade : null;
       const dupKey = `${sz.id}:${grade ?? ""}`;
       if (seenKeys.has(dupKey)) {
-        toast.error("لا يمكن تكرار نفس القياس بنفس النخب في الطلبية");
+        toast.error(t("toastDuplicateSizeGrade"));
         return;
       }
       seenKeys.add(dupKey);
@@ -210,11 +218,11 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
       const requestedTons = r.requestedTons ? Number(r.requestedTons) : null;
       if (sz.isBundleType) {
         if (bundleCount === null || bundleCount < 1) {
-          toast.error("عدد الربطات مطلوب ويجب أن يكون 1 على الأقل");
+          toast.error(t("toastBundlesRequired"));
           return;
         }
       } else if (requestedTons === null || requestedTons <= 0) {
-        toast.error("الوزن بالطن مطلوب ويجب أن يكون أكبر من صفر");
+        toast.error(t("toastTonsRequired"));
         return;
       }
       items.push({
@@ -247,12 +255,12 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success("تم تسجيل الشاحنة بنجاح");
+      toast.success(t("registerSuccess"));
       reset();
       onOpenChange(false);
       onSuccess();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "خطأ في التسجيل");
+      toast.error(e instanceof Error ? e.message : t("errorRegister"));
     } finally {
       setSaving(false);
     }
@@ -260,14 +268,17 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] min-w-0 overflow-x-hidden overflow-y-auto">
+      <DialogContent
+        dir={dir}
+        className="max-w-lg max-h-[90vh] min-w-0 overflow-x-hidden overflow-y-auto"
+      >
         <DialogHeader>
-          <DialogTitle>تسجيل شاحنة جديدة</DialogTitle>
+          <DialogTitle>{t("registerTitle")}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="min-w-0 space-y-4">
           {/* Customer */}
           <div className="space-y-2">
-            <Label>الزبون *</Label>
+            <Label>{t("customerRequired")}</Label>
             {loadingRef ? (
               <div className="h-9 animate-pulse rounded-md bg-muted" />
             ) : (
@@ -277,7 +288,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                 onValueChange={(v) => setCustomerId(v ?? "")}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="اختر الزبون" />
+                  <SelectValue placeholder={t("selectCustomer")} />
                 </SelectTrigger>
                 <SelectContent>
                   {customers.map((c) => (
@@ -292,7 +303,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
 
           {/* Destination */}
           <div className="space-y-2">
-            <Label>الوجهة (اختياري)</Label>
+            <Label>{t("destinationOptional")}</Label>
             <DestinationSelect
               value={destinationId}
               onValueChange={setDestinationId}
@@ -302,7 +313,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
 
           {/* Load type — UI-only toggle to show/hide grade */}
           <div className="space-y-2">
-            <Label>نوع الحمل (اختياري)</Label>
+            <Label>{t("loadTypeOptional")}</Label>
             <Select
               value={isRebarLoad ? "REBAR" : "OTHER"}
               onValueChange={(v) => {
@@ -318,11 +329,11 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
               }}
             >
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="اختر نوع الحمل" />
+                <SelectValue placeholder={t("selectLoadType")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="OTHER">غير مبروم</SelectItem>
-                <SelectItem value="REBAR">مبروم</SelectItem>
+                <SelectItem value="OTHER">{t("loadTypeOther")}</SelectItem>
+                <SelectItem value="REBAR">{t("loadTypeRebar")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -330,7 +341,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
           {/* Grade — visible only when load type is REBAR */}
           {isRebarLoad && (
             <div className="space-y-2">
-              <Label>النخب (اختياري)</Label>
+              <Label>{t("gradeOptional")}</Label>
               <Select
                 value={operationalGrade}
                 onValueChange={(v) =>
@@ -338,17 +349,15 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                 }
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="اختر النخب" />
+                  <SelectValue placeholder={t("selectGrade")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">لا يوجد</SelectItem>
-                  {(Object.entries(GRADE_LABELS) as [SalesOrderGrade, string][]).map(
-                    ([key, label]) => (
-                      <SelectItem key={key} value={key}>
-                        {label}
-                      </SelectItem>
-                    ),
-                  )}
+                  <SelectItem value="">{t("noGrade")}</SelectItem>
+                  {GRADES.map((key) => (
+                    <SelectItem key={key} value={key}>
+                      {tEnums(`grade.${key}`)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -357,22 +366,22 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
           {/* Plate + Driver */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label htmlFor="plateNumber">رقم اللوحة *</Label>
+              <Label htmlFor="plateNumber">{t("plateRequired")}</Label>
               <Input
                 id="plateNumber"
                 value={plateNumber}
                 onChange={(e) => setPlateNumber(e.target.value)}
-                placeholder="مثال: دمشق 123456"
+                placeholder={t("platePlaceholder")}
                 autoFocus
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="driverName">اسم السائق *</Label>
+              <Label htmlFor="driverName">{t("driverRequired")}</Label>
               <Input
                 id="driverName"
                 value={driverName}
                 onChange={(e) => setDriverName(e.target.value)}
-                placeholder="الاسم الكامل"
+                placeholder={t("driverPlaceholder")}
               />
             </div>
           </div>
@@ -380,7 +389,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
           {/* Request Items */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label>تفاصيل الطلبية</Label>
+              <Label>{t("requestItems")}</Label>
               <Button
                 type="button"
                 variant="outline"
@@ -388,14 +397,14 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                 onClick={addRequestItem}
                 disabled={loadingRef}
               >
-                <Plus className="h-4 w-4 ml-1" />
-                إضافة قياس
+                <Plus className="h-4 w-4 me-1" />
+                {t("addSize")}
               </Button>
             </div>
 
             {requestItems.length === 0 && (
               <p className="text-sm text-muted-foreground">
-                لم يتم إضافة تفاصيل للطلبية بعد (اختياري)
+                {t("requestItemsEmpty")}
               </p>
             )}
 
@@ -414,7 +423,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                       }
                     >
                       <SelectTrigger className="w-full min-w-0">
-                        <SelectValue placeholder="القياس" />
+                        <SelectValue placeholder={t("size")} />
                       </SelectTrigger>
                       <SelectContent>
                         {sizes
@@ -438,17 +447,15 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                         }
                       >
                         <SelectTrigger className="w-full min-w-0">
-                          <SelectValue placeholder="النخب" />
+                          <SelectValue placeholder={t("grade")} />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">بلا نخب</SelectItem>
-                          {(Object.entries(GRADE_LABELS) as [SalesOrderGrade, string][]).map(
-                            ([key, label]) => (
-                              <SelectItem key={key} value={key}>
-                                {label}
-                              </SelectItem>
-                            ),
-                          )}
+                          <SelectItem value="">{t("noGradeShort")}</SelectItem>
+                          {GRADES.map((key) => (
+                            <SelectItem key={key} value={key}>
+                              {tEnums(`grade.${key}`)}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     )}
@@ -463,7 +470,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                           onChange={(e) =>
                             updateRequestItem(row.key, "requestedTons", e.target.value)
                           }
-                          placeholder="طن"
+                          placeholder={t("tons")}
                         />
                       ) : (
                         <Input
@@ -474,7 +481,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                           onChange={(e) =>
                             updateRequestItem(row.key, "bundleCount", e.target.value)
                           }
-                          placeholder="ربطات"
+                          placeholder={t("bundles")}
                         />
                       )}
                       <Button
@@ -495,7 +502,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
 
           {/* Notes */}
           <div className="space-y-2">
-            <Label htmlFor="notes">ملاحظات (اختياري)</Label>
+            <Label htmlFor="notes">{t("notesOptional")}</Label>
             <Textarea
               id="notes"
               value={notes}
@@ -510,10 +517,10 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              إلغاء
+              {t("cancel")}
             </Button>
             <Button type="submit" disabled={saving || loadingRef}>
-              {saving ? "جاري التسجيل..." : "تسجيل"}
+              {saving ? t("registering") : t("register")}
             </Button>
           </DialogFooter>
         </form>

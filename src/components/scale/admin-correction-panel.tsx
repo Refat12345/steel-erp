@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { createClientIdempotencyKey } from "@/lib/browser-idempotency-key";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,7 +32,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { AlertTriangle, Pencil, Trash2, Plus, ShieldAlert } from "lucide-react";
-import { GRADE_LABELS } from "@/lib/truck-grade";
+import { getTextDirection, type Locale } from "@/i18n/config";
+import { formatDecimal, formatKg } from "@/lib/number-format";
 import type { SalesOrderGrade } from "@prisma/client";
 
 interface SizeOption {
@@ -94,6 +96,11 @@ export function AdminCorrectionPanel({
   sizes: SizeOption[];
   onChanged: () => void | Promise<void>;
 }) {
+  const t = useTranslations("scale");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+
   const [dialog, setDialog] = useState<DialogState>(null);
   const [reason, setReason] = useState("");
   const [weight, setWeight] = useState("");
@@ -170,11 +177,11 @@ export function AdminCorrectionPanel({
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success("تم التصحيح بنجاح");
+      toast.success(t("correctionSuccess"));
       close();
       await onChanged();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "حدث خطأ");
+      toast.error(e instanceof Error ? e.message : t("errorGeneric"));
     } finally {
       setSubmitting(false);
     }
@@ -241,95 +248,122 @@ export function AdminCorrectionPanel({
     (a, b) => a.roundNumber - b.roundNumber,
   );
 
+  const dialogTitle =
+    dialog?.kind === "tare"
+      ? t("dialogCorrectTare")
+      : dialog?.kind === "card"
+        ? t("dialogCorrectCard")
+        : dialog?.kind === "grade"
+          ? t("dialogCorrectGrade")
+          : dialog?.kind === "external"
+            ? t("dialogCorrectExternal")
+            : dialog?.kind === "addSession"
+              ? t("dialogAddSession")
+              : dialog?.kind === "editSession"
+                ? t("dialogEditSession")
+                : dialog?.kind === "deleteSession"
+                  ? t("dialogDeleteSession")
+                  : "";
+
   return (
     <Card className="border-amber-400/60 bg-amber-50/40">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-base text-amber-900">
           <ShieldAlert className="h-4 w-4" />
-          تصحيح إداري (بعد الإغلاق)
+          {t("adminTitle")}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="flex items-start gap-2 rounded-md bg-amber-100/70 p-2 text-xs text-amber-900">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          هذه التعديلات تنعكس فوراً على التقارير والأرصدة. كل عملية تتطلب سبباً
-          مكتوباً ويُسجَّل في سجل التدقيق. الحالة تبقى «مكتملة».
+          {t("adminWarning")}
         </p>
 
-        {/* Visit-level fields */}
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background/60 p-2">
           <div className="text-sm">
-            <span className="text-muted-foreground">وزن الفارغ: </span>
+            <span className="text-muted-foreground">{t("tareWeightLabel")}</span>
             <span className="font-mono font-medium">
-              {truck.tareWeightKg ? Number(truck.tareWeightKg).toLocaleString() : "—"} كغ
+              {truck.tareWeightKg
+                ? t("kgValue", { value: formatKg(truck.tareWeightKg) })
+                : t("emDash")}
             </span>
           </div>
           <Button size="sm" variant="outline" onClick={openTare}>
             <Pencil className="h-3.5 w-3.5 me-1" />
-            تصحيح وزن الفارغ
+            {t("correctTare")}
           </Button>
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background/60 p-2">
           <div className="text-sm">
-            <span className="text-muted-foreground">رقم كرت القبان (المالية): </span>
+            <span className="text-muted-foreground">
+              {t("externalCardNumber")}:{" "}
+            </span>
             <span className="font-mono font-medium">
-              {truck.externalCardNumber ?? "—"}
+              {truck.externalCardNumber ?? t("emDash")}
             </span>
           </div>
           <Button size="sm" variant="outline" onClick={openCard}>
             <Pencil className="h-3.5 w-3.5 me-1" />
-            تصحيح رقم الكرت
+            {t("correctCardNumber")}
           </Button>
         </div>
 
-        {/* Per-round sections */}
         {sortedRounds.map((round) => {
           const roundSessions = truck.sessions.filter(
             (s) => s.bridgeRoundId === round.id,
           );
+          const gradeLabel = round.grade
+            ? tEnums(`grade.${round.grade}`)
+            : t("gradeUnspecified");
           return (
             <div key={round.id} className="space-y-2 rounded-md border bg-background/60 p-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-sm font-semibold">
-                  الدورة {round.roundNumber}
+                  {t("roundNumber", { n: round.roundNumber })}
                   {round.isFinal && (
-                    <span className="ms-1 text-xs text-muted-foreground">(الخروج النهائي)</span>
+                    <span className="ms-1 text-xs text-muted-foreground">
+                      {t("finalExit")}
+                    </span>
                   )}
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  النخب: {round.grade ? GRADE_LABELS[round.grade] : "غير محدد"}
+                  {t("gradeColonValue", { value: gradeLabel })}
                 </span>
               </div>
 
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <span>
-                  بداية: <span className="font-mono">{Number(round.startWeightKg).toLocaleString()}</span> كغ
+                  {t("startColon")}
+                  <span className="font-mono tabular-nums" dir="ltr">
+                    {t("kgValue", { value: formatKg(round.startWeightKg) })}
+                  </span>
                 </span>
                 <span>
-                  نهاية:{" "}
-                  <span className="font-mono">
-                    {round.endWeightKg ? Number(round.endWeightKg).toLocaleString() : "—"}
-                  </span>{" "}
-                  كغ
+                  {t("endColon")}
+                  <span className="font-mono tabular-nums" dir="ltr">
+                    {round.endWeightKg
+                      ? t("kgValue", { value: formatKg(round.endWeightKg) })
+                      : t("emDash")}
+                  </span>
                 </span>
               </div>
 
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" variant="outline" onClick={() => openGrade(round)}>
                   <Pencil className="h-3.5 w-3.5 me-1" />
-                  تصحيح النخب
+                  {t("correctGrade")}
                 </Button>
                 {round.endWeightKg != null && (
                   <Button size="sm" variant="outline" onClick={() => openExternal(round)}>
                     <Pencil className="h-3.5 w-3.5 me-1" />
-                    تصحيح الوزن الخارجي
+                    {t("correctExternalWeight")}
                   </Button>
                 )}
                 {!truck.skipInternalWeighing && (
                   <Button size="sm" variant="outline" onClick={() => openAddSession(round)}>
                     <Plus className="h-3.5 w-3.5 me-1" />
-                    إضافة وزنة داخلية
+                    {t("addInternalSession")}
                   </Button>
                 )}
               </div>
@@ -340,20 +374,20 @@ export function AdminCorrectionPanel({
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-[40px]">#</TableHead>
-                        <TableHead>القياس</TableHead>
-                        <TableHead>الربطات</TableHead>
-                        <TableHead>الوزن (طن)</TableHead>
-                        <TableHead className="w-[90px]">إجراءات</TableHead>
+                        <TableHead>{t("size")}</TableHead>
+                        <TableHead>{t("bundles")}</TableHead>
+                        <TableHead>{t("weightTons")}</TableHead>
+                        <TableHead className="w-[90px]">{t("actions")}</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {roundSessions.map((s) => (
                         <TableRow key={s.id}>
                           <TableCell className="font-mono">{s.sessionNumber}</TableCell>
-                          <TableCell>{s.size?.displayName ?? "—"}</TableCell>
-                          <TableCell>{s.bundleCount ?? "—"}</TableCell>
-                          <TableCell className="font-mono">
-                            {Number(s.weightTons).toFixed(3)}
+                          <TableCell>{s.size?.displayName ?? t("emDash")}</TableCell>
+                          <TableCell>{s.bundleCount ?? t("emDash")}</TableCell>
+                          <TableCell className="font-mono tabular-nums text-start">
+                            {formatDecimal(s.weightTons, 3)}
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-0.5">
@@ -386,25 +420,16 @@ export function AdminCorrectionPanel({
         })}
       </CardContent>
 
-      {/* ── Dialog ── */}
       <Dialog open={dialog != null} onOpenChange={(o) => !o && close()}>
-        <DialogContent>
+        <DialogContent dir={dir}>
           <DialogHeader>
-            <DialogTitle>
-              {dialog?.kind === "tare" && "تصحيح وزن الفارغ"}
-              {dialog?.kind === "card" && "تصحيح رقم كرت القبان (المالية)"}
-              {dialog?.kind === "grade" && "تصحيح نخب الدورة"}
-              {dialog?.kind === "external" && "تصحيح الوزن الخارجي للدورة"}
-              {dialog?.kind === "addSession" && "إضافة وزنة داخلية"}
-              {dialog?.kind === "editSession" && "تعديل وزنة داخلية"}
-              {dialog?.kind === "deleteSession" && "حذف وزنة داخلية"}
-            </DialogTitle>
+            <DialogTitle>{dialogTitle}</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-3">
             {(dialog?.kind === "tare" || dialog?.kind === "external") && (
               <div className="space-y-1.5">
-                <Label>الوزن (كغ)</Label>
+                <Label>{t("weightKg")}</Label>
                 <Input
                   type="number"
                   inputMode="decimal"
@@ -414,7 +439,7 @@ export function AdminCorrectionPanel({
                 {dialog?.kind === "tare" && (
                   <p className="flex items-start gap-1 text-xs text-amber-700">
                     <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-                    تغيير وزن الفارغ يعيد حساب صافي الدورة الأولى.
+                    {t("tareRecalcWarning")}
                   </p>
                 )}
               </div>
@@ -422,11 +447,11 @@ export function AdminCorrectionPanel({
 
             {dialog?.kind === "card" && (
               <div className="space-y-1.5">
-                <Label>رقم كرت القبان (المالية)</Label>
+                <Label>{t("externalCardNumber")}</Label>
                 <Input
                   value={cardNumber}
                   onChange={(e) => setCardNumber(e.target.value)}
-                  placeholder="أدخل الرقم الجديد"
+                  placeholder={t("newCardPlaceholder")}
                   maxLength={30}
                 />
               </div>
@@ -434,15 +459,15 @@ export function AdminCorrectionPanel({
 
             {dialog?.kind === "grade" && (
               <div className="space-y-1.5">
-                <Label>النخب</Label>
+                <Label>{t("grade")}</Label>
                 <Select value={grade} onValueChange={(v) => setGrade(v ?? GRADE_NONE)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={GRADE_NONE}>غير محدد</SelectItem>
-                    <SelectItem value="FIRST">{GRADE_LABELS.FIRST}</SelectItem>
-                    <SelectItem value="SECOND">{GRADE_LABELS.SECOND}</SelectItem>
+                  <SelectContent dir={dir}>
+                    <SelectItem value={GRADE_NONE}>{t("gradeUnspecified")}</SelectItem>
+                    <SelectItem value="FIRST">{tEnums("grade.FIRST")}</SelectItem>
+                    <SelectItem value="SECOND">{tEnums("grade.SECOND")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -451,13 +476,13 @@ export function AdminCorrectionPanel({
             {(dialog?.kind === "addSession" || dialog?.kind === "editSession") && (
               <>
                 <div className="space-y-1.5">
-                  <Label>القياس</Label>
+                  <Label>{t("size")}</Label>
                   <Select value={sizeId} onValueChange={(v) => setSizeId(v ?? GRADE_NONE)}>
                     <SelectTrigger>
-                      <SelectValue placeholder="اختر القياس" />
+                      <SelectValue placeholder={t("selectSize")} />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={GRADE_NONE}>بدون قياس</SelectItem>
+                    <SelectContent dir={dir}>
+                      <SelectItem value={GRADE_NONE}>{t("noSize")}</SelectItem>
                       {sizes.map((s) => (
                         <SelectItem key={s.id} value={String(s.id)}>
                           {s.displayName}
@@ -467,7 +492,7 @@ export function AdminCorrectionPanel({
                   </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <Label>عدد الربطات (اختياري)</Label>
+                  <Label>{t("bundleCountOptional")}</Label>
                   <Input
                     type="number"
                     inputMode="numeric"
@@ -476,7 +501,7 @@ export function AdminCorrectionPanel({
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label>الوزن (طن)</Label>
+                  <Label>{t("weightTonsField")}</Label>
                   <Input
                     type="number"
                     inputMode="decimal"
@@ -489,22 +514,21 @@ export function AdminCorrectionPanel({
 
             {dialog?.kind === "deleteSession" && (
               <p className="text-sm">
-                سيتم حذف الوزنة رقم{" "}
-                <span className="font-mono font-semibold">
-                  {dialog.session.sessionNumber}
-                </span>{" "}
-                ({Number(dialog.session.weightTons).toFixed(3)} طن). لا يمكن التراجع.
+                {t("deleteSessionConfirm", {
+                  n: dialog.session.sessionNumber,
+                  tons: formatDecimal(dialog.session.weightTons, 3),
+                })}
               </p>
             )}
 
             <div className="space-y-1.5">
               <Label>
-                سبب التصحيح <span className="text-destructive">*</span>
+                {t("correctionReason")} <span className="text-destructive">*</span>
               </Label>
               <Textarea
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                placeholder="مثال: خطأ إدخال من الموظف عند الإغلاق"
+                placeholder={t("correctionReasonPlaceholder")}
                 rows={2}
               />
             </div>
@@ -512,7 +536,7 @@ export function AdminCorrectionPanel({
 
           <DialogFooter>
             <Button variant="outline" onClick={close} disabled={submitting}>
-              إلغاء
+              {t("cancel")}
             </Button>
             <Button
               onClick={handleSubmit}
@@ -523,7 +547,7 @@ export function AdminCorrectionPanel({
               }
               variant={dialog?.kind === "deleteSession" ? "destructive" : "default"}
             >
-              {dialog?.kind === "deleteSession" ? "حذف" : "حفظ"}
+              {dialog?.kind === "deleteSession" ? t("delete") : t("save")}
             </Button>
           </DialogFooter>
         </DialogContent>

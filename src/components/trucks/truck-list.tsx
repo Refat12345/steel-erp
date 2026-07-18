@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { useLocale, useTranslations } from "next-intl";
 import { sessionHasPermission } from "@/lib/client-permissions";
 import { toast } from "sonner";
 import {
@@ -37,10 +38,12 @@ import { RegisterTruckDialog } from "./register-truck-dialog";
 import { EditTruckDialog, type EditableTruck } from "./edit-truck-dialog";
 import { durationBetween, formatDurationCompact } from "@/lib/format-duration";
 import { formatDate, formatDateTime } from "@/lib/date-format";
+import { formatInteger } from "@/lib/number-format";
 import { defaultOperationalDateInput } from "@/lib/operational-day";
-import { getDisplayGradeLabel } from "@/lib/truck-grade";
+import { getDisplayGrade } from "@/lib/truck-grade";
 import { canShowTruckEditButton } from "@/lib/truck-edit-ui";
-import type { SalesOrderGrade } from "@prisma/client";
+import { getTextDirection, type Locale } from "@/i18n/config";
+import type { SalesOrderGrade, TruckStatus } from "@prisma/client";
 
 interface TruckListItem extends EditableTruck {
   id: number;
@@ -66,22 +69,40 @@ interface TruckListItem extends EditableTruck {
   _count: { sessions: number; rounds: number };
 }
 
-const statusMap: Record<
+const TRUCK_STATUSES: TruckStatus[] = [
+  "Queued",
+  "Approved",
+  "FirstWeigh",
+  "Loading",
+  "OnScale",
+  "LoadingComplete",
+  "SecondWeigh",
+  "Completed",
+  "Cancelled",
+];
+
+const STATUS_VARIANTS: Record<
   string,
-  { label: string; variant: "default" | "secondary" | "destructive" | "outline" }
+  "default" | "secondary" | "destructive" | "outline"
 > = {
-  Queued: { label: "بالطابور", variant: "secondary" },
-  FirstWeigh: { label: "وزن فارغ", variant: "default" },
-  OnScale: { label: "على الميزان", variant: "default" },
-  LoadingComplete: { label: "تحميل مكتمل", variant: "outline" },
-  SecondWeigh: { label: "وزن محمّل", variant: "default" },
-  Completed: { label: "مكتملة", variant: "secondary" },
-  Cancelled: { label: "ملغاة", variant: "destructive" },
+  Queued: "secondary",
+  Approved: "secondary",
+  FirstWeigh: "default",
+  Loading: "default",
+  OnScale: "default",
+  LoadingComplete: "outline",
+  SecondWeigh: "default",
+  Completed: "secondary",
+  Cancelled: "destructive",
 };
 
 const PAGE_SIZE = 25;
 
 export function TruckList() {
+  const t = useTranslations("trucks");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const isRtl = getTextDirection(locale) === "rtl";
   const { data: session } = useSession();
   const router = useRouter();
   const [data, setData] = useState<TruckListItem[]>([]);
@@ -121,11 +142,11 @@ export function TruckList() {
       setTotal(json.total);
       setAnalyticsStartDate(json.analyticsStartDate ?? null);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "خطأ في تحميل البيانات");
+      toast.error(e instanceof Error ? e.message : t("errorLoad"));
     } finally {
       setLoading(false);
     }
-  }, [page, statusFilter, plateSearch, operationalDate]);
+  }, [page, statusFilter, plateSearch, operationalDate, t]);
 
   useEffect(() => {
     fetchData();
@@ -136,6 +157,13 @@ export function TruckList() {
   }, [statusFilter, plateSearch, operationalDate]);
 
   const totalPages = Math.ceil(total / PAGE_SIZE) || 1;
+
+  function statusLabel(status: string): string {
+    if ((TRUCK_STATUSES as readonly string[]).includes(status)) {
+      return tEnums(`truckStatus.${status as TruckStatus}`);
+    }
+    return status;
+  }
 
   return (
     <div className="space-y-4">
@@ -148,13 +176,13 @@ export function TruckList() {
               htmlFor="truck-plate-search"
               className="text-xs font-medium text-muted-foreground"
             >
-              بحث
+              {t("search")}
             </label>
             <div className="relative">
               <Search className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 id="truck-plate-search"
-                placeholder="بحث برقم اللوحة أو رقم الكرت..."
+                placeholder={t("searchPlatePlaceholder")}
                 className="ps-9"
                 value={plateSearch}
                 onChange={(e) => setPlateSearch(e.target.value)}
@@ -164,16 +192,18 @@ export function TruckList() {
 
           {/* Status */}
           <div className="flex w-full flex-col gap-1.5 sm:w-[11rem]">
-            <label className="text-xs font-medium text-muted-foreground">الحالة</label>
+            <label className="text-xs font-medium text-muted-foreground">
+              {t("status")}
+            </label>
             <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v ?? "all")}>
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="الحالة" />
+                <SelectValue placeholder={t("status")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">جميع الحالات</SelectItem>
-                {Object.entries(statusMap).map(([key, { label }]) => (
+                <SelectItem value="all">{t("allStatuses")}</SelectItem>
+                {TRUCK_STATUSES.map((key) => (
                   <SelectItem key={key} value={key}>
-                    {label}
+                    {tEnums(`truckStatus.${key}`)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -187,9 +217,11 @@ export function TruckList() {
                 htmlFor="truck-operational-date"
                 className="text-xs font-medium text-muted-foreground"
               >
-                يوم التشغيل
+                {t("operationalDay")}
               </label>
-              <span className="text-[11px] text-muted-foreground">(08:00 ← 08:00)</span>
+              <span className="text-[11px] text-muted-foreground">
+                {t("operationalDayHint")}
+              </span>
             </div>
             <div className="flex items-center gap-2">
               <Input
@@ -207,7 +239,7 @@ export function TruckList() {
                 onClick={() => setOperationalDate(defaultOperationalDateInput())}
               >
                 <CalendarDays className="h-4 w-4 me-1" />
-                اليوم
+                {t("today")}
               </Button>
             </div>
           </div>
@@ -218,7 +250,7 @@ export function TruckList() {
               variant="secondary"
               className="h-10 px-3 text-sm tabular-nums shrink-0"
             >
-              {loading ? "…" : `${total.toLocaleString("ar-SY")} شاحنة`}
+              {loading ? "…" : t("truckCount", { count: formatInteger(total) })}
             </Badge>
           )}
 
@@ -226,7 +258,7 @@ export function TruckList() {
           {canRegister && (
             <Button className="shrink-0" onClick={() => setShowRegister(true)}>
               <Plus className="h-4 w-4 me-1" />
-              تسجيل شاحنة
+              {t("registerTruck")}
             </Button>
           )}
         </div>
@@ -237,17 +269,17 @@ export function TruckList() {
         <Table className="min-w-[920px]">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[60px]">#</TableHead>
-              <TableHead>رقم الكرت</TableHead>
-              <TableHead>الزبون</TableHead>
-              <TableHead>رقم اللوحة</TableHead>
-              <TableHead>السائق</TableHead>
-              <TableHead>الحالة</TableHead>
-              <TableHead>النخب</TableHead>
-              <TableHead>الوجهة</TableHead>
-              <TableHead>صافي القبان (كغ)</TableHead>
-              <TableHead>مدة التحميل</TableHead>
-              <TableHead>التاريخ</TableHead>
+              <TableHead className="w-[60px]">{t("columns.id")}</TableHead>
+              <TableHead>{t("columns.cardNumber")}</TableHead>
+              <TableHead>{t("columns.customer")}</TableHead>
+              <TableHead>{t("columns.plateNumber")}</TableHead>
+              <TableHead>{t("columns.driver")}</TableHead>
+              <TableHead>{t("columns.status")}</TableHead>
+              <TableHead>{t("columns.grade")}</TableHead>
+              <TableHead>{t("columns.destination")}</TableHead>
+              <TableHead>{t("columns.bridgeNetKg")}</TableHead>
+              <TableHead>{t("columns.loadingDuration")}</TableHead>
+              <TableHead>{t("columns.date")}</TableHead>
               <TableHead className="w-[96px]" />
             </TableRow>
           </TableHeader>
@@ -265,15 +297,12 @@ export function TruckList() {
               : data.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
-                      لا توجد عمليات
+                      {t("emptyOperations")}
                     </TableCell>
                   </TableRow>
                 ) : (
                   data.map((truck) => {
-                    const st = statusMap[truck.status] ?? {
-                      label: truck.status,
-                      variant: "secondary" as const,
-                    };
+                    const variant = STATUS_VARIANTS[truck.status] ?? "secondary";
                     const endTime = truck.grossTime
                       ?? (truck.status === "Cancelled" ? truck.closedAt : null);
                     const loadingInProgress =
@@ -285,6 +314,17 @@ export function TruckList() {
                     const grossKg = truck.grossWeightKg ? Number(truck.grossWeightKg) : null;
                     const bridgeNetKg =
                       tareKg != null && grossKg != null ? grossKg - tareKg : null;
+                    const grade = getDisplayGrade(truck);
+                    const durationTitle = truck.tareTime
+                      ? [
+                          t("tareEntryTitle", { time: formatDateTime(truck.tareTime) }),
+                          endTime
+                            ? t("grossWeighTitle", { time: formatDateTime(endTime) })
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join("\n")
+                      : "";
                     return (
                       <TableRow
                         key={truck.id}
@@ -306,47 +346,37 @@ export function TruckList() {
                         <TableCell>{truck.driverName}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
-                            <Badge variant={st.variant}>{st.label}</Badge>
+                            <Badge variant={variant}>{statusLabel(truck.status)}</Badge>
                             {(truck._count?.rounds ?? 0) > 1 && (
                               <Badge
                                 variant="outline"
                                 className="border-violet-300 text-violet-700"
-                                title="عدد دورات القبان"
+                                title={t("roundsBadgeTitle")}
                               >
-                                {truck._count.rounds} دورات
+                                {t("roundsBadge", { count: truck._count.rounds })}
                               </Badge>
                             )}
                           </div>
                         </TableCell>
                         <TableCell className="text-sm">
-                          {getDisplayGradeLabel(truck) ?? "—"}
+                          {grade ? tEnums(`grade.${grade}`) : "—"}
                         </TableCell>
                         <TableCell className="text-sm">
                           {truck.destination?.name ?? "—"}
                         </TableCell>
                         <TableCell className="font-mono text-sm">
-                          {bridgeNetKg != null
-                            ? bridgeNetKg.toLocaleString("ar-SY")
-                            : "—"}
+                          {bridgeNetKg != null ? formatInteger(bridgeNetKg) : "—"}
                         </TableCell>
                         <TableCell
                           className={`font-mono text-sm tabular-nums ${
                             loadingInProgress ? "text-amber-600" : ""
                           }`}
-                          title={
-                            truck.tareTime
-                              ? `دخول القبان فارغاً: ${formatDateTime(truck.tareTime)}${
-                                  endTime
-                                    ? `\nوزن المحمّل: ${formatDateTime(endTime)}`
-                                    : ""
-                                }`
-                              : ""
-                          }
+                          title={durationTitle}
                         >
                           {formatDurationCompact(loadingMs)}
                           {loadingInProgress && (
                             <span className="ms-1 text-[10px] font-sans text-amber-600">
-                              (جارٍ)
+                              {t("loadingInProgress")}
                             </span>
                           )}
                         </TableCell>
@@ -364,7 +394,7 @@ export function TruckList() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                title="تعديل"
+                                title={t("edit")}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setEditingTruckId(truck.id);
@@ -376,7 +406,7 @@ export function TruckList() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              title="فتح عملية الوزن"
+                              title={t("openScale")}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 router.push(`/scale/${truck.id}`);
@@ -398,8 +428,12 @@ export function TruckList() {
       <div className="flex items-center justify-between text-sm text-muted-foreground">
         <span>
           {total > 0
-            ? `عرض ${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, total)} من ${total}`
-            : "لا توجد نتائج"}
+            ? t("paginationRange", {
+                from: (page - 1) * PAGE_SIZE + 1,
+                to: Math.min(page * PAGE_SIZE, total),
+                total,
+              })
+            : t("emptyResults")}
         </span>
         <div className="flex items-center gap-1">
           <Button
@@ -408,7 +442,7 @@ export function TruckList() {
             disabled={page <= 1}
             onClick={() => setPage((p) => p - 1)}
           >
-            <ChevronRight className="h-4 w-4" />
+            {isRtl ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
           </Button>
           <span className="px-2 tabular-nums">
             {page} / {totalPages}
@@ -419,7 +453,7 @@ export function TruckList() {
             disabled={page >= totalPages}
             onClick={() => setPage((p) => p + 1)}
           >
-            <ChevronLeft className="h-4 w-4" />
+            {isRtl ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </Button>
         </div>
       </div>

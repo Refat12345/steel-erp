@@ -1,15 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Printer, ArrowRight } from "lucide-react";
+import { Printer, ArrowLeft, ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { aggregateWeighSessionsBySize } from "@/lib/weigh-session-aggregate";
-import { formatDuration } from "@/lib/format-duration";
+import { formatDurationLocalized } from "@/lib/format-duration";
 import { formatDate, formatDateTime } from "@/lib/date-format";
 import type { TruckTimings } from "@/lib/truck-timing";
-import { getDisplayGradeLabel, GRADE_LABELS } from "@/lib/truck-grade";
+import { getDisplayGrade } from "@/lib/truck-grade";
+import { getTextDirection, type Locale } from "@/i18n/config";
+import { formatDecimal, formatInteger, formatKg } from "@/lib/number-format";
 import {
   computeA4PrintFitScale,
   SCALE_CARD_PRINT_HEIGHT_FUDGE,
@@ -82,8 +85,14 @@ export function ScaleCardPrint({
   truckId: number;
   variant?: "internal" | "driver";
 }) {
+  const t = useTranslations("scale");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+  const isRtl = dir === "rtl";
+  const listSeparator = locale === "en" ? ", " : "، ";
+
   const isDriver = variant === "driver";
-  const isInternal = !isDriver;
   const printBodyClass = `scale-card-print-${variant}`;
   const [truck, setTruck] = useState<TruckDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -97,11 +106,11 @@ export function ScaleCardPrint({
       if (!json.success) throw new Error(json.error);
       setTruck(json.data);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "خطأ في تحميل البيانات");
+      toast.error(e instanceof Error ? e.message : t("errorLoad"));
     } finally {
       setLoading(false);
     }
-  }, [truckId]);
+  }, [truckId, t]);
 
   useEffect(() => {
     fetchTruck();
@@ -177,10 +186,10 @@ export function ScaleCardPrint({
   }, [applyPrintFit]);
 
   if (loading) {
-    return <div className="p-8 text-center text-muted-foreground">جاري التحميل...</div>;
+    return <div className="p-8 text-center text-muted-foreground">{t("loading")}</div>;
   }
   if (!truck) {
-    return <div className="p-8 text-center text-muted-foreground">العملية غير موجودة</div>;
+    return <div className="p-8 text-center text-muted-foreground">{t("notFound")}</div>;
   }
 
   const tare = truck.tareWeightKg ? Number(truck.tareWeightKg) : 0;
@@ -197,6 +206,7 @@ export function ScaleCardPrint({
 
   const rounds = truck.rounds ?? [];
   const isMultiRound = rounds.length > 1;
+  const displayGrade = getDisplayGrade(truck);
 
   const sessionsBySize = aggregateWeighSessionsBySize(truck.sessions);
   const totalAggregateBundles =
@@ -210,11 +220,15 @@ export function ScaleCardPrint({
   return (
     <>
       {/* Screen-only toolbar */}
-      <div className="print:hidden flex items-center gap-3 mb-4 flex-wrap">
+      <div className="print:hidden flex items-center gap-3 mb-4 flex-wrap" dir={dir}>
         <Link href={`/scale/${truck.id}`}>
           <Button variant="ghost" size="sm">
-            <ArrowRight className="h-4 w-4 me-1" />
-            العودة
+            {isRtl ? (
+              <ArrowRight className="h-4 w-4 me-1" />
+            ) : (
+              <ArrowLeft className="h-4 w-4 me-1" />
+            )}
+            {t("back")}
           </Button>
         </Link>
         <div className="flex items-center gap-2 ms-auto">
@@ -227,7 +241,7 @@ export function ScaleCardPrint({
               size="sm"
               disabled={variant === "internal"}
             >
-              نسخة داخلية
+              {t("print.internalCopy")}
             </Button>
           </Link>
           <Link
@@ -239,18 +253,18 @@ export function ScaleCardPrint({
               size="sm"
               disabled={variant === "driver"}
             >
-              نسخة السائق
+              {t("print.driverCopy")}
             </Button>
           </Link>
           <Button onClick={handlePrint}>
             <Printer className="h-4 w-4 me-1" />
-            طباعة
+            {t("print.print")}
           </Button>
         </div>
       </div>
 
       {/* Printable card — internal host clips scaled content to one A4 page */}
-      <div ref={printHostRef} className={hostClassName}>
+      <div ref={printHostRef} className={hostClassName} dir={dir}>
       <div
         ref={cardRef}
         className={`scale-card scale-card--${variant} mx-auto max-w-[210mm] bg-white text-black p-6 print:p-3 print:leading-tight border print:border-0 rounded-lg print:rounded-none ${isDriver ? "print:text-[8pt]" : "print:text-[9pt]"}`}
@@ -269,14 +283,14 @@ export function ScaleCardPrint({
           </div>
           {/* Title */}
           <div className="text-center flex-1">
-            <h1 className="text-xl font-bold print:text-[14pt]">كرت قبان</h1>
+            <h1 className="text-xl font-bold print:text-[14pt]">{t("print.title")}</h1>
             {isDriver && (
               <p className="text-xs font-semibold text-gray-500 mt-0.5 tracking-wide">
-                — نسخة السائق —
+                {t("print.driverCopyBanner")}
               </p>
             )}
             <p className="text-xs text-gray-500 print:text-[7pt]">
-              نظام إدارة القبان
+              {t("print.systemName")}
             </p>
           </div>
           {/* Spacer to balance logo */}
@@ -290,16 +304,16 @@ export function ScaleCardPrint({
             unified number existed fall back to the internal id alone. */}
         <div className="flex justify-between items-center mb-3 print:mb-2 text-sm">
           <div>
-            <span className="font-bold">رقم الكرت: </span>
+            <span className="font-bold">{t("print.cardNumber")}</span>
             <span className="font-mono">{truck.externalCardNumber ?? truck.id}</span>
             {truck.externalCardNumber && (
               <span className="text-gray-500 text-xs ms-2">
-                (رقم العملية: {truck.id})
+                {t("print.operationId", { id: truck.id })}
               </span>
             )}
           </div>
           <div>
-            <span className="font-bold">التاريخ: </span>
+            <span className="font-bold">{t("print.date")}</span>
             <span>
               {truck.closedAt
                 ? formatDate(truck.closedAt)
@@ -313,40 +327,40 @@ export function ScaleCardPrint({
           <tbody>
             {truck.customer && (
               <tr>
-                <td className="font-bold py-1 pe-4 w-1/4">الزبون:</td>
+                <td className="font-bold py-1 pe-4 w-1/4">{t("print.customerColon")}</td>
                 <td className="py-1" colSpan={3}>
                   {truck.customer.fullName} ({truck.customer.code})
                 </td>
               </tr>
             )}
             <tr>
-              <td className="font-bold py-1 pe-4 w-1/4">رقم اللوحة:</td>
+              <td className="font-bold py-1 pe-4 w-1/4">{t("print.plateColon")}</td>
               <td className="py-1">{truck.plateNumber}</td>
-              <td className="font-bold py-1 pe-4 w-1/4">السائق:</td>
+              <td className="font-bold py-1 pe-4 w-1/4">{t("print.driverColon")}</td>
               <td className="py-1">{truck.driverName}</td>
             </tr>
             <tr>
-              <td className="font-bold py-1 pe-4">الوجهة:</td>
+              <td className="font-bold py-1 pe-4">{t("print.destinationColon")}</td>
               <td className="py-1" colSpan={3}>
                 {truck.destination
                   ? truck.destination.details
                     ? `${truck.destination.name} - ${truck.destination.details}`
                     : truck.destination.name
-                  : "—"}
+                  : t("emDash")}
               </td>
             </tr>
             {truck.salesOrder && (
               <tr>
-                <td className="font-bold py-1 pe-4">أمر البيع:</td>
+                <td className="font-bold py-1 pe-4">{t("print.salesOrderColon")}</td>
                 <td className="py-1">{truck.salesOrder.orderNumber}</td>
-                <td className="font-bold py-1 pe-4">العميل:</td>
+                <td className="font-bold py-1 pe-4">{t("print.clientColon")}</td>
                 <td className="py-1">{truck.salesOrder.contract.customer.fullName}</td>
               </tr>
             )}
-            {getDisplayGradeLabel(truck) && (
+            {displayGrade && (
               <tr>
-                <td className="font-bold py-1 pe-4">النخب:</td>
-                <td className="py-1" colSpan={3}>{getDisplayGradeLabel(truck)}</td>
+                <td className="font-bold py-1 pe-4">{t("print.gradeColon")}</td>
+                <td className="py-1" colSpan={3}>{tEnums(`grade.${displayGrade}`)}</td>
               </tr>
             )}
           </tbody>
@@ -355,16 +369,16 @@ export function ScaleCardPrint({
         {/* Request Items */}
         {truck.requestItems && truck.requestItems.length > 0 && (
           <div className="mb-3 print:mb-2">
-            <h3 className="font-bold text-sm mb-2">تفاصيل الطلبية</h3>
+            <h3 className="font-bold text-sm mb-2">{t("requestDetails")}</h3>
             <div className="border border-black rounded">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-100 print:bg-gray-200">
-                    <th className="py-1.5 px-2 text-start border-b border-black">القياس</th>
+                    <th className="py-1.5 px-2 text-start border-b border-black">{t("size")}</th>
                     {truck.requestItems.some((i) => i.grade) && (
-                      <th className="py-1.5 px-2 text-start border-b border-black">النخب</th>
+                      <th className="py-1.5 px-2 text-start border-b border-black">{t("grade")}</th>
                     )}
-                    <th className="py-1.5 px-2 text-start border-b border-black">الكمية المطلوبة</th>
+                    <th className="py-1.5 px-2 text-start border-b border-black">{t("requestedQty")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -373,17 +387,19 @@ export function ScaleCardPrint({
                       <td className="py-1 px-2">{item.size.displayName}</td>
                       {truck.requestItems.some((i) => i.grade) && (
                         <td className="py-1 px-2">
-                          {item.grade ? GRADE_LABELS[item.grade] : "—"}
+                          {item.grade ? tEnums(`grade.${item.grade}`) : t("emDash")}
                         </td>
                       )}
                       <td className="py-1 px-2 font-mono">
                         {item.size.isBundleType
                           ? item.bundleCount != null
-                            ? `${item.bundleCount} ربطة`
-                            : "—"
+                            ? t("bundlesValue", { value: formatInteger(item.bundleCount) })
+                            : t("emDash")
                           : item.requestedTons != null
-                            ? `${Number(item.requestedTons).toFixed(3)} طن`
-                            : "—"}
+                            ? t("tonsValue", {
+                                value: formatDecimal(Number(item.requestedTons), 3),
+                              })
+                            : t("emDash")}
                       </td>
                     </tr>
                   ))}
@@ -398,45 +414,45 @@ export function ScaleCardPrint({
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-100 print:bg-gray-200">
-                <th className="py-2 px-3 text-start font-bold border-b border-black">البند</th>
-                <th className="py-2 px-3 text-start font-bold border-b border-black">القيمة</th>
-                <th className="py-2 px-3 text-start font-bold border-b border-black">الوقت</th>
+                <th className="py-2 px-3 text-start font-bold border-b border-black">{t("print.item")}</th>
+                <th className="py-2 px-3 text-start font-bold border-b border-black">{t("print.value")}</th>
+                <th className="py-2 px-3 text-start font-bold border-b border-black">{t("print.time")}</th>
               </tr>
             </thead>
             <tbody>
               <tr className="border-b border-gray-300">
-                <td className="py-2 px-3">تسجيل الشاحنة (اللوجستك)</td>
-                <td className="py-2 px-3 text-gray-600">—</td>
+                <td className="py-2 px-3">{t("print.truckRegistered")}</td>
+                <td className="py-2 px-3 text-gray-600">{t("emDash")}</td>
                 <td className="py-2 px-3 text-xs">
                   {formatDateTime(truck.createdAt)}
                 </td>
               </tr>
               <tr className="border-b border-gray-300">
-                <td className="py-2 px-3">وزن الفارغ (Tare)</td>
+                <td className="py-2 px-3">{t("print.tareRow")}</td>
                 <td className="py-2 px-3 font-mono font-bold">
-                  {tare.toLocaleString("en-US")} كغ
+                  {t("kgValue", { value: formatKg(tare) })}
                 </td>
                 <td className="py-2 px-3 text-xs">
                   {truck.tareTime
                     ? formatDateTime(truck.tareTime)
-                    : "—"}
+                    : t("emDash")}
                 </td>
               </tr>
               <tr className="border-b border-gray-300">
-                <td className="py-2 px-3">وزن المحمّل (Gross)</td>
+                <td className="py-2 px-3">{t("print.grossRow")}</td>
                 <td className="py-2 px-3 font-mono font-bold">
-                  {gross.toLocaleString("en-US")} كغ
+                  {t("kgValue", { value: formatKg(gross) })}
                 </td>
                 <td className="py-2 px-3 text-xs">
                   {truck.grossTime
                     ? formatDateTime(truck.grossTime)
-                    : "—"}
+                    : t("emDash")}
                 </td>
               </tr>
               <tr className="bg-gray-50">
-                <td className="py-2 px-3 font-bold">صافي القبان (Net)</td>
+                <td className="py-2 px-3 font-bold">{t("print.netRow")}</td>
                 <td className="py-2 px-3 font-mono font-bold text-base">
-                  {bridgeNetKg.toLocaleString("en-US")} كغ
+                  {t("kgValue", { value: formatKg(bridgeNetKg) })}
                 </td>
                 <td className="py-2 px-3" />
               </tr>
@@ -450,18 +466,18 @@ export function ScaleCardPrint({
         {isMultiRound && (
           <div className="mb-3 print:mb-2">
             <h3 className="font-bold text-sm mb-2">
-              تفصيل دورات القبان ({rounds.length} دورات)
+              {t("print.roundsBreakdown", { count: rounds.length })}
             </h3>
             <div className="border border-black rounded">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-100 print:bg-gray-200">
-                    <th className="py-1.5 px-2 text-start border-b border-black">الدورة</th>
-                    <th className="py-1.5 px-2 text-start border-b border-black">النخب</th>
-                    <th className="py-1.5 px-2 text-start border-b border-black">الأصناف</th>
-                    <th className="py-1.5 px-2 text-start border-b border-black">وزن الدخول (كغ)</th>
-                    <th className="py-1.5 px-2 text-start border-b border-black">وزن الخروج (كغ)</th>
-                    <th className="py-1.5 px-2 text-start border-b border-black">الصافي (كغ)</th>
+                    <th className="py-1.5 px-2 text-start border-b border-black">{t("round")}</th>
+                    <th className="py-1.5 px-2 text-start border-b border-black">{t("grade")}</th>
+                    <th className="py-1.5 px-2 text-start border-b border-black">{t("print.products")}</th>
+                    <th className="py-1.5 px-2 text-start border-b border-black">{t("print.entryWeightKg")}</th>
+                    <th className="py-1.5 px-2 text-start border-b border-black">{t("print.exitWeightKg")}</th>
+                    <th className="py-1.5 px-2 text-start border-b border-black">{t("print.netKg")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -482,29 +498,29 @@ export function ScaleCardPrint({
                       <tr key={r.id} className="border-b border-gray-200">
                         <td className="py-1 px-2 font-mono">{r.roundNumber}</td>
                         <td className="py-1 px-2">
-                          {r.grade ? GRADE_LABELS[r.grade] : "—"}
+                          {r.grade ? tEnums(`grade.${r.grade}`) : t("emDash")}
                         </td>
                         <td className="py-1 px-2 text-xs">
-                          {sizeNames.length > 0 ? sizeNames.join("، ") : "—"}
+                          {sizeNames.length > 0 ? sizeNames.join(listSeparator) : t("emDash")}
                         </td>
                         <td className="py-1 px-2 font-mono">
-                          {startKg.toLocaleString("en-US")}
+                          {formatKg(startKg)}
                         </td>
                         <td className="py-1 px-2 font-mono">
-                          {endKg != null ? endKg.toLocaleString("en-US") : "—"}
+                          {endKg != null ? formatKg(endKg) : t("emDash")}
                         </td>
                         <td className="py-1 px-2 font-mono font-bold">
-                          {netKg != null ? netKg.toLocaleString("en-US") : "—"}
+                          {netKg != null ? formatKg(netKg) : t("emDash")}
                         </td>
                       </tr>
                     );
                   })}
                   <tr className="bg-gray-50 font-bold">
                     <td className="py-1.5 px-2" colSpan={5}>
-                      المجموع (= صافي القبان)
+                      {t("print.totalEqualsBridgeNet")}
                     </td>
                     <td className="py-1.5 px-2 font-mono">
-                      {bridgeNetKg.toLocaleString("en-US")}
+                      {formatKg(bridgeNetKg)}
                     </td>
                   </tr>
                 </tbody>
@@ -517,37 +533,37 @@ export function ScaleCardPrint({
         {!isDriver && (
           <div className="border border-black rounded mb-3 print:mb-2">
             <div className="bg-gray-100 print:bg-gray-200 px-3 py-1.5 border-b border-black">
-              <h3 className="text-sm font-bold">الأزمنة</h3>
+              <h3 className="text-sm font-bold">{t("print.timings")}</h3>
             </div>
             <table className="w-full text-sm">
               <tbody>
                 <tr className="border-b border-gray-300">
                   <td className="py-1.5 px-3 w-1/2">
-                    وقت الانتظار (التسجيل → دخول القبان)
+                    {t("print.waitTiming")}
                   </td>
                   <td className="py-1.5 px-3 font-semibold">
-                    {formatDuration(waitMs)}
+                    {formatDurationLocalized(waitMs, locale)}
                   </td>
                 </tr>
                 <tr className="border-b border-gray-300 bg-emerald-50 print:bg-gray-50">
                   <td className="py-1.5 px-3 font-bold">
-                    مدة القبان (الفارغ → المحمّل)
+                    {t("print.scaleTiming")}
                   </td>
                   <td className="py-1.5 px-3 font-bold">
-                    {formatDuration(scaleMs)}
+                    {formatDurationLocalized(scaleMs, locale)}
                   </td>
                 </tr>
                 <tr className="border-b border-gray-300">
                   <td className="py-1.5 px-3">
-                    مدة التحميل الداخلي (أول وزنة → تأكيد المحمّل)
+                    {t("print.internalTiming")}
                   </td>
                   <td className="py-1.5 px-3 font-semibold">
-                    {formatDuration(internalLoadingMs)}
+                    {formatDurationLocalized(internalLoadingMs, locale)}
                   </td>
                 </tr>
                 {loadingConfirmedAt && loaderName && (
                   <tr className="border-b border-gray-300">
-                    <td className="py-1.5 px-3">تأكيد المحمّل</td>
+                    <td className="py-1.5 px-3">{t("print.loaderConfirm")}</td>
                     <td className="py-1.5 px-3 font-semibold">
                       {loaderName} —{" "}
                       {formatDateTime(loadingConfirmedAt)}
@@ -556,10 +572,10 @@ export function ScaleCardPrint({
                 )}
                 <tr>
                   <td className="py-1.5 px-3">
-                    المدة الكلية (التسجيل → الإغلاق)
+                    {t("print.totalTiming")}
                   </td>
                   <td className="py-1.5 px-3 font-semibold">
-                    {formatDuration(totalMs)}
+                    {formatDurationLocalized(totalMs, locale)}
                   </td>
                 </tr>
               </tbody>
@@ -572,17 +588,17 @@ export function ScaleCardPrint({
           <div className="mb-3 print:mb-2">
             <h3 className="font-bold text-sm mb-2">
               {isDriver
-                ? "الإجمالي حسب القياس"
-                : `الوزنات الداخلية (${truck.sessions.length} وزنة) — الإجمالي حسب القياس`}
+                ? t("totalBySize")
+                : t("print.sessionsInternal", { count: truck.sessions.length })}
             </h3>
             <div className="border border-black rounded">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-100 print:bg-gray-200">
-                      <th className="py-1.5 px-2 text-start border-b border-black">القياس</th>
-                      <th className="py-1.5 px-2 text-start border-b border-black">إجمالي الربطات</th>
+                      <th className="py-1.5 px-2 text-start border-b border-black">{t("size")}</th>
+                      <th className="py-1.5 px-2 text-start border-b border-black">{t("totalBundles")}</th>
                       {!isDriver && (
-                        <th className="py-1.5 px-2 text-start border-b border-black">إجمالي الوزن (طن)</th>
+                        <th className="py-1.5 px-2 text-start border-b border-black">{t("totalWeightTons")}</th>
                       )}
                     </tr>
                   </thead>
@@ -592,23 +608,27 @@ export function ScaleCardPrint({
                         <td className="py-1 px-2">{row.displayName}</td>
                         <td className="py-1 px-2 font-mono">
                           {row.totalBundles != null
-                            ? row.totalBundles.toLocaleString("en-US")
-                            : "—"}
+                            ? formatInteger(row.totalBundles)
+                            : t("emDash")}
                         </td>
                         {!isDriver && (
-                          <td className="py-1 px-2 font-mono font-bold">{row.totalTons.toFixed(3)}</td>
+                          <td className="py-1 px-2 font-mono font-bold">
+                            {formatDecimal(row.totalTons, 3)}
+                          </td>
                         )}
                       </tr>
                     ))}
                     {!isDriver && (
                       <tr className="bg-gray-50 font-bold">
-                        <td className="py-1.5 px-2">المجموع الكلي (كل الوزنات)</td>
+                        <td className="py-1.5 px-2">{t("grandTotalAllSessions")}</td>
                         <td className="py-1.5 px-2 font-mono">
                           {totalAggregateBundles != null
-                            ? totalAggregateBundles.toLocaleString("en-US")
-                            : "—"}
+                            ? formatInteger(totalAggregateBundles)
+                            : t("emDash")}
                         </td>
-                        <td className="py-1.5 px-2 font-mono">{totalSessionsTons.toFixed(3)} طن</td>
+                        <td className="py-1.5 px-2 font-mono">
+                          {t("tonsValue", { value: formatDecimal(totalSessionsTons, 3) })}
+                        </td>
                       </tr>
                     )}
                   </tbody>
@@ -620,22 +640,26 @@ export function ScaleCardPrint({
         {/* Cross Verification — internal only */}
         {!isDriver && (
           <div className="border border-dashed border-gray-400 rounded p-3 print:p-2 mb-3 print:mb-2 text-sm">
-            <h3 className="font-bold mb-1">المقارنة (للتحقق فقط)</h3>
+            <h3 className="font-bold mb-1">{t("print.comparisonTitle")}</h3>
             <div className="grid grid-cols-3 gap-2">
               <div>
-                <span className="text-gray-600">صافي القبان: </span>
-                <span className="font-mono font-bold">{bridgeNetTons.toFixed(3)} طن</span>
+                <span className="text-gray-600">{t("print.bridgeNetTons")}</span>
+                <span className="font-mono font-bold">
+                  {t("tonsValue", { value: formatDecimal(bridgeNetTons, 3) })}
+                </span>
               </div>
               <div>
-                <span className="text-gray-600">مجموع الداخلي: </span>
-                <span className="font-mono font-bold">{totalSessionsTons.toFixed(3)} طن</span>
+                <span className="text-gray-600">{t("print.internalTotalTons")}</span>
+                <span className="font-mono font-bold">
+                  {t("tonsValue", { value: formatDecimal(totalSessionsTons, 3) })}
+                </span>
               </div>
               <div>
-                <span className="text-gray-600">الفرق: </span>
+                <span className="text-gray-600">{t("print.differenceTons")}</span>
                 <span
                   className={`font-mono font-bold ${Math.abs(discrepancyTons) > 0.5 ? "text-red-600" : ""}`}
                 >
-                  {discrepancyTons.toFixed(3)} طن
+                  {t("tonsValue", { value: formatDecimal(discrepancyTons, 3) })}
                 </span>
               </div>
             </div>
@@ -646,15 +670,25 @@ export function ScaleCardPrint({
         <div className="flex justify-between items-end text-xs text-gray-600 border-t border-gray-300 pt-3">
           <div className="space-y-0.5">
             {!isDriver && (
-              <div>المشغّل: {truck.closer?.fullName ?? truck.creator.fullName}</div>
+              <div>
+                {t("print.operator", {
+                  name: truck.closer?.fullName ?? truck.creator.fullName,
+                })}
+              </div>
             )}
             {truck.closedAt && (
-              <div>وقت الإغلاق: {formatDateTime(truck.closedAt)}</div>
+              <div>
+                {t("print.closedAt", { time: formatDateTime(truck.closedAt) })}
+              </div>
             )}
           </div>
-          <div className="text-left space-y-0.5">
-            {truck.notes && <div>ملاحظات: {truck.notes}</div>}
-            <div>طُبع: {formatDateTime(new Date())}</div>
+          <div className="text-start space-y-0.5">
+            {truck.notes && (
+              <div>{t("print.notes", { notes: truck.notes })}</div>
+            )}
+            <div>
+              {t("print.printedAt", { time: formatDateTime(new Date()) })}
+            </div>
           </div>
         </div>
 
@@ -662,15 +696,15 @@ export function ScaleCardPrint({
         <div className="mt-8 flex justify-around text-sm print:mt-3">
           <div className="text-center">
             <div className="w-32 border-b border-black mb-1" />
-            <div>موظف القبان</div>
+            <div>{t("print.signScaleClerk")}</div>
           </div>
           <div className="text-center">
             <div className="w-32 border-b border-black mb-1" />
-            <div>السائق</div>
+            <div>{t("print.signDriver")}</div>
           </div>
           <div className="text-center">
             <div className="w-32 border-b border-black mb-1" />
-            <div>مشرف القبان</div>
+            <div>{t("print.signSupervisor")}</div>
           </div>
         </div>
       </div>

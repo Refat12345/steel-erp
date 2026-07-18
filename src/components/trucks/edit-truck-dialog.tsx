@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -22,11 +23,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { DestinationSelect } from "@/components/destinations/destination-select";
 import { createClientIdempotencyKey } from "@/lib/browser-idempotency-key";
-import { GRADE_LABELS } from "@/lib/truck-grade";
 import { sizeCodeSupportsGrade, sizeCodeToKind } from "@/lib/material-kind";
 import { notesForPatch, operationalGradeIfChanged } from "@/lib/truck-edit-ui";
 import { Plus, Trash2 } from "lucide-react";
 import type { SalesOrderGrade } from "@prisma/client";
+import { getTextDirection, type Locale } from "@/i18n/config";
 
 interface Customer {
   id: number;
@@ -71,6 +72,7 @@ export interface EditableTruck {
 }
 
 const EDITABLE_STATUSES = ["Queued", "Approved", "FirstWeigh"] as const;
+const GRADES: SalesOrderGrade[] = ["FIRST", "SECOND"];
 
 interface Props {
   truckId: number | null;
@@ -113,6 +115,11 @@ function populateFormFromTruck(
 }
 
 export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Props) {
+  const t = useTranslations("trucks");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+
   const [truck, setTruck] = useState<EditableTruck | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [customerId, setCustomerId] = useState("");
@@ -148,11 +155,11 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
       if (custJson.success) setCustomers(custJson.data || []);
       if (sizeJson.success) setSizes(sizeJson.data || []);
     } catch {
-      toast.error("خطأ في تحميل البيانات المرجعية");
+      toast.error(t("errorRefData"));
     } finally {
       setLoadingRef(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (open) fetchReferenceData();
@@ -173,19 +180,17 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
         const res = await fetch(`/api/trucks/${truckId}`);
         const json = await res.json();
         if (cancelled) return;
-        if (!json.success) throw new Error(json.error || "فشل تحميل بيانات الشاحنة");
+        if (!json.success) throw new Error(json.error || t("errorLoadTruck"));
 
         const data = json.data as EditableTruck & { sessions?: unknown[] };
 
         if (!EDITABLE_STATUSES.includes(data.status as (typeof EDITABLE_STATUSES)[number])) {
-          toast.error("لا يمكن تعديل الشاحنة في الحالة الحالية");
+          toast.error(t("errorNotEditableStatus"));
           onOpenChange(false);
           return;
         }
         if (data.status === "FirstWeigh" && (data.sessions?.length ?? 0) > 0) {
-          toast.error(
-            "لا يمكن تعديل الشاحنة بعد بدء الوزنات الداخلية. حدّث القائمة وحاول مرة أخرى.",
-          );
+          toast.error(t("errorEditAfterInternalWeigh"));
           onOpenChange(false);
           return;
         }
@@ -217,7 +222,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
         });
       } catch (err) {
         if (!cancelled) {
-          toast.error(err instanceof Error ? err.message : "خطأ في تحميل بيانات الشاحنة");
+          toast.error(err instanceof Error ? err.message : t("errorLoadTruckGeneric"));
           onOpenChange(false);
         }
       } finally {
@@ -230,7 +235,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
       cancelled = true;
     };
     // onOpenChange omitted — parent inline callback would retrigger fetch every render
-  }, [open, truckId]);
+  }, [open, truckId, t]);
 
   const customerSelectItems = useMemo(
     () =>
@@ -300,11 +305,11 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
     if (!truck) return;
 
     if (truck.status === "Queued" && (!customerId || !plateNumber.trim() || !driverName.trim())) {
-      toast.error("الزبون ورقم اللوحة واسم السائق مطلوبة");
+      toast.error(t("toastCustomerPlateDriverRequired"));
       return;
     }
     if (editAfterTare && !driverName.trim()) {
-      toast.error("اسم السائق مطلوب");
+      toast.error(t("toastDriverRequired"));
       return;
     }
 
@@ -318,7 +323,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
     for (const row of requestItems.filter((x) => x.sizeCode)) {
       const size = sizes.find((s) => s.code === row.sizeCode);
       if (!size) {
-        toast.error("قياس غير صالح، أعد تحميل الصفحة والمحاولة");
+        toast.error(t("toastInvalidSize"));
         return;
       }
       const grade =
@@ -327,7 +332,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
           : null;
       const dupKey = `${size.id}:${grade ?? ""}`;
       if (seenKeys.has(dupKey)) {
-        toast.error("لا يمكن تكرار نفس القياس بنفس النخب في الطلبية");
+        toast.error(t("toastDuplicateSizeGrade"));
         return;
       }
       seenKeys.add(dupKey);
@@ -335,11 +340,11 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
       const requestedTons = row.requestedTons ? Number(row.requestedTons) : null;
       if (size.isBundleType) {
         if (bundleCount === null || bundleCount < 1) {
-          toast.error("عدد الربطات مطلوب ويجب أن يكون 1 على الأقل");
+          toast.error(t("toastBundlesRequired"));
           return;
         }
       } else if (requestedTons === null || requestedTons <= 0) {
-        toast.error("الوزن بالطن مطلوب ويجب أن يكون أكبر من صفر");
+        toast.error(t("toastTonsRequired"));
         return;
       }
       items.push({
@@ -393,11 +398,11 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success("تم تعديل الشاحنة بنجاح");
+      toast.success(t("editSuccess"));
       onOpenChange(false);
       onSuccess();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "خطأ في تعديل الشاحنة");
+      toast.error(err instanceof Error ? err.message : t("errorEdit"));
     } finally {
       setSaving(false);
     }
@@ -407,9 +412,12 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] min-w-0 overflow-x-hidden overflow-y-auto">
+      <DialogContent
+        dir={dir}
+        className="max-w-lg max-h-[90vh] min-w-0 overflow-x-hidden overflow-y-auto"
+      >
         <DialogHeader>
-          <DialogTitle>تعديل الشاحنة #{truckId ?? truck?.id}</DialogTitle>
+          <DialogTitle>{t("editTitle", { id: truckId ?? truck?.id ?? "" })}</DialogTitle>
         </DialogHeader>
         {loadingDetail ? (
           <div className="space-y-4 py-2">
@@ -421,19 +429,17 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
         <form onSubmit={handleSubmit} className="min-w-0 space-y-4">
           {requestItemsOnly && (
             <p className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
-              الشاحنة معتمدة، لذلك يمكن تعديل تفاصيل الطلبية فقط قبل بدء الوزن.
+              {t("editApprovedOnlyItems")}
             </p>
           )}
           {editAfterTare && (
             <p className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-100">
-              تم تسجيل وزن الفارغ. يمكن تعديل السائق والوجهة والملاحظات والنخب وتفاصيل
-              الطلبية فقط — الزبون وأمر البيع ورقم اللوحة غير قابلة للتغيير. بعد أول
-              وزنة داخلية لن يكون التعديل متاحاً.
+              {t("editAfterTareNote")}
             </p>
           )}
 
           <div className="space-y-2">
-            <Label>الزبون *</Label>
+            <Label>{t("customerRequired")}</Label>
             {loadingRef ? (
               <div className="h-9 animate-pulse rounded-md bg-muted" />
             ) : (
@@ -444,7 +450,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
                 disabled={lockIdentityFields || saving}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="اختر الزبون" />
+                  <SelectValue placeholder={t("selectCustomer")} />
                 </SelectTrigger>
                 <SelectContent>
                   {customers.map((c) => (
@@ -458,7 +464,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
           </div>
 
           <div className="space-y-2">
-            <Label>الوجهة (اختياري)</Label>
+            <Label>{t("destinationOptional")}</Label>
             <DestinationSelect
               value={destinationId}
               onValueChange={setDestinationId}
@@ -467,7 +473,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
           </div>
 
           <div className="space-y-2">
-            <Label>نوع الحمل (اختياري)</Label>
+            <Label>{t("loadTypeOptional")}</Label>
             <Select
               value={isRebarLoad ? "REBAR" : "OTHER"}
               onValueChange={(v) => {
@@ -481,18 +487,18 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
               disabled={requestItemsOnly || saving}
             >
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="اختر نوع الحمل" />
+                <SelectValue placeholder={t("selectLoadType")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="OTHER">غير مبروم</SelectItem>
-                <SelectItem value="REBAR">مبروم</SelectItem>
+                <SelectItem value="OTHER">{t("loadTypeOther")}</SelectItem>
+                <SelectItem value="REBAR">{t("loadTypeRebar")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           {isRebarLoad && (
             <div className="space-y-2">
-              <Label>النخب (اختياري)</Label>
+              <Label>{t("gradeOptional")}</Label>
               <Select
                 value={operationalGrade}
                 onValueChange={(v) =>
@@ -501,17 +507,15 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
                 disabled={requestItemsOnly || saving}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="اختر النخب" />
+                  <SelectValue placeholder={t("selectGrade")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">لا يوجد</SelectItem>
-                  {(Object.entries(GRADE_LABELS) as [SalesOrderGrade, string][]).map(
-                    ([key, label]) => (
-                      <SelectItem key={key} value={key}>
-                        {label}
-                      </SelectItem>
-                    ),
-                  )}
+                  <SelectItem value="">{t("noGrade")}</SelectItem>
+                  {GRADES.map((key) => (
+                    <SelectItem key={key} value={key}>
+                      {tEnums(`grade.${key}`)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -519,7 +523,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label htmlFor="editPlateNumber">رقم اللوحة *</Label>
+              <Label htmlFor="editPlateNumber">{t("plateRequired")}</Label>
               <Input
                 id="editPlateNumber"
                 value={plateNumber}
@@ -528,7 +532,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="editDriverName">اسم السائق *</Label>
+              <Label htmlFor="editDriverName">{t("driverRequired")}</Label>
               <Input
                 id="editDriverName"
                 value={driverName}
@@ -540,7 +544,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label>تفاصيل الطلبية</Label>
+              <Label>{t("requestItems")}</Label>
               <Button
                 type="button"
                 variant="outline"
@@ -548,8 +552,8 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
                 onClick={addRequestItem}
                 disabled={loadingRef || saving}
               >
-                <Plus className="h-4 w-4 ml-1" />
-                إضافة قياس
+                <Plus className="h-4 w-4 me-1" />
+                {t("addSize")}
               </Button>
             </div>
 
@@ -569,7 +573,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
                       disabled={saving}
                     >
                       <SelectTrigger className="w-full min-w-0">
-                        <SelectValue placeholder="القياس" />
+                        <SelectValue placeholder={t("size")} />
                       </SelectTrigger>
                       <SelectContent>
                         {sizes
@@ -594,17 +598,15 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
                         disabled={saving}
                       >
                         <SelectTrigger className="w-full min-w-0">
-                          <SelectValue placeholder="النخب" />
+                          <SelectValue placeholder={t("grade")} />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">بلا نخب</SelectItem>
-                          {(Object.entries(GRADE_LABELS) as [SalesOrderGrade, string][]).map(
-                            ([key, label]) => (
-                              <SelectItem key={key} value={key}>
-                                {label}
-                              </SelectItem>
-                            ),
-                          )}
+                          <SelectItem value="">{t("noGradeShort")}</SelectItem>
+                          {GRADES.map((key) => (
+                            <SelectItem key={key} value={key}>
+                              {tEnums(`grade.${key}`)}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     )}
@@ -619,7 +621,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
                           onChange={(e) =>
                             updateRequestItem(row.key, "requestedTons", e.target.value)
                           }
-                          placeholder="طن"
+                          placeholder={t("tons")}
                           disabled={saving}
                         />
                       ) : (
@@ -631,7 +633,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
                           onChange={(e) =>
                             updateRequestItem(row.key, "bundleCount", e.target.value)
                           }
-                          placeholder="ربطات"
+                          placeholder={t("bundles")}
                           disabled={saving}
                         />
                       )}
@@ -653,7 +655,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="editNotes">ملاحظات (اختياري)</Label>
+            <Label htmlFor="editNotes">{t("notesOptional")}</Label>
             <Textarea
               id="editNotes"
               value={notes}
@@ -665,10 +667,10 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              إلغاء
+              {t("cancel")}
             </Button>
             <Button type="submit" disabled={!canSubmit || !truck || saving || formBusy}>
-              {saving ? "جاري الحفظ..." : "حفظ التعديلات"}
+              {saving ? t("saving") : t("saveChanges")}
             </Button>
           </DialogFooter>
         </form>

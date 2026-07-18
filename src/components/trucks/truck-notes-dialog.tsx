@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -14,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { createClientIdempotencyKey } from "@/lib/browser-idempotency-key";
 import { notesForPatch, NOTES_ONLY_EDITABLE_STATUSES } from "@/lib/truck-edit-ui";
+import { getTextDirection, type Locale } from "@/i18n/config";
 
 interface Props {
   truckId: number | null;
@@ -30,6 +32,10 @@ interface NotesTruck {
 }
 
 export function TruckNotesDialog({ truckId, open, onOpenChange, onSuccess }: Props) {
+  const t = useTranslations("trucks");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+
   const [truck, setTruck] = useState<NotesTruck | null>(null);
   const [notes, setNotes] = useState("");
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -51,13 +57,13 @@ export function TruckNotesDialog({ truckId, open, onOpenChange, onSuccess }: Pro
         const res = await fetch(`/api/trucks/${truckId}`);
         const json = await res.json();
         if (cancelled) return;
-        if (!json.success) throw new Error(json.error || "فشل تحميل بيانات الشاحنة");
+        if (!json.success) throw new Error(json.error || t("errorLoadTruck"));
 
         const data = json.data as NotesTruck;
         if (
           !(NOTES_ONLY_EDITABLE_STATUSES as readonly string[]).includes(data.status)
         ) {
-          toast.error("لا يمكن تعديل الملاحظات في الحالة الحالية");
+          toast.error(t("errorNotesNotEditable"));
           onOpenChange(false);
           return;
         }
@@ -71,7 +77,7 @@ export function TruckNotesDialog({ truckId, open, onOpenChange, onSuccess }: Pro
         setNotes(data.notes ?? "");
       } catch (err) {
         if (!cancelled) {
-          toast.error(err instanceof Error ? err.message : "خطأ في تحميل بيانات الشاحنة");
+          toast.error(err instanceof Error ? err.message : t("errorLoadTruckGeneric"));
           onOpenChange(false);
         }
       } finally {
@@ -84,7 +90,7 @@ export function TruckNotesDialog({ truckId, open, onOpenChange, onSuccess }: Pro
       cancelled = true;
     };
     // onOpenChange omitted — parent inline callback would retrigger fetch every render
-  }, [open, truckId]);
+  }, [open, truckId, t]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,11 +111,11 @@ export function TruckNotesDialog({ truckId, open, onOpenChange, onSuccess }: Pro
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success("تم تعديل الملاحظات بنجاح");
+      toast.success(t("notesSuccess"));
       onOpenChange(false);
       onSuccess();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "خطأ في تعديل الملاحظات");
+      toast.error(err instanceof Error ? err.message : t("errorNotes"));
     } finally {
       setSaving(false);
     }
@@ -117,9 +123,9 @@ export function TruckNotesDialog({ truckId, open, onOpenChange, onSuccess }: Pro
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md min-w-0 overflow-x-hidden">
+      <DialogContent dir={dir} className="max-w-md min-w-0 overflow-x-hidden">
         <DialogHeader>
-          <DialogTitle>ملاحظات الشاحنة #{truckId ?? truck?.id}</DialogTitle>
+          <DialogTitle>{t("notesTitle", { id: truckId ?? truck?.id ?? "" })}</DialogTitle>
         </DialogHeader>
         {loadingDetail ? (
           <div className="space-y-4 py-2">
@@ -128,10 +134,10 @@ export function TruckNotesDialog({ truckId, open, onOpenChange, onSuccess }: Pro
         ) : (
           <form onSubmit={handleSubmit} className="min-w-0 space-y-4">
             <p className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
-              الشاحنة قيد الوزن، لذلك يمكن تعديل الملاحظات فقط.
+              {t("notesOnlyHint")}
             </p>
             <div className="space-y-2">
-              <Label htmlFor="truckNotes">الملاحظات (اختياري)</Label>
+              <Label htmlFor="truckNotes">{t("notesLabel")}</Label>
               <Textarea
                 id="truckNotes"
                 value={notes}
@@ -143,10 +149,10 @@ export function TruckNotesDialog({ truckId, open, onOpenChange, onSuccess }: Pro
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                إلغاء
+                {t("cancel")}
               </Button>
               <Button type="submit" disabled={!truck || saving}>
-                {saving ? "جاري الحفظ..." : "حفظ الملاحظات"}
+                {saving ? t("saving") : t("saveNotes")}
               </Button>
             </DialogFooter>
           </form>

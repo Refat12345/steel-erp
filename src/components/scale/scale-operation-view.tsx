@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { useLocale, useTranslations } from "next-intl";
 import { useSession } from "next-auth/react";
 import { sessionHasPermission } from "@/lib/client-permissions";
 import { toast } from "sonner";
@@ -44,6 +45,7 @@ import {
   CircleCheck,
   Ban,
   Printer,
+  ArrowLeft,
   ArrowRight,
   Pencil,
   Trash2,
@@ -60,13 +62,15 @@ import {
   computeWeighbridgeDiscrepancy,
   isWeighbridgeDiscrepancyWarning,
 } from "@/lib/weighbridge-discrepancy";
-import { getDisplayGradeLabel, GRADE_LABELS } from "@/lib/truck-grade";
+import { getDisplayGrade } from "@/lib/truck-grade";
+import { getTextDirection, type Locale } from "@/i18n/config";
+import { formatDecimal, formatInteger, formatKg } from "@/lib/number-format";
 import { shouldWarnBridgeRoundProductMix } from "@/lib/material-kind";
 import type { SalesOrderGrade } from "@prisma/client";
 import { compressImage } from "@/lib/compress-image";
 import {
-  formatDuration,
-  formatDurationCompact,
+  formatDurationCompactLocalized,
+  formatDurationLocalized,
 } from "@/lib/format-duration";
 import { formatDateTime } from "@/lib/date-format";
 import type { TruckTimings } from "@/lib/truck-timing";
@@ -178,15 +182,17 @@ interface TruckDetail {
   timings: TruckTimings;
 }
 
-const statusMap: Record<string, { label: string; color: string }> = {
-  Queued: { label: "بالطابور", color: "bg-gray-100 text-gray-800" },
-  FirstWeigh: { label: "وزن فارغ", color: "bg-sky-100 text-sky-800" },
-  OnScale: { label: "على الميزان", color: "bg-amber-100 text-amber-800" },
-  LoadingComplete: { label: "تحميل مكتمل", color: "bg-emerald-100 text-emerald-800" },
-  SecondWeigh: { label: "وزن محمّل", color: "bg-indigo-100 text-indigo-800" },
-  Completed: { label: "مكتملة", color: "bg-green-100 text-green-800" },
-  Cancelled: { label: "ملغاة", color: "bg-red-100 text-red-800" },
+const statusColors: Record<string, string> = {
+  Queued: "bg-gray-100 text-gray-800",
+  FirstWeigh: "bg-sky-100 text-sky-800",
+  OnScale: "bg-amber-100 text-amber-800",
+  LoadingComplete: "bg-emerald-100 text-emerald-800",
+  SecondWeigh: "bg-indigo-100 text-indigo-800",
+  Completed: "bg-green-100 text-green-800",
+  Cancelled: "bg-red-100 text-red-800",
 };
+
+const GRADES: SalesOrderGrade[] = ["FIRST", "SECOND"];
 
 export function ScaleOperationView({
   truckId,
@@ -197,6 +203,10 @@ export function ScaleOperationView({
   discrepancyWarnKg: number;
   stockModuleEnabled?: boolean;
 }) {
+  const t = useTranslations("scale");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const isRtl = getTextDirection(locale) === "rtl";
   const { data: session } = useSession();
   const searchParams = useSearchParams();
   const backHref =
@@ -239,11 +249,11 @@ export function ScaleOperationView({
       if (!json.success) throw new Error(json.error);
       setTruck(json.data);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "خطأ في تحميل البيانات");
+      toast.error(e instanceof Error ? e.message : t("errorLoad"));
     } finally {
       setLoading(false);
     }
-  }, [truckId]);
+  }, [truckId, t]);
 
   // The size catalog is only consumed by the internal-session weighing
   // features (add / edit / delete a session weight). The external scale
@@ -290,11 +300,11 @@ export function ScaleOperationView({
       const res = await fetch(url, opts);
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success("تمت العملية بنجاح");
+      toast.success(t("successAction"));
       await fetchTruck();
       return true;
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "حدث خطأ");
+      toast.error(e instanceof Error ? e.message : t("errorGeneric"));
       return false;
     } finally {
       setActionLoading(false);
@@ -314,7 +324,7 @@ export function ScaleOperationView({
   if (!truck) {
     return (
       <div className="text-center py-12 text-muted-foreground">
-        العملية غير موجودة
+        {t("notFound")}
       </div>
     );
   }
@@ -360,13 +370,14 @@ export function ScaleOperationView({
         .reduce((sum, s) => sum + Number(s.weightTons), 0)
     : 0;
 
-  const st = statusMap[truck.status] ?? { label: truck.status, color: "" };
-  // FirstWeigh on round ≥ 2 means "weighed out, came back to load more" —
-  // the default label ("وزن فارغ") would be misleading.
+  const statusColor = statusColors[truck.status] ?? "";
   const statusLabel =
     truck.status === "FirstWeigh" && openRound && openRound.roundNumber > 1
-      ? `بانتظار التحميل — دورة ${openRound.roundNumber}`
-      : st.label;
+      ? t("awaitingLoadRound", { n: openRound.roundNumber })
+      : statusColors[truck.status]
+        ? tEnums(`truckStatus.${truck.status}`)
+        : truck.status;
+  const displayGrade = getDisplayGrade(truck);
 
   return (
     <div className="space-y-4">
@@ -374,21 +385,25 @@ export function ScaleOperationView({
       <div className="flex flex-wrap items-center gap-3">
         <Link href={backHref}>
           <Button variant="ghost" size="sm">
-            <ArrowRight className="h-4 w-4 me-1" />
-            العودة للقائمة
+            {isRtl ? (
+              <ArrowRight className="h-4 w-4 me-1" />
+            ) : (
+              <ArrowLeft className="h-4 w-4 me-1" />
+            )}
+            {t("backToList")}
           </Button>
         </Link>
         <h2 className="text-lg font-bold">
-          عملية #{truck.id}
+          {t("operationNumber", { id: truck.id })}
         </h2>
-        <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${st.color}`}>
+        <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${statusColor}`}>
           {statusLabel}
         </span>
         {isMultiRound && (
           <span className="inline-flex items-center rounded-full bg-violet-100 px-3 py-1 text-sm font-medium text-violet-800">
             {openRound
-              ? `دورة ${openRound.roundNumber} من ${rounds.length}`
-              : `${rounds.length} دورات قبان`}
+              ? t("roundOfTotal", { current: openRound.roundNumber, total: rounds.length })
+              : t("bridgeRoundsCount", { count: rounds.length })}
           </span>
         )}
       </div>
@@ -397,35 +412,35 @@ export function ScaleOperationView({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {truck.customer && (
           <InfoCard
-            label="الزبون"
+            label={t("customer")}
             value={`${truck.customer.fullName} (${truck.customer.code})`}
           />
         )}
-        <InfoCard label="رقم اللوحة" value={truck.plateNumber} />
-        <InfoCard label="السائق" value={truck.driverName} />
+        <InfoCard label={t("plateNumber")} value={truck.plateNumber} />
+        <InfoCard label={t("driver")} value={truck.driverName} />
         <InfoCard
-          label="الوجهة"
+          label={t("destination")}
           value={
             truck.destination
               ? truck.destination.details
                 ? `${truck.destination.name} - ${truck.destination.details}`
                 : truck.destination.name
-              : "—"
+              : t("emDash")
           }
         />
-        {getDisplayGradeLabel(truck) && (
-          <InfoCard label="النخب" value={getDisplayGradeLabel(truck)!} />
+        {displayGrade && (
+          <InfoCard label={t("grade")} value={tEnums(`grade.${displayGrade}`)} />
         )}
         <InfoCard
-          label="وزن الفارغ"
-          value={tare != null ? `${tare.toLocaleString("en-US")} كغ` : "—"}
+          label={t("tareWeight")}
+          value={tare != null ? t("kgValue", { value: formatKg(tare) }) : t("emDash")}
         />
         <InfoCard
-          label="وزن المحمّل"
-          value={gross != null ? `${gross.toLocaleString("en-US")} كغ` : "—"}
+          label={t("grossWeight")}
+          value={gross != null ? t("kgValue", { value: formatKg(gross) }) : t("emDash")}
         />
         {truck.externalCardNumber && (
-          <InfoCard label="رقم كرت القبان (المالية)" value={truck.externalCardNumber} />
+          <InfoCard label={t("externalCardNumber")} value={truck.externalCardNumber} />
         )}
       </div>
 
@@ -437,7 +452,7 @@ export function ScaleOperationView({
             <StickyNote className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
             <div className="min-w-0">
               <p className="text-xs font-semibold text-amber-700 dark:text-amber-300">
-                ملاحظة
+                {t("note")}
               </p>
               <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-amber-900 dark:text-amber-100">
                 {truck.notes}
@@ -450,28 +465,30 @@ export function ScaleOperationView({
       {bridgeNetKg != null && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <InfoCard
-            label="صافي القبان"
-            value={`${bridgeNetKg.toLocaleString("en-US")} كغ`}
+            label={t("bridgeNet")}
+            value={t("kgValue", { value: formatKg(bridgeNetKg) })}
           />
           <InfoCard
-            label="مجموع الوزنات الداخلية"
-            value={`${totalSessionsTons.toFixed(3)} طن`}
+            label={t("internalSessionsTotal")}
+            value={t("tonsValue", { value: formatDecimal(totalSessionsTons, 3) })}
           />
           <InfoCard
-            label="الفرق"
+            label={t("difference")}
             value={
               bridgeDiscrepancyKg != null
-                ? `${bridgeDiscrepancyKg.toLocaleString("en-US")} كغ`
-                : "—"
+                ? t("kgValue", { value: formatKg(bridgeDiscrepancyKg) })
+                : t("emDash")
             }
           />
           {bridgeDiscrepancyKg != null &&
             isWeighbridgeDiscrepancyWarning(bridgeDiscrepancyKg, discrepancyWarnKg) && (
               <div className="sm:col-span-3 rounded-lg border-2 border-red-500 bg-red-50 px-4 py-3 text-sm text-red-800 dark:bg-red-950/30 dark:text-red-200">
-                <p className="font-semibold">تنبيه: فرق كبير بين القبان والوزنات الداخلية</p>
+                <p className="font-semibold">{t("discrepancyWarningTitle")}</p>
                 <p className="mt-1 text-xs">
-                  الفرق {bridgeDiscrepancyKg.toLocaleString("en-US")} كغ يتجاوز الحد{" "}
-                  {discrepancyWarnKg.toLocaleString("en-US")} كغ
+                  {t("discrepancyWarningDetail", {
+                    diff: formatKg(bridgeDiscrepancyKg),
+                    limit: formatKg(discrepancyWarnKg),
+                  })}
                 </p>
               </div>
             )}
@@ -501,18 +518,18 @@ export function ScaleOperationView({
       {truck.requestItems && truck.requestItems.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">تفاصيل الطلبية</CardTitle>
+            <CardTitle className="text-base">{t("requestDetails")}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
               <Table className="min-w-[360px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>القياس</TableHead>
+                    <TableHead>{t("size")}</TableHead>
                     {truck.requestItems.some((i) => i.grade) && (
-                      <TableHead>النخب</TableHead>
+                      <TableHead>{t("grade")}</TableHead>
                     )}
-                    <TableHead>الكمية المطلوبة</TableHead>
+                    <TableHead>{t("requestedQty")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -521,17 +538,19 @@ export function ScaleOperationView({
                       <TableCell>{item.size.displayName}</TableCell>
                       {truck.requestItems.some((i) => i.grade) && (
                         <TableCell>
-                          {item.grade ? GRADE_LABELS[item.grade] : "—"}
+                          {item.grade ? tEnums(`grade.${item.grade}`) : t("emDash")}
                         </TableCell>
                       )}
                       <TableCell className="font-mono">
                         {item.size.isBundleType
                           ? item.bundleCount != null
-                            ? `${item.bundleCount} ربطة`
-                            : "—"
+                            ? t("bundlesValue", { value: formatInteger(item.bundleCount) })
+                            : t("emDash")
                           : item.requestedTons != null
-                            ? `${Number(item.requestedTons).toFixed(3)} طن`
-                            : "—"}
+                            ? t("tonsValue", {
+                                value: formatDecimal(Number(item.requestedTons), 3),
+                              })
+                            : t("emDash")}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -545,9 +564,9 @@ export function ScaleOperationView({
       {truck.salesOrder && (
         <Card>
           <CardContent className="py-3 text-sm">
-            <span className="text-muted-foreground">أمر البيع: </span>
+            <span className="text-muted-foreground">{t("salesOrder")}</span>
             <span className="font-medium">{truck.salesOrder.orderNumber}</span>
-            <span className="text-muted-foreground mx-2">—</span>
+            <span className="text-muted-foreground mx-2">{t("emDash")}</span>
             <span>{truck.salesOrder.contract.customer.fullName}</span>
           </CardContent>
         </Card>
@@ -556,7 +575,7 @@ export function ScaleOperationView({
       {truck.cancelReason && (
         <Card className="border-destructive">
           <CardContent className="py-3 text-sm text-destructive">
-            <span className="font-medium">سبب الإلغاء: </span>
+            <span className="font-medium">{t("cancelReason")}</span>
             {truck.cancelReason}
           </CardContent>
         </Card>
@@ -566,13 +585,13 @@ export function ScaleOperationView({
       {isActive && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">الإجراءات</CardTitle>
+            <CardTitle className="text-base">{t("actions")}</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-2">
             {truck.status === "Queued" && canTare && (
               <Button onClick={() => setShowTareDialog(true)} disabled={actionLoading}>
                 <Weight className="h-4 w-4 me-1" />
-                إدخال وزن الفارغ
+                {t("enterTare")}
               </Button>
             )}
             {["FirstWeigh", "OnScale", "LoadingComplete"].includes(truck.status) &&
@@ -584,7 +603,7 @@ export function ScaleOperationView({
                 disabled={actionLoading}
               >
                 <Pencil className="h-4 w-4 me-1" />
-                تصحيح وزن الفارغ
+                {t("correctTare")}
               </Button>
             )}
             {(truck.status === "FirstWeigh" || truck.status === "OnScale") &&
@@ -592,7 +611,7 @@ export function ScaleOperationView({
               !truck.skipInternalWeighing && (
               <Button onClick={() => setShowSessionDialog(true)} disabled={actionLoading}>
                 <Weight className="h-4 w-4 me-1" />
-                إضافة وزنة
+                {t("addSession")}
               </Button>
             )}
             {(truck.status === "FirstWeigh" || truck.status === "OnScale") && canPhoto && (
@@ -607,7 +626,7 @@ export function ScaleOperationView({
                 disabled={actionLoading}
               >
                 <Lock className="h-4 w-4 me-1" />
-                تأكيد اكتمال التحميل
+                {t("confirmLoadingComplete")}
               </Button>
             )}
             {truck.status === "LoadingComplete" && canReopen && (
@@ -617,13 +636,13 @@ export function ScaleOperationView({
                 disabled={actionLoading}
               >
                 <Unlock className="h-4 w-4 me-1" />
-                إعادة فتح التحميل
+                {t("reopenLoading")}
               </Button>
             )}
             {truck.status === "LoadingComplete" && canGross && (
               <Button onClick={() => setShowGrossDialog(true)} disabled={actionLoading}>
                 <Weight className="h-4 w-4 me-1" />
-                إدخال وزن المحمّل
+                {t("enterGross")}
               </Button>
             )}
             {(truck.status === "SecondWeigh" ||
@@ -637,8 +656,8 @@ export function ScaleOperationView({
               >
                 <Pencil className="h-4 w-4 me-1" />
                 {truck.status === "SecondWeigh"
-                  ? "تصحيح وزن المحمّل"
-                  : "تصحيح آخر وزنة خارجية"}
+                  ? t("correctGross")
+                  : t("correctLastExternal")}
               </Button>
             )}
             {truck.status === "SecondWeigh" && canClose && (
@@ -649,7 +668,7 @@ export function ScaleOperationView({
                 disabled={actionLoading}
               >
                 <CircleCheck className="h-4 w-4 me-1" />
-                إغلاق العملية
+                {t("closeOperation")}
               </Button>
             )}
             {canShowTruckNotesButton(truck.status, canEditApproved) && (
@@ -659,7 +678,7 @@ export function ScaleOperationView({
                 disabled={actionLoading}
               >
                 <StickyNote className="h-4 w-4 me-1" />
-                {truck.notes ? "تعديل ملاحظة" : "إضافة ملاحظة"}
+                {truck.notes ? t("editNote") : t("addNote")}
               </Button>
             )}
             {canCancel && (
@@ -669,7 +688,7 @@ export function ScaleOperationView({
                 disabled={actionLoading}
               >
                 <Ban className="h-4 w-4 me-1" />
-                إلغاء
+                {t("cancel")}
               </Button>
             )}
           </CardContent>
@@ -681,13 +700,13 @@ export function ScaleOperationView({
           <Link href={`/scale/${truck.id}/print`} target="_blank">
             <Button variant="outline">
               <Printer className="h-4 w-4 me-1" />
-              طباعة (داخلي)
+              {t("printInternal")}
             </Button>
           </Link>
           <Link href={`/scale/${truck.id}/print?format=driver`} target="_blank">
             <Button variant="outline">
               <Printer className="h-4 w-4 me-1" />
-              طباعة نسخة السائق
+              {t("printDriver")}
             </Button>
           </Link>
         </div>
@@ -701,15 +720,13 @@ export function ScaleOperationView({
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">
-            الوزنات الداخلية ({truck.sessions.length})
+            {t("internalSessions", { count: truck.sessions.length })}
           </CardTitle>
         </CardHeader>
         <CardContent>
           {truck.sessions.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">
-              {truck.skipInternalWeighing
-                ? "شاحنة خردة/أسلاك تربيط — بدون وزنات داخلية. يُحتسب الصافي تلقائياً من القبان (فارغ ومحمّل) عند إدخال وزن المحمّل."
-                : "لا توجد وزنات بعد"}
+              {truck.skipInternalWeighing ? t("scrapNoInternal") : t("noSessionsYet")}
             </p>
           ) : (
             <div className="overflow-x-auto">
@@ -717,11 +734,11 @@ export function ScaleOperationView({
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[50px]">#</TableHead>
-                    {isMultiRound && <TableHead className="w-[60px]">الدورة</TableHead>}
-                    <TableHead>القياس</TableHead>
-                    <TableHead>الربطات</TableHead>
-                    <TableHead>الوزن (طن)</TableHead>
-                    {canManageSession && <TableHead className="w-[100px]">إجراءات</TableHead>}
+                    {isMultiRound && <TableHead className="w-[60px]">{t("round")}</TableHead>}
+                    <TableHead>{t("size")}</TableHead>
+                    <TableHead>{t("bundles")}</TableHead>
+                    <TableHead>{t("weightTons")}</TableHead>
+                    {canManageSession && <TableHead className="w-[100px]">{t("actions")}</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -738,13 +755,13 @@ export function ScaleOperationView({
                       <TableCell className="font-mono">{s.sessionNumber}</TableCell>
                       {isMultiRound && (
                         <TableCell className="font-mono">
-                          {roundNumber ?? "—"}
+                          {roundNumber ?? t("emDash")}
                         </TableCell>
                       )}
-                      <TableCell>{s.size?.displayName ?? "—"}</TableCell>
-                      <TableCell>{s.bundleCount ?? "—"}</TableCell>
+                      <TableCell>{s.size?.displayName ?? t("emDash")}</TableCell>
+                      <TableCell>{s.bundleCount ?? t("emDash")}</TableCell>
                       <TableCell className="font-mono">
-                        {Number(s.weightTons).toFixed(3)}
+                        {formatDecimal(Number(s.weightTons), 3)}
                       </TableCell>
                       {canManageSession && (
                         <TableCell>
@@ -769,7 +786,7 @@ export function ScaleOperationView({
                           ) : (
                             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                               <Lock className="h-3 w-3" aria-hidden />
-                              مُرحَّلة
+                              {t("frozen")}
                             </span>
                           )}
                         </TableCell>
@@ -778,9 +795,9 @@ export function ScaleOperationView({
                     );
                   })}
                   <TableRow className="font-bold">
-                    <TableCell colSpan={isMultiRound ? 4 : 3}>المجموع الكلي (كل الوزنات)</TableCell>
+                    <TableCell colSpan={isMultiRound ? 4 : 3}>{t("grandTotalAllSessions")}</TableCell>
                     <TableCell className="font-mono">
-                      {totalSessionsTons.toFixed(3)}
+                      {formatDecimal(totalSessionsTons, 3)}
                     </TableCell>
                     {canManageSession && <TableCell />}
                   </TableRow>
@@ -791,17 +808,17 @@ export function ScaleOperationView({
 
           {truck.sessions.length > 0 && (
             <div className="mt-4 pt-4 border-t space-y-2">
-              <p className="text-sm font-medium">الإجمالي حسب القياس</p>
+              <p className="text-sm font-medium">{t("totalBySize")}</p>
               <p className="text-xs text-muted-foreground">
-                مجموع الوزن (والربطات) لكل قياس عبر كل الوزنات — مثال: وزنتان لنفس القياس يظهران كسطر واحد.
+                {t("totalBySizeHint")}
               </p>
               <div className="overflow-x-auto">
                 <Table className="min-w-[320px]">
                   <TableHeader>
                     <TableRow>
-                      <TableHead>القياس</TableHead>
-                      <TableHead>إجمالي الربطات</TableHead>
-                      <TableHead>إجمالي الوزن (طن)</TableHead>
+                      <TableHead>{t("size")}</TableHead>
+                      <TableHead>{t("totalBundles")}</TableHead>
+                      <TableHead>{t("totalWeightTons")}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -810,11 +827,11 @@ export function ScaleOperationView({
                         <TableCell>{row.displayName}</TableCell>
                         <TableCell className="font-mono">
                           {row.totalBundles != null
-                            ? row.totalBundles.toLocaleString("en-US")
-                            : "—"}
+                            ? formatInteger(row.totalBundles)
+                            : t("emDash")}
                         </TableCell>
                         <TableCell className="font-mono font-semibold">
-                          {row.totalTons.toFixed(3)}
+                          {formatDecimal(row.totalTons, 3)}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -831,7 +848,7 @@ export function ScaleOperationView({
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">
-              الصور ({truck.photos.length})
+              {t("photos", { count: truck.photos.length })}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -847,7 +864,7 @@ export function ScaleOperationView({
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={buildFileViewUrl(p.filePath)}
-                    alt={`صورة ${p.id}`}
+                    alt={t("photoAlt", { id: p.id })}
                     className="w-full h-full object-cover"
                   />
                 </a>
@@ -860,10 +877,23 @@ export function ScaleOperationView({
       {/* Metadata */}
       <Card>
         <CardContent className="py-3 text-xs text-muted-foreground space-y-1">
-          <div>سجّل بواسطة: {truck.creator.fullName} — {formatDateTime(truck.createdAt)}</div>
+          <div>
+            {t("createdBy", {
+              name: truck.creator.fullName,
+              time: formatDateTime(truck.createdAt),
+            })}
+          </div>
           {truck.closer && truck.closedAt && (
             <div>
-              {truck.status === "Cancelled" ? "ألغى" : "أغلق"} بواسطة: {truck.closer.fullName} — {formatDateTime(truck.closedAt)}
+              {truck.status === "Cancelled"
+                ? t("cancelledBy", {
+                    name: truck.closer.fullName,
+                    time: formatDateTime(truck.closedAt),
+                  })
+                : t("closedBy", {
+                    name: truck.closer.fullName,
+                    time: formatDateTime(truck.closedAt),
+                  })}
             </div>
           )}
         </CardContent>
@@ -879,7 +909,7 @@ export function ScaleOperationView({
       <WeightDialog
         open={showTareDialog}
         onOpenChange={setShowTareDialog}
-        title="إدخال وزن الفارغ (كغ)"
+        title={t("enterTareTitle")}
         onSubmit={(kg) => doAction(`/api/trucks/${truck.id}/tare`, "PATCH", { weightKg: kg })}
       />
       <WeightDialog
@@ -887,8 +917,8 @@ export function ScaleOperationView({
         onOpenChange={setShowGrossDialog}
         title={
           openRound && openRound.roundNumber > 1
-            ? `إدخال وزنة الدورة ${openRound.roundNumber} (كغ)`
-            : "إدخال وزن المحمّل (كغ)"
+            ? t("enterRoundGrossTitle", { n: openRound.roundNumber })
+            : t("enterGrossTitle")
         }
         crossCheck={
           openRound
@@ -913,7 +943,7 @@ export function ScaleOperationView({
       <WeightDialog
         open={showCorrectTareDialog}
         onOpenChange={setShowCorrectTareDialog}
-        title="تصحيح وزن الفارغ (كغ)"
+        title={t("correctTareTitle")}
         currentValue={tare ?? undefined}
         onSubmit={(kg) =>
           doAction(`/api/trucks/${truck.id}/correct-tare`, "PATCH", {
@@ -927,8 +957,8 @@ export function ScaleOperationView({
         onOpenChange={setShowCorrectGrossDialog}
         title={
           lastClosedRound && !lastClosedRound.isFinal
-            ? `تصحيح وزنة الدورة ${lastClosedRound.roundNumber} (كغ)`
-            : "تصحيح وزن المحمّل (كغ)"
+            ? t("correctRoundGrossTitle", { n: lastClosedRound.roundNumber })
+            : t("correctGrossTitle")
         }
         currentValue={
           lastClosedRound
@@ -1041,6 +1071,10 @@ function RoundsCard({
   sessions: WeighSessionItem[];
   discrepancyWarnKg: number;
 }) {
+  const t = useTranslations("scale");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const listSeparator = locale === "en" ? ", " : "، ";
   const totalNetKg = rounds.reduce((sum, r) => {
     if (r.endWeightKg == null) return sum;
     return sum + (Number(r.endWeightKg) - Number(r.startWeightKg));
@@ -1049,24 +1083,25 @@ function RoundsCard({
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">دورات القبان ({rounds.length})</CardTitle>
+        <CardTitle className="text-base">
+          {t("bridgeRoundsTitle", { count: rounds.length })}
+        </CardTitle>
       </CardHeader>
       <CardContent>
         <p className="text-xs text-muted-foreground mb-2">
-          كل دورة = ما بين وزنتين خارجيتين. صافي الدورة هو الوزن المعتمد لما
-          حُمِّل فيها، ووزن بداية كل دورة يُنسخ تلقائياً من نهاية الدورة السابقة.
+          {t("bridgeRoundsHint")}
         </p>
         <div className="overflow-x-auto">
           <Table className="min-w-[640px]">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[50px]">#</TableHead>
-                <TableHead>النخب</TableHead>
-                <TableHead>الأصناف المحمّلة</TableHead>
-                <TableHead>وزن البداية (كغ)</TableHead>
-                <TableHead>وزن النهاية (كغ)</TableHead>
-                <TableHead>الصافي المعتمد (كغ)</TableHead>
-                <TableHead>الفرق عن الداخلي</TableHead>
+                <TableHead>{t("grade")}</TableHead>
+                <TableHead>{t("loadedProducts")}</TableHead>
+                <TableHead>{t("startWeightKg")}</TableHead>
+                <TableHead>{t("endWeightKg")}</TableHead>
+                <TableHead>{t("approvedNetKg")}</TableHead>
+                <TableHead>{t("vsInternalDiff")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1092,24 +1127,24 @@ function RoundsCard({
                 return (
                   <TableRow key={r.id}>
                     <TableCell className="font-mono">{r.roundNumber}</TableCell>
-                    <TableCell>{r.grade ? GRADE_LABELS[r.grade] : "—"}</TableCell>
+                    <TableCell>{r.grade ? tEnums(`grade.${r.grade}`) : t("emDash")}</TableCell>
                     <TableCell className="text-xs">
                       {sizeNames.length > 0
-                        ? sizeNames.join("، ")
-                        : r.size?.displayName ?? "—"}
+                        ? sizeNames.join(listSeparator)
+                        : r.size?.displayName ?? t("emDash")}
                     </TableCell>
                     <TableCell className="font-mono">
-                      {startKg.toLocaleString("en-US")}
+                      {formatKg(startKg)}
                     </TableCell>
                     <TableCell className="font-mono">
                       {endKg != null ? (
-                        endKg.toLocaleString("en-US")
+                        formatKg(endKg)
                       ) : (
-                        <span className="text-amber-600">دورة جارية</span>
+                        <span className="text-amber-600">{t("roundInProgress")}</span>
                       )}
                     </TableCell>
                     <TableCell className="font-mono font-semibold">
-                      {netKg != null ? netKg.toLocaleString("en-US") : "—"}
+                      {netKg != null ? formatKg(netKg) : t("emDash")}
                     </TableCell>
                     <TableCell className="font-mono text-xs">
                       {discrepancyKg != null ? (
@@ -1123,19 +1158,19 @@ function RoundsCard({
                               : ""
                           }
                         >
-                          {Math.round(discrepancyKg).toLocaleString("en-US")} كغ
+                          {t("kgValue", { value: formatKg(Math.round(discrepancyKg)) })}
                         </span>
                       ) : (
-                        "—"
+                        t("emDash")
                       )}
                     </TableCell>
                   </TableRow>
                 );
               })}
               <TableRow className="font-bold bg-muted/50">
-                <TableCell colSpan={5}>مجموع الصافي المعتمد</TableCell>
+                <TableCell colSpan={5}>{t("approvedNetTotal")}</TableCell>
                 <TableCell className="font-mono">
-                  {totalNetKg.toLocaleString("en-US")}
+                  {formatKg(totalNetKg)}
                 </TableCell>
                 <TableCell />
               </TableRow>
@@ -1164,6 +1199,9 @@ function TimingCard({
   status: string;
   timings: TruckTimings;
 }) {
+  const t = useTranslations("scale");
+  const locale = useLocale() as Locale;
+
   const steps: {
     label: string;
     time: string | null;
@@ -1174,31 +1212,33 @@ function TimingCard({
     subtitle?: string;
   }[] = [
     {
-      label: "تسجيل في اللوجستك",
+      label: t("stepRegistered"),
       time: createdAt,
     },
     {
-      label: "دخول القبان فارغاً",
+      label: t("stepTareEntry"),
       time: tareTime,
-      durationLabel: "وقت الانتظار",
+      durationLabel: t("waitTime"),
       durationMs: timings.waitMs,
     },
     {
-      label: "أول وزنة داخلية",
+      label: t("stepFirstInternal"),
       time: timings.firstSessionAt,
     },
     {
-      label: "تأكيد اكتمال التحميل",
+      label: t("stepLoadingConfirmed"),
       time: timings.loadingConfirmedAt,
-      durationLabel: "مدة التحميل الداخلي",
+      durationLabel: t("internalLoadingDuration"),
       durationMs: timings.internalLoadingMs,
       inProgress: timings.internalLoadingInProgress,
-      subtitle: timings.loaderName ? `بواسطة: ${timings.loaderName}` : undefined,
+      subtitle: timings.loaderName
+        ? t("byLoader", { name: timings.loaderName })
+        : undefined,
     },
     {
-      label: "وزن المحمّل (الخروج)",
+      label: t("stepGrossExit"),
       time: grossTime,
-      durationLabel: "مدة القبان",
+      durationLabel: t("scaleDuration"),
       durationMs: timings.scaleMs,
       highlight: true,
       inProgress: timings.scaleInProgress,
@@ -1207,7 +1247,7 @@ function TimingCard({
 
   if (closedAt) {
     steps.push({
-      label: status === "Cancelled" ? "إلغاء العملية" : "إغلاق العملية",
+      label: status === "Cancelled" ? t("stepCancelled") : t("stepClosed"),
       time: closedAt,
     });
   }
@@ -1215,37 +1255,43 @@ function TimingCard({
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">الجدول الزمني للعملية</CardTitle>
+        <CardTitle className="text-base">{t("timelineTitle")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <MetricBox
-            label="وقت الانتظار"
-            sublabel="من التسجيل إلى دخول القبان"
+            label={t("waitTime")}
+            sublabel={t("waitTimeSub")}
             valueMs={timings.waitMs}
+            locale={locale}
           />
           <MetricBox
-            label={timings.scaleInProgress ? "مدة القبان (جارٍ)" : "مدة القبان"}
-            sublabel="من الوزن الفارغ إلى المحمّل"
+            label={
+              timings.scaleInProgress ? t("scaleDurationRunning") : t("scaleDuration")
+            }
+            sublabel={t("scaleDurationSub")}
             valueMs={timings.scaleMs}
             emphasize="scale"
             pulse={timings.scaleInProgress}
+            locale={locale}
           />
           <MetricBox
             label={
               timings.internalLoadingInProgress
-                ? "مدة التحميل الداخلي (جارٍ)"
-                : "مدة التحميل الداخلي"
+                ? t("internalLoadingDurationRunning")
+                : t("internalLoadingDuration")
             }
-            sublabel="من أول وزنة إلى تأكيد المحمّل"
+            sublabel={t("internalLoadingDurationSub")}
             valueMs={timings.internalLoadingMs}
             emphasize="internal"
             pulse={timings.internalLoadingInProgress}
+            locale={locale}
           />
           <MetricBox
-            label="المدة الكلية"
-            sublabel="من التسجيل إلى الإغلاق"
+            label={t("totalDuration")}
+            sublabel={t("totalDurationSub")}
             valueMs={timings.totalMs}
+            locale={locale}
           />
         </div>
 
@@ -1271,8 +1317,8 @@ function TimingCard({
                   {step.time
                     ? formatDateTime(step.time)
                     : step.inProgress
-                      ? "— في الانتظار —"
-                      : "— لم يحصل بعد —"}
+                      ? t("waitingNow")
+                      : t("notHappenedYet")}
                 </span>
               </div>
               {step.subtitle && (
@@ -1282,10 +1328,10 @@ function TimingCard({
                 <div className="mt-1 text-xs text-muted-foreground">
                   <span>{step.durationLabel}: </span>
                   <span className="font-semibold text-foreground">
-                    {formatDuration(step.durationMs)}
+                    {formatDurationLocalized(step.durationMs, locale)}
                   </span>
                   {step.inProgress && (
-                    <span className="ms-2 text-amber-600">(جارٍ الآن)</span>
+                    <span className="ms-2 text-amber-600">{t("inProgressNow")}</span>
                   )}
                 </div>
               )}
@@ -1303,12 +1349,14 @@ function MetricBox({
   valueMs,
   emphasize,
   pulse,
+  locale,
 }: {
   label: string;
   sublabel: string;
   valueMs: number | null;
   emphasize?: "scale" | "internal";
   pulse?: boolean;
+  locale: Locale;
 }) {
   const emphasizeClass =
     emphasize === "scale"
@@ -1329,7 +1377,7 @@ function MetricBox({
     >
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className={`text-lg font-bold mt-0.5 font-mono tabular-nums ${valueClass}`}>
-        {formatDurationCompact(valueMs)}
+        {formatDurationCompactLocalized(valueMs, locale)}
       </div>
       <div className="text-[10px] text-muted-foreground mt-0.5">{sublabel}</div>
     </div>
@@ -1366,6 +1414,9 @@ function WeightDialog({
   };
   onSubmit: (kg: number, exit?: "final" | "return") => Promise<boolean>;
 }) {
+  const t = useTranslations("scale");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
   const [value, setValue] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -1395,7 +1446,7 @@ function WeightDialog({
   const handleNext = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isValid) {
-      toast.error("أدخل وزناً صالحاً");
+      toast.error(t("toastInvalidWeight"));
       return;
     }
     setConfirming(true);
@@ -1424,7 +1475,7 @@ function WeightDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-sm">
+      <DialogContent dir={dir} className="max-w-sm">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
@@ -1433,28 +1484,30 @@ function WeightDialog({
           <form onSubmit={handleNext} className="space-y-4">
             {currentValue !== undefined && (
               <div className="rounded-md bg-muted px-3 py-2 text-sm">
-                <span className="text-muted-foreground">القيمة الحالية: </span>
-                <span className="font-mono font-semibold">{currentValue.toLocaleString("en-US")} كغ</span>
+                <span className="text-muted-foreground">{t("currentValue")}</span>
+                <span className="font-mono font-semibold">
+                  {t("kgValue", { value: formatKg(currentValue) })}
+                </span>
               </div>
             )}
             <div className="space-y-2">
-              <Label>الوزن بالكيلوغرام</Label>
+              <Label>{t("weightKgLabel")}</Label>
               <Input
                 type="number"
                 step="0.1"
                 min="0"
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
-                placeholder="مثال: 15200"
+                placeholder={t("weightKgPlaceholder")}
                 autoFocus
               />
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => handleClose(false)}>
-                إلغاء
+                {t("cancel")}
               </Button>
               <Button type="submit" disabled={!isValid}>
-                التالي
+                {t("next")}
               </Button>
             </DialogFooter>
           </form>
@@ -1462,38 +1515,40 @@ function WeightDialog({
           <div className="space-y-4">
             {showDiscrepancyWarning && discrepancyPreview && crossCheck && (
               <div className="rounded-lg border-2 border-red-500 bg-red-50 p-4 text-sm text-red-800 dark:bg-red-950/30 dark:border-red-700 dark:text-red-200">
-                <p className="font-bold">تنبيه: فرق كبير بين القبان والوزنات الداخلية</p>
+                <p className="font-bold">{t("discrepancyWarningTitle")}</p>
                 <div className="mt-2 space-y-1 font-mono text-xs sm:text-sm">
                   <p>
-                    صافي القبان:{" "}
-                    {discrepancyPreview.bridgeNetKg.toLocaleString("en-US")} كغ
+                    {t("bridgeNetLabel")}
+                    {t("kgValue", { value: formatKg(discrepancyPreview.bridgeNetKg) })}
                   </p>
                   <p>
-                    مجموع الداخلي:{" "}
-                    {discrepancyPreview.internalKg.toLocaleString("en-US")} كغ
+                    {t("internalTotalLabel")}
+                    {t("kgValue", { value: formatKg(discrepancyPreview.internalKg) })}
                   </p>
                   <p className="font-semibold">
-                    الفرق: {discrepancyPreview.discrepancyKg.toLocaleString("en-US")} كغ
-                    {" "}(الحد: {crossCheck.discrepancyWarnKg.toLocaleString("en-US")} كغ)
+                    {t("differenceWithLimit", {
+                      diff: formatKg(discrepancyPreview.discrepancyKg),
+                      limit: formatKg(crossCheck.discrepancyWarnKg),
+                    })}
                   </p>
                 </div>
                 <p className="mt-2 text-xs">
-                  يمكنك المتابعة بعد التحقق الفعلي على الأرض.
+                  {t("discrepancyContinueHint")}
                 </p>
               </div>
             )}
             <div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4 text-center dark:bg-amber-950/30 dark:border-amber-700">
-              <p className="text-sm text-muted-foreground mb-1">هل أنت متأكد من القيمة التالية؟</p>
+              <p className="text-sm text-muted-foreground mb-1">{t("confirmValuePrompt")}</p>
               <p className="text-3xl font-bold font-mono" dir="ltr">
-                {parsedKg.toLocaleString("en-US")} <span className="text-base font-normal">كغ</span>
+                {t("kgValue", { value: formatKg(parsedKg) })}
               </p>
               {exitChoice && roundNetPreview != null && (
                 <p className="mt-2 text-sm">
                   <span className="text-muted-foreground">
-                    صافي الدورة {exitChoice.roundNumber}:{" "}
+                    {t("roundNetPreview", { n: exitChoice.roundNumber })}
                   </span>
                   <span className="font-mono font-semibold" dir="ltr">
-                    {roundNetPreview.toLocaleString("en-US")} كغ
+                    {t("kgValue", { value: formatKg(roundNetPreview) })}
                   </span>
                 </p>
               )}
@@ -1501,9 +1556,7 @@ function WeightDialog({
             {exitChoice ? (
               <div className="space-y-2">
                 <p className="text-xs text-muted-foreground">
-                  «خروج نهائي» يُنهي الوزن ويجهّز العملية للإغلاق. «رجوع
-                  للتحميل» يفتح دورة جديدة تبدأ من هذه الوزنة لتحميل صنف أو نخب
-                  آخر.
+                  {t("exitChoiceHint")}
                 </p>
                 <div className="grid grid-cols-1 gap-2">
                   <Button
@@ -1513,8 +1566,8 @@ function WeightDialog({
                     className="bg-green-600 hover:bg-green-700"
                   >
                     {submittingExit === "final"
-                      ? "جاري الحفظ..."
-                      : "تأكيد — وزنة وخروج نهائي"}
+                      ? t("saving")
+                      : t("confirmFinalExit")}
                   </Button>
                   <Button
                     type="button"
@@ -1524,8 +1577,8 @@ function WeightDialog({
                     className="border border-violet-300 bg-violet-50 text-violet-900 hover:bg-violet-100 dark:bg-violet-950/30 dark:text-violet-100"
                   >
                     {submittingExit === "return"
-                      ? "جاري الحفظ..."
-                      : `تأكيد — وزنة ورجوع للتحميل (دورة ${exitChoice.roundNumber + 1})`}
+                      ? t("saving")
+                      : t("confirmReturnLoad", { n: exitChoice.roundNumber + 1 })}
                   </Button>
                   <Button
                     type="button"
@@ -1533,7 +1586,7 @@ function WeightDialog({
                     onClick={() => setConfirming(false)}
                     disabled={submitting}
                   >
-                    تعديل القيمة
+                    {t("editValue")}
                   </Button>
                 </div>
               </div>
@@ -1544,7 +1597,7 @@ function WeightDialog({
                   variant="outline"
                   onClick={() => setConfirming(false)}
                 >
-                  تعديل القيمة
+                  {t("editValue")}
                 </Button>
                 <Button
                   type="button"
@@ -1552,7 +1605,7 @@ function WeightDialog({
                   disabled={submitting}
                   className="bg-green-600 hover:bg-green-700"
                 >
-                  {submitting ? "جاري الحفظ..." : "تأكيد الحفظ"}
+                  {submitting ? t("saving") : t("confirmSave")}
                 </Button>
               </DialogFooter>
             )}
@@ -1590,6 +1643,9 @@ function SessionDialog({
   /** When false the stock module is dark-launched: no source picker, no deduction. */
   stockModuleEnabled?: boolean;
 }) {
+  const t = useTranslations("scale");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
   const [sizeCode, setSizeCode] = useState<string>("");
   const [bundleCount, setBundleCount] = useState("");
   const [weightTons, setWeightTons] = useState("");
@@ -1671,13 +1727,13 @@ function SessionDialog({
   // Base UI's Select shows the raw value in the trigger unless items provided.
   const sourceSelectItems = useMemo(
     () => [
-      { value: PRODUCTION_SOURCE, label: "من خط الإنتاج مباشرة" },
+      { value: PRODUCTION_SOURCE, label: t("fromProduction") },
       ...sourceOptions.map((o) => ({
         value: String(o.loc.locationId),
         label: `${o.loc.nameAr} — ${o.loc.yardNameAr}`,
       })),
     ],
-    [sourceOptions],
+    [sourceOptions, t],
   );
   const sizeSelectItems = useMemo(
     () => sizes.map((s) => ({ value: s.code, label: s.displayName })),
@@ -1727,15 +1783,15 @@ function SessionDialog({
   const handleNext = (e: React.FormEvent) => {
     e.preventDefault();
     if (isNaN(parsedWeight) || parsedWeight <= 0) {
-      toast.error("أدخل وزناً صالحاً");
+      toast.error(t("toastInvalidWeight"));
       return;
     }
     if (stockModuleEnabled && !isProductionSource && !selectedSource) {
-      toast.error("اختر المصدر: موقع مخزون أو خط الإنتاج مباشرة");
+      toast.error(t("toastSelectSource"));
       return;
     }
     if (bundleRequired && (parsedBundles == null || parsedBundles <= 0)) {
-      toast.error("عدد الربطات مطلوب");
+      toast.error(t("toastBundlesRequired"));
       return;
     }
     setConfirming(true);
@@ -1765,12 +1821,12 @@ function SessionDialog({
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success("تمت إضافة الوزنة");
+      toast.success(t("sessionAdded"));
       reset();
       onOpenChange(false);
       onSuccess();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "خطأ");
+      toast.error(e instanceof Error ? e.message : t("errorShort"));
     } finally {
       setSaving(false);
     }
@@ -1778,15 +1834,15 @@ function SessionDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-sm">
+      <DialogContent dir={dir} className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>إضافة وزنة داخلية</DialogTitle>
+          <DialogTitle>{t("addInternalSessionTitle")}</DialogTitle>
         </DialogHeader>
 
         {!confirming ? (
           <form onSubmit={handleNext} className="space-y-4">
             <div className="space-y-2">
-              <Label>القياس</Label>
+              <Label>{t("size")}</Label>
               <Select
                 items={sizeSelectItems}
                 value={sizeCode}
@@ -1796,9 +1852,9 @@ function SessionDialog({
                 }}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="اختر القياس" />
+                  <SelectValue placeholder={t("selectSize")} />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent dir={dir}>
                   {sizes.map((s) => (
                     <SelectItem key={s.id} value={s.code}>
                       {s.displayName}
@@ -1809,7 +1865,7 @@ function SessionDialog({
             </div>
             {stockModuleEnabled && (
             <div className="space-y-2">
-              <Label>المصدر</Label>
+              <Label>{t("source")}</Label>
               <Select
                 items={sourceSelectItems}
                 value={sourceId}
@@ -1819,24 +1875,22 @@ function SessionDialog({
                 <SelectTrigger className="w-full">
                   <SelectValue
                     placeholder={
-                      selectedSize ? "اختر المصدر" : "اختر القياس أولاً"
+                      selectedSize ? t("selectSource") : t("selectSizeFirst")
                     }
                   />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent dir={dir}>
                   <SelectItem value={PRODUCTION_SOURCE}>
                     <span className="flex w-full items-center justify-between gap-3">
-                      <span className="font-medium">من خط الإنتاج مباشرة</span>
+                      <span className="font-medium">{t("fromProduction")}</span>
                       <span className="text-xs text-muted-foreground">
-                        بدون خصم من الساحة
+                        {t("noYardDeduction")}
                       </span>
                     </span>
                   </SelectItem>
                   {sourceOptions.length === 0 ? (
                     <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                      {selectedSize
-                        ? "لا يوجد رصيد لهذا المقاس في أي موقع"
-                        : "لا توجد مواقع مطابقة"}
+                      {selectedSize ? t("noStockForSize") : t("noMatchingLocations")}
                     </div>
                   ) : (
                     sourceYardGroups.map((g) => (
@@ -1855,10 +1909,13 @@ function SessionDialog({
                                 className="text-xs tabular-nums text-muted-foreground"
                                 dir="ltr"
                               >
-                                {o.qty.toLocaleString("en-US", {
-                                  maximumFractionDigits: 3,
-                                })}{" "}
-                                {o.loc.unit === "TON" ? "طن" : "ربطة"}
+                                {o.loc.unit === "TON"
+                                  ? t("tonsValue", {
+                                      value: formatDecimal(o.qty, 3),
+                                    })
+                                  : t("bundlesValue", {
+                                      value: formatInteger(o.qty),
+                                    })}
                               </span>
                             </span>
                           </SelectItem>
@@ -1872,7 +1929,7 @@ function SessionDialog({
             )}
             {selectedSize?.isBundleType && (
             <div className="space-y-2">
-              <Label>عدد الربطات</Label>
+              <Label>{t("bundleCount")}</Label>
               <Input
                 type="number"
                 min="1"
@@ -1882,53 +1939,53 @@ function SessionDialog({
             </div>
             )}
             <div className="space-y-2">
-              <Label>الوزن بالطن</Label>
+              <Label>{t("weightTonsLabel")}</Label>
               <Input
                 type="number"
                 step="0.001"
                 min="0"
                 value={weightTons}
                 onChange={(e) => setWeightTons(e.target.value)}
-                placeholder="مثال: 6.120"
+                placeholder={t("weightTonsPlaceholder")}
                 autoFocus
               />
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => handleClose(false)}>
-                إلغاء
+                {t("cancel")}
               </Button>
               <Button type="submit" disabled={!isValid}>
-                التالي
+                {t("next")}
               </Button>
             </DialogFooter>
           </form>
         ) : (
           <div className="space-y-4">
             <div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4 text-center dark:bg-amber-950/30 dark:border-amber-700">
-              <p className="text-sm text-muted-foreground mb-1">هل أنت متأكد من إضافة الوزنة التالية؟</p>
+              <p className="text-sm text-muted-foreground mb-1">{t("confirmAddSessionPrompt")}</p>
               <p className="text-3xl font-bold font-mono" dir="ltr">
-                {parsedWeight.toFixed(3)} <span className="text-base font-normal">طن</span>
+                {t("tonsValue", { value: formatDecimal(parsedWeight, 3) })}
               </p>
               <div className="mt-2 text-sm space-y-0.5">
                 <div>
-                  <span className="text-muted-foreground">القياس: </span>
-                  <span className="font-medium">{selectedSize?.displayName ?? "—"}</span>
+                  <span className="text-muted-foreground">{t("sizeLabel")}</span>
+                  <span className="font-medium">{selectedSize?.displayName ?? t("emDash")}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">الربطات: </span>
+                  <span className="text-muted-foreground">{t("bundlesLabel")}</span>
                   <span className="font-medium">
-                    {parsedBundles != null ? parsedBundles.toLocaleString("en-US") : "—"}
+                    {parsedBundles != null ? formatInteger(parsedBundles) : t("emDash")}
                   </span>
                 </div>
                 {stockModuleEnabled && (
                 <div>
-                  <span className="text-muted-foreground">المصدر: </span>
+                  <span className="text-muted-foreground">{t("sourceLabel")}</span>
                   <span className="font-medium">
                     {isProductionSource
-                      ? "خط الإنتاج مباشرة (تُسجَّل بالسجل دون خصم من الساحة)"
+                      ? t("productionSourceConfirm")
                       : selectedSource
                         ? `${selectedSource.code} — ${selectedSource.nameAr}`
-                        : "—"}
+                        : t("emDash")}
                   </span>
                 </div>
                 )}
@@ -1941,16 +1998,13 @@ function SessionDialog({
               >
                 <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
                 <span>
-                  تنبيه: الدورة {roundNumber} تحتوي نوعاً مختلفاً (مثلاً مبروم
-                  مع قصائر أو خردة) — القبان الخارجي يعطي وزناً واحداً للدورة
-                  ولا يفصل بين الأنواع. إن أردت فصل كل نوع، استخدم «رجوع
-                  للتحميل» وافتح دورة جديدة.
+                  {t("mixedSizeWarning", { n: roundNumber })}
                 </span>
               </div>
             )}
             <DialogFooter className="gap-2">
               <Button type="button" variant="outline" onClick={() => setConfirming(false)}>
-                تعديل القيم
+                {t("editValues")}
               </Button>
               <Button
                 type="button"
@@ -1958,7 +2012,7 @@ function SessionDialog({
                 disabled={saving}
                 className="bg-green-600 hover:bg-green-700"
               >
-                {saving ? "جاري الحفظ..." : "تأكيد الإضافة"}
+                {saving ? t("saving") : t("confirmAdd")}
               </Button>
             </DialogFooter>
           </div>
@@ -1981,6 +2035,9 @@ function EditSessionButton({
   sizes: SizeOption[];
   onEdited: () => void;
 }) {
+  const t = useTranslations("scale");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
   const [open, setOpen] = useState(false);
   const [sizeCode, setSizeCode] = useState(s.size?.code ?? "");
   const [bundleCount, setBundleCount] = useState(
@@ -2004,7 +2061,7 @@ function EditSessionButton({
   const handleNext = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isValid) {
-      toast.error("أدخل وزناً صالحاً");
+      toast.error(t("toastInvalidWeight"));
       return;
     }
     setConfirming(true);
@@ -2033,12 +2090,12 @@ function EditSessionButton({
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success("تم تعديل الوزنة");
+      toast.success(t("sessionEdited"));
       setConfirming(false);
       setOpen(false);
       onEdited();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "خطأ");
+      toast.error(e instanceof Error ? e.message : t("errorShort"));
     } finally {
       setSaving(false);
     }
@@ -2047,31 +2104,33 @@ function EditSessionButton({
   return (
     <>
       <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
-        تعديل
+        {t("edit")}
       </Button>
       <Dialog open={open} onOpenChange={handleClose}>
-        <DialogContent className="max-w-sm">
+        <DialogContent dir={dir} className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>تعديل الوزنة #{s.sessionNumber}</DialogTitle>
+            <DialogTitle>{t("editSessionTitle", { n: s.sessionNumber })}</DialogTitle>
           </DialogHeader>
 
           {!confirming ? (
             <form onSubmit={handleNext} className="space-y-4">
               <div className="rounded-md bg-muted px-3 py-2 text-sm">
-                <span className="text-muted-foreground">القيمة الحالية: </span>
-                <span className="font-mono font-semibold">{originalWeight.toFixed(3)} طن</span>
+                <span className="text-muted-foreground">{t("currentValue")}</span>
+                <span className="font-mono font-semibold">
+                  {t("tonsValue", { value: formatDecimal(originalWeight, 3) })}
+                </span>
               </div>
               <div className="space-y-2">
-                <Label>القياس</Label>
+                <Label>{t("size")}</Label>
                 <Select
                   items={sizes.map((sz) => ({ value: sz.code, label: sz.displayName }))}
                   value={sizeCode}
                   onValueChange={(v) => setSizeCode(v ?? "")}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="اختر القياس" />
+                    <SelectValue placeholder={t("selectSize")} />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent dir={dir}>
                     {sizes.map((sz) => (
                       <SelectItem key={sz.id} value={sz.code}>
                         {sz.displayName}
@@ -2082,7 +2141,7 @@ function EditSessionButton({
               </div>
               {selectedSize?.isBundleType && (
               <div className="space-y-2">
-                <Label>عدد الربطات</Label>
+                <Label>{t("bundleCount")}</Label>
                 <Input
                   type="number"
                   min="1"
@@ -2092,7 +2151,7 @@ function EditSessionButton({
               </div>
               )}
               <div className="space-y-2">
-                <Label>الوزن بالطن</Label>
+                <Label>{t("weightTonsLabel")}</Label>
                 <Input
                   type="number"
                   step="0.001"
@@ -2104,39 +2163,39 @@ function EditSessionButton({
               </div>
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => handleClose(false)}>
-                  إلغاء
+                  {t("cancel")}
                 </Button>
                 <Button type="submit" disabled={!isValid}>
-                  التالي
+                  {t("next")}
                 </Button>
               </DialogFooter>
             </form>
           ) : (
             <div className="space-y-4">
               <div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4 text-center dark:bg-amber-950/30 dark:border-amber-700">
-                <p className="text-sm text-muted-foreground mb-1">هل أنت متأكد من تعديل الوزنة إلى القيمة التالية؟</p>
+                <p className="text-sm text-muted-foreground mb-1">{t("confirmEditSessionPrompt")}</p>
                 <p className="text-3xl font-bold font-mono" dir="ltr">
-                  {parsedWeight.toFixed(3)} <span className="text-base font-normal">طن</span>
+                  {t("tonsValue", { value: formatDecimal(parsedWeight, 3) })}
                 </p>
                 <div className="mt-2 text-sm space-y-0.5">
                   <div>
-                    <span className="text-muted-foreground">القياس: </span>
-                    <span className="font-medium">{selectedSize?.displayName ?? "—"}</span>
+                    <span className="text-muted-foreground">{t("sizeLabel")}</span>
+                    <span className="font-medium">{selectedSize?.displayName ?? t("emDash")}</span>
                   </div>
                   <div>
-                    <span className="text-muted-foreground">الربطات: </span>
+                    <span className="text-muted-foreground">{t("bundlesLabel")}</span>
                     <span className="font-medium">
-                      {parsedBundles != null ? parsedBundles.toLocaleString("en-US") : "—"}
+                      {parsedBundles != null ? formatInteger(parsedBundles) : t("emDash")}
                     </span>
                   </div>
                   <div className="pt-1 text-xs text-muted-foreground">
-                    القيمة السابقة: {originalWeight.toFixed(3)} طن
+                    {t("previousValue", { value: formatDecimal(originalWeight, 3) })}
                   </div>
                 </div>
               </div>
               <DialogFooter className="gap-2">
                 <Button type="button" variant="outline" onClick={() => setConfirming(false)}>
-                  تعديل القيم
+                  {t("editValues")}
                 </Button>
                 <Button
                   type="button"
@@ -2144,7 +2203,7 @@ function EditSessionButton({
                   disabled={saving}
                   className="bg-green-600 hover:bg-green-700"
                 >
-                  {saving ? "جاري الحفظ..." : "تأكيد التعديل"}
+                  {saving ? t("saving") : t("confirmEdit")}
                 </Button>
               </DialogFooter>
             </div>
@@ -2166,10 +2225,13 @@ function DeleteSessionButton({
   session: WeighSessionItem;
   onDeleted: () => void;
 }) {
+  const t = useTranslations("scale");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const weightLabel = Number(s.weightTons).toFixed(3);
+  const weightLabel = formatDecimal(Number(s.weightTons), 3);
 
   const handleConfirm = async () => {
     setSaving(true);
@@ -2184,11 +2246,11 @@ function DeleteSessionButton({
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success("تم حذف الوزنة");
+      toast.success(t("sessionDeleted"));
       setOpen(false);
       onDeleted();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "خطأ");
+      toast.error(e instanceof Error ? e.message : t("errorShort"));
     } finally {
       setSaving(false);
     }
@@ -2201,30 +2263,30 @@ function DeleteSessionButton({
         size="sm"
         className="text-destructive hover:text-destructive"
         onClick={() => setOpen(true)}
-        aria-label={`حذف الوزنة ${s.sessionNumber}`}
+        aria-label={t("deleteSessionAria", { n: s.sessionNumber })}
       >
         <Trash2 className="h-4 w-4" />
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-sm">
+        <DialogContent dir={dir} className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>حذف الوزنة #{s.sessionNumber}</DialogTitle>
+            <DialogTitle>{t("deleteSessionTitle", { n: s.sessionNumber })}</DialogTitle>
           </DialogHeader>
           <div className="rounded-lg border-2 border-destructive/40 bg-destructive/5 p-4 text-center">
-            <p className="text-sm text-muted-foreground mb-1">سيتم حذف الوزنة التالية نهائياً:</p>
+            <p className="text-sm text-muted-foreground mb-1">{t("deleteSessionPrompt")}</p>
             <p className="text-2xl font-bold font-mono" dir="ltr">
-              {weightLabel} <span className="text-base font-normal">طن</span>
+              {t("tonsValue", { value: weightLabel })}
             </p>
             {s.size?.displayName && (
               <p className="text-sm mt-2">
-                <span className="text-muted-foreground">القياس: </span>
+                <span className="text-muted-foreground">{t("sizeLabel")}</span>
                 {s.size.displayName}
               </p>
             )}
           </div>
           <DialogFooter className="gap-2">
             <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={saving}>
-              إلغاء
+              {t("cancel")}
             </Button>
             <Button
               type="button"
@@ -2232,7 +2294,7 @@ function DeleteSessionButton({
               onClick={() => void handleConfirm()}
               disabled={saving}
             >
-              {saving ? "جاري الحذف..." : "تأكيد الحذف"}
+              {saving ? t("deleting") : t("confirmDelete")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2252,6 +2314,7 @@ function PhotoUploadButton({
   onUploaded: () => void;
   disabled: boolean;
 }) {
+  const t = useTranslations("scale");
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
 
@@ -2270,10 +2333,10 @@ function PhotoUploadButton({
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success("تم رفع الصورة");
+      toast.success(t("photoUploaded"));
       onUploaded();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "خطأ في رفع الصورة");
+      toast.error(e instanceof Error ? e.message : t("photoUploadError"));
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -2295,7 +2358,7 @@ function PhotoUploadButton({
         disabled={disabled || uploading}
       >
         <Camera className="h-4 w-4 me-1" />
-        {uploading ? "جاري الرفع..." : "رفع صورة"}
+        {uploading ? t("uploading") : t("uploadPhoto")}
       </Button>
     </>
   );
@@ -2340,6 +2403,10 @@ function LoadingCompleteDialog({
     sizeId?: number | null,
   ) => Promise<boolean>;
 }) {
+  const t = useTranslations("scale");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
   const [saving, setSaving] = useState(false);
   const [grade, setGrade] = useState<SalesOrderGrade | "">(initialGrade ?? "");
   const [sizeId, setSizeId] = useState<number | null>(initialSizeId);
@@ -2385,22 +2452,22 @@ function LoadingCompleteDialog({
   // comparison warnings are noise — the round net is recorded at gross.
   const warnings: string[] = skipInternalWeighing ? [] : [...requestWarnings];
   if (!skipInternalWeighing && sessions.length === 0) {
-    warnings.push("لا توجد وزنات داخلية — يُفضّل إضافة وزنة واحدة على الأقل قبل التأكيد");
+    warnings.push(t("warnNoInternalSessions"));
   }
   if (photoCount === 0) {
-    warnings.push("لم تُرفع أي صورة بعد — يُفضّل رفع صورة واحدة على الأقل قبل التأكيد");
+    warnings.push(t("warnNoPhotos"));
   }
   if (
     sessions.some(
       (s) => s.size?.isBundleType === true && s.bundleCount == null,
     )
   ) {
-    warnings.push("بعض الوزنات لم يُسجَّل فيها عدد الربطات — راجع القائمة قبل التأكيد");
+    warnings.push(t("warnMissingBundles"));
   }
 
   const handleConfirm = async () => {
     if (showMaterialSelect && sizeId == null) {
-      toast.error("حدد مادة هذه الدورة قبل التأكيد");
+      toast.error(t("toastSelectRoundMaterial"));
       return;
     }
     setSaving(true);
@@ -2416,20 +2483,22 @@ function LoadingCompleteDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm max-h-[90dvh] overflow-y-auto">
+      <DialogContent dir={dir} className="max-w-sm max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {roundNumber > 1
-              ? `تأكيد اكتمال التحميل — دورة ${roundNumber}`
-              : "تأكيد اكتمال التحميل"}
+              ? t("loadingCompleteRoundTitle", { n: roundNumber })
+              : t("loadingCompleteTitle")}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 text-sm">
           <div className="text-muted-foreground space-y-0.5">
             <div>
-              <span className="font-medium text-foreground">عملية #{truckId}</span>
-              <span className="mx-2">·</span>
+              <span className="font-medium text-foreground">
+                {t("operationNumber", { id: truckId })}
+              </span>
+              <span className="mx-2">{t("emDash")}</span>
               <span>{plateNumber}</span>
             </div>
             {customerLabel && <div>{customerLabel}</div>}
@@ -2437,44 +2506,41 @@ function LoadingCompleteDialog({
 
           {showGradeSelect && (
             <div className="space-y-2">
-              <Label>نخب هذه الدورة</Label>
+              <Label>{t("roundGrade")}</Label>
               <Select
                 value={grade}
                 onValueChange={(v) => setGrade((v as SalesOrderGrade | "") ?? "")}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="اختر النخب" />
+                  <SelectValue placeholder={t("selectGrade")} />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">بلا نخب (سكراب / غير مبروم)</SelectItem>
-                  {(Object.entries(GRADE_LABELS) as [SalesOrderGrade, string][]).map(
-                    ([key, label]) => (
-                      <SelectItem key={key} value={key}>
-                        {label}
-                      </SelectItem>
-                    ),
-                  )}
+                <SelectContent dir={dir}>
+                  <SelectItem value="">{t("noGradeScrap")}</SelectItem>
+                  {GRADES.map((g) => (
+                    <SelectItem key={g} value={g}>
+                      {tEnums(`grade.${g}`)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                نخب واحد لكل دورة — إذا حمّلت الشاحنة نخبين، افصلهما بوزنة
-                «رجوع للتحميل» بين الدورتين.
+                {t("roundGradeHint")}
               </p>
             </div>
           )}
 
           {showMaterialSelect && (
             <div className="space-y-2">
-              <Label>مادة هذه الدورة *</Label>
+              <Label>{t("roundMaterial")}</Label>
               <Select
                 items={materialSelectItems}
                 value={sizeId != null ? String(sizeId) : ""}
                 onValueChange={(v) => setSizeId(v ? Number(v) : null)}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="اختر المادة المحمّلة" />
+                  <SelectValue placeholder={t("selectMaterial")} />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent dir={dir}>
                   {materialOptions.map((size) => (
                     <SelectItem key={size.id} value={String(size.id)}>
                       {size.displayName}
@@ -2483,23 +2549,21 @@ function LoadingCompleteDialog({
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                مادة واحدة لكل دورة — صافي القبان لهذه الدورة سيُسجَّل تلقائياً
-                على المادة المختارة. إذا حمّلت الشاحنة مادتين، افصلهما بوزنة
-                «رجوع للتحميل» بين الدورتين.
+                {t("roundMaterialHint")}
               </p>
             </div>
           )}
 
           {requestRows.length > 0 && (
             <div className="space-y-2">
-              <p className="text-sm font-medium">تفاصيل الطلبية مقابل المحمّل</p>
+              <p className="text-sm font-medium">{t("requestVsLoaded")}</p>
               <div className="overflow-x-auto rounded-lg border">
                 <Table className="min-w-[280px]">
                   <TableHeader>
                     <TableRow>
-                      <TableHead>القياس</TableHead>
-                      <TableHead>المطلوب</TableHead>
-                      <TableHead>المحمّل</TableHead>
+                      <TableHead>{t("size")}</TableHead>
+                      <TableHead>{t("requested")}</TableHead>
+                      <TableHead>{t("loaded")}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -2510,7 +2574,7 @@ function LoadingCompleteDialog({
                           {row.grade && (
                             <span className="text-xs text-muted-foreground">
                               {" "}
-                              — {GRADE_LABELS[row.grade]}
+                              {t("emDash")} {tEnums(`grade.${row.grade}`)}
                             </span>
                           )}
                         </TableCell>
@@ -2530,20 +2594,20 @@ function LoadingCompleteDialog({
 
           {sessions.length > 0 && (
             <p className="text-sm font-medium">
-              {requestRows.length > 0 ? "تفصيل المحمّل (حسب القياس)" : "ما تم تحميله"}
+              {requestRows.length > 0 ? t("loadedBySize") : t("whatWasLoaded")}
             </p>
           )}
 
           {sessions.length === 0 ? (
-            <p className="text-center text-muted-foreground py-4">لا توجد وزنات داخلية بعد</p>
+            <p className="text-center text-muted-foreground py-4">{t("noInternalSessionsYet")}</p>
           ) : (
             <div className="overflow-x-auto rounded-lg border">
               <Table className="min-w-[260px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>القياس</TableHead>
-                    <TableHead>الربطات</TableHead>
-                    <TableHead>الوزن (طن)</TableHead>
+                    <TableHead>{t("size")}</TableHead>
+                    <TableHead>{t("bundles")}</TableHead>
+                    <TableHead>{t("weightTons")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -2552,22 +2616,22 @@ function LoadingCompleteDialog({
                       <TableCell>{row.displayName}</TableCell>
                       <TableCell className="font-mono">
                         {row.totalBundles != null
-                          ? row.totalBundles.toLocaleString("en-US")
-                          : "—"}
+                          ? formatInteger(row.totalBundles)
+                          : t("emDash")}
                       </TableCell>
                       <TableCell className="font-mono font-semibold">
-                        {row.totalTons.toFixed(3)}
+                        {formatDecimal(row.totalTons, 3)}
                       </TableCell>
                     </TableRow>
                   ))}
                   <TableRow className="font-bold bg-muted/50">
-                    <TableCell>المجموع الكلي</TableCell>
+                    <TableCell>{t("grandTotal")}</TableCell>
                     <TableCell className="font-mono">
                       {totalBundles != null
-                        ? totalBundles.toLocaleString("en-US")
-                        : "—"}
+                        ? formatInteger(totalBundles)
+                        : t("emDash")}
                     </TableCell>
-                    <TableCell className="font-mono">{totalTons.toFixed(3)}</TableCell>
+                    <TableCell className="font-mono">{formatDecimal(totalTons, 3)}</TableCell>
                   </TableRow>
                 </TableBody>
               </Table>
@@ -2575,8 +2639,10 @@ function LoadingCompleteDialog({
           )}
 
           <p className="text-xs text-muted-foreground">
-            {sessions.length.toLocaleString("en-US")} وزنة ·{" "}
-            {photoCount.toLocaleString("en-US")} صورة
+            {t("sessionsPhotosCount", {
+              sessions: formatInteger(sessions.length),
+              photos: formatInteger(photoCount),
+            })}
           </p>
 
           {warnings.length > 0 && (
@@ -2594,14 +2660,13 @@ function LoadingCompleteDialog({
           )}
 
           <p className="text-xs text-muted-foreground">
-            بعد التأكيد تُجمَّد الوزنات الداخلية ولا تُعدَّل إلا بإعادة فتح التحميل (إن وُجدت
-            الصلاحية).
+            {t("loadingCompleteFreezeHint")}
           </p>
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-            تراجع
+            {t("goBack")}
           </Button>
           <Button
             type="button"
@@ -2609,7 +2674,7 @@ function LoadingCompleteDialog({
             disabled={saving}
             className="bg-green-600 hover:bg-green-700"
           >
-            {saving ? "جاري التأكيد..." : "تأكيد اكتمال التحميل"}
+            {saving ? t("confirming") : t("confirmLoadingComplete")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -2634,6 +2699,9 @@ function CloseDialog({
   truckId: number;
   onSuccess: () => void;
 }) {
+  const t = useTranslations("scale");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
   const [cardNumber, setCardNumber] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -2645,7 +2713,7 @@ function CloseDialog({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!cardNumber.trim()) {
-      toast.error("أدخل رقم كرت القبان (المالية)");
+      toast.error(t("toastCardRequired"));
       return;
     }
     setSaving(true);
@@ -2660,12 +2728,12 @@ function CloseDialog({
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success("تم إغلاق العملية");
+      toast.success(t("operationClosed"));
       setCardNumber("");
       onOpenChange(false);
       onSuccess();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "خطأ");
+      toast.error(e instanceof Error ? e.message : t("errorShort"));
     } finally {
       setSaving(false);
     }
@@ -2673,38 +2741,37 @@ function CloseDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-sm">
+      <DialogContent dir={dir} className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>إغلاق العملية</DialogTitle>
+          <DialogTitle>{t("closeOperation")}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="external-card-number">رقم كرت القبان (المالية)</Label>
+            <Label htmlFor="external-card-number">{t("externalCardNumber")}</Label>
             <Input
               id="external-card-number"
               value={cardNumber}
               onChange={(e) => setCardNumber(e.target.value)}
-              placeholder="الرقم الصادر عن برنامج المالية..."
+              placeholder={t("cardNumberPlaceholder")}
               maxLength={30}
               autoFocus
               dir="ltr"
               className="text-start font-mono"
             />
             <p className="text-xs text-muted-foreground">
-              لا يمكن إغلاق العملية بدون إدخال رقم الكرت الصادر عن برنامج
-              المالية لتوحيد الرقم بين النظامين.
+              {t("closeCardHint")}
             </p>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
-              تراجع
+              {t("goBack")}
             </Button>
             <Button
               type="submit"
               className="bg-green-600 hover:bg-green-700"
               disabled={saving || !cardNumber.trim()}
             >
-              {saving ? "جاري الإغلاق..." : "تأكيد الإغلاق"}
+              {saving ? t("closing") : t("confirmClose")}
             </Button>
           </DialogFooter>
         </form>
@@ -2726,13 +2793,16 @@ function CancelDialog({
   truckId: number;
   onSuccess: () => void;
 }) {
+  const t = useTranslations("scale");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!reason.trim()) {
-      toast.error("أدخل سبب الإلغاء");
+      toast.error(t("toastCancelReasonRequired"));
       return;
     }
     setSaving(true);
@@ -2747,12 +2817,12 @@ function CancelDialog({
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success("تم إلغاء العملية");
+      toast.success(t("operationCancelled"));
       setReason("");
       onOpenChange(false);
       onSuccess();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "خطأ");
+      toast.error(e instanceof Error ? e.message : t("errorShort"));
     } finally {
       setSaving(false);
     }
@@ -2760,27 +2830,27 @@ function CancelDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm">
+      <DialogContent dir={dir} className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>إلغاء العملية</DialogTitle>
+          <DialogTitle>{t("stepCancelled")}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label>سبب الإلغاء</Label>
+            <Label>{t("cancelReasonLabel")}</Label>
             <Textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               rows={3}
-              placeholder="اكتب سبب الإلغاء..."
+              placeholder={t("cancelReasonPlaceholder")}
               autoFocus
             />
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              تراجع
+              {t("goBack")}
             </Button>
             <Button type="submit" variant="destructive" disabled={saving}>
-              {saving ? "جاري الإلغاء..." : "تأكيد الإلغاء"}
+              {saving ? t("cancelling") : t("confirmCancel")}
             </Button>
           </DialogFooter>
         </form>
