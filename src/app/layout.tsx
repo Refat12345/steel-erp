@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import { Cairo } from "next/font/google";
+import { NextIntlClientProvider } from "next-intl";
+import { getLocale, getTranslations } from "next-intl/server";
 import { Toaster } from "@/components/ui/sonner";
 import { Providers } from "@/components/providers";
 import { BRAND } from "@/lib/brand";
+import { getTextDirection, type Locale } from "@/i18n/config";
 import "./globals.css";
 
 const cairo = Cairo({
@@ -10,27 +13,35 @@ const cairo = Cairo({
   subsets: ["arabic", "latin"],
 });
 
-export const metadata: Metadata = {
-  title: BRAND.metadataTitle,
-  description: BRAND.metadataDescription,
-  icons: {
-    icon: [{ url: BRAND.faviconPath, sizes: "any" }],
-    apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
-  },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations("brand");
+  return {
+    title: t("metadataTitle"),
+    description: t("metadataDescription"),
+    icons: {
+      icon: [{ url: BRAND.faviconPath, sizes: "any" }],
+      apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
+    },
+  };
+}
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const locale = (await getLocale()) as Locale;
+  const dir = getTextDirection(locale);
+
   return (
-    <html lang="ar" dir="rtl" className={`${cairo.variable} h-full`}>
+    <html lang={locale} dir={dir} className={`${cairo.variable} h-full`}>
       <body className="min-h-full font-[family-name:var(--font-cairo)] antialiased">
-        <Providers>
-          {children}
-          <Toaster position="top-center" richColors dir="rtl" />
-        </Providers>
+        <NextIntlClientProvider>
+          <Providers>
+            {children}
+            <Toaster position="top-center" richColors dir={dir} />
+          </Providers>
+        </NextIntlClientProvider>
       </body>
     </html>
   );

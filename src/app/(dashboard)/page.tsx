@@ -9,8 +9,8 @@ import {
   getRoleLandingPage,
   isAnalyticsRestrictedRole,
 } from "@/lib/rbac-policy";
+import { getTranslations } from "next-intl/server";
 import { logger } from "@/lib/logger";
-import { BRAND } from "@/lib/brand";
 import { formatDate } from "@/lib/date-format";
 
 export default async function DashboardPage() {
@@ -75,6 +75,8 @@ export default async function DashboardPage() {
   }
 
   const dateStr = formatDate(new Date());
+  const tBrand = await getTranslations("brand");
+  const userName = session?.user.name ?? "";
 
   return (
     <div className="space-y-8">
@@ -96,13 +98,17 @@ export default async function DashboardPage() {
           </div>
           <div>
             <h2 className="text-xl font-bold tracking-tight">
-              أهلاً،{" "}
-              <span style={{ color: "oklch(0.390 0.130 232)" }}>
-                {session?.user.name}
-              </span>
+              {tBrand.rich("helloName", {
+                name: userName,
+                highlight: (chunks) => (
+                  <span style={{ color: "oklch(0.390 0.130 232)" }}>
+                    {chunks}
+                  </span>
+                ),
+              })}
             </h2>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              {BRAND.welcomeAr}
+              {tBrand("welcome")}
             </p>
           </div>
         </div>

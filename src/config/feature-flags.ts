@@ -23,3 +23,13 @@
 export function isStockModuleEnabled(): boolean {
   return process.env.STOCK_MODULE_ENABLED === "true";
 }
+
+/**
+ * Language switcher (bilingual i18n rollout). Dark-launched: the i18n
+ * infrastructure ships early, but users cannot switch away from Arabic until
+ * translations are complete (plan phase 7). Enable locally / on production
+ * with `LANGUAGE_SWITCHER_ENABLED=true`.
+ */
+export function isLanguageSwitcherEnabled(): boolean {
+  return process.env.LANGUAGE_SWITCHER_ENABLED === "true";
+}

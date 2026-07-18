@@ -155,6 +155,8 @@ model User {
   passwordHash String   @map("password_hash")
   fullName     String   @map("full_name")
   roleCode     String   @map("role_code")
+  /** UI language preference: "ar" (default) or "en". Mirrored in the NEXT_LOCALE cookie. */
+  locale       String   @default("ar")
   isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")

@@ -1,5 +1,29 @@
 "use client";
 
+import {
+  DEFAULT_LOCALE,
+  LOCALE_COOKIE,
+  getTextDirection,
+  isLocale,
+  type Locale,
+} from "@/i18n/config";
+import ar from "../../messages/ar.json";
+import en from "../../messages/en.json";
+
+/**
+ * Root error boundary — replaces the entire document, so next-intl's
+ * provider is unavailable. Locale + copy are resolved from the cookie
+ * and the static message files instead.
+ */
+function readLocale(): Locale {
+  if (typeof document === "undefined") return DEFAULT_LOCALE;
+  const match = document.cookie.match(
+    new RegExp(`(?:^|; )${LOCALE_COOKIE}=([^;]*)`),
+  );
+  const value = match?.[1] ? decodeURIComponent(match[1]) : undefined;
+  return isLocale(value) ? value : DEFAULT_LOCALE;
+}
+
 export default function GlobalError({
   error,
   reset,
@@ -7,8 +31,14 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const locale = readLocale();
+  const dir = getTextDirection(locale);
+  const messages = locale === "en" ? en : ar;
+  const t = messages.errors;
+  const retry = messages.common.retry;
+
   return (
-    <html dir="rtl" lang="ar">
+    <html dir={dir} lang={locale}>
       <body
         style={{
           fontFamily: "system-ui, sans-serif",
@@ -38,10 +68,10 @@ export default function GlobalError({
             ⚠️
           </div>
           <h2 style={{ fontSize: "18px", fontWeight: "bold", marginBottom: "8px" }}>
-            حدث خطأ في النظام
+            {t.globalTitle}
           </h2>
           <p style={{ fontSize: "14px", color: "#6b7280", marginBottom: "16px" }}>
-            عذراً، حدث خطأ غير متوقع. يرجى تحديث الصفحة.
+            {t.globalBody}
           </p>
           {error.digest && (
             <p
@@ -68,7 +98,7 @@ export default function GlobalError({
               cursor: "pointer",
             }}
           >
-            إعادة المحاولة
+            {retry}
           </button>
         </div>
       </body>
