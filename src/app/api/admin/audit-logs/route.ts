@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
     to: req.nextUrl.searchParams.get("to") ?? undefined,
   });
   if (!parsedFilters.success) {
-    return badRequest(parsedFilters.error.issues[0]?.message || "بيانات غير صالحة");
+    return badRequest(parsedFilters.error.issues[0]?.message || "invalidData");
   }
 
   try {

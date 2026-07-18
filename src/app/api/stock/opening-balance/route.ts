@@ -20,12 +20,12 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return badRequest("بيانات غير صالحة");
+    return badRequest("invalidData");
   }
 
   const parsed = productionInSchema.safeParse(body);
   if (!parsed.success) {
-    return badRequest(parsed.error.issues[0]?.message || "بيانات غير صالحة");
+    return badRequest(parsed.error.issues[0]?.message || "invalidData");
   }
 
   try {

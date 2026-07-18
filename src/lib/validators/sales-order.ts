@@ -8,61 +8,61 @@ const STATUS_VALUES = ["draft", "approved", "in_progress", "completed", "cancell
 
 export const salesOrderCreateSchema = z
   .object({
-    contractNumber: z.string().min(1, "رقم العقد مطلوب"),
-    kind: z.enum(KIND_VALUES, { message: "نوع أمر البيع مطلوب" }),
+    contractNumber: z.string().min(1, "contractNumberRequired"),
+    kind: z.enum(KIND_VALUES, { message: "orderKindRequired" }),
     grade: z.enum(GRADE_VALUES).optional().nullable(),
-    settlementMode: z.enum(SETTLEMENT_VALUES, { message: "نمط التسوية مطلوب" }),
+    settlementMode: z.enum(SETTLEMENT_VALUES, { message: "settlementModeRequired" }),
     paymentDeadlineDays: z.number().int().positive().optional().nullable(),
     totalQtyTons: z
-      .number({ message: "الكمية الإجمالية مطلوبة" })
-      .positive("الكمية يجب أن تكون أكبر من صفر"),
-    toleranceType: z.enum(TOLERANCE_VALUES, { message: "نوع السماحية مطلوب" }),
+      .number({ message: "totalQuantityRequired" })
+      .positive("quantityMustBePositive"),
+    toleranceType: z.enum(TOLERANCE_VALUES, { message: "toleranceTypeRequired" }),
     toleranceValue: z
-      .number({ message: "قيمة السماحية مطلوبة" })
-      .min(0, "السماحية لا يمكن أن تكون سلبية"),
+      .number({ message: "toleranceValueRequired" })
+      .min(0, "toleranceCannotBeNegative"),
     specialRatioPct: z
       .number()
       .min(0)
-      .max(100, "النسبة الخاصة يجب أن تكون بين 0 و100")
+      .max(100, "specialRatioRange")
       .optional()
       .nullable(),
-    orderDate: z.string().min(1, "تاريخ الأمر مطلوب"),
-    deliveryDate: z.string().min(1, "تاريخ التسليم المتوقع مطلوب"),
+    orderDate: z.string().min(1, "orderDateRequired"),
+    deliveryDate: z.string().min(1, "deliveryDateRequired"),
     notes: z.string().max(2000).optional().or(z.literal("")),
   })
   .superRefine((data, ctx) => {
     if (data.kind === "REBAR" && !data.grade) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "النخب مطلوب لأوامر بيع المبروم",
+        message: "gradeRequiredForRebar",
         path: ["grade"],
       });
     }
     if (data.kind !== "REBAR" && data.grade) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "النخب يُحدد فقط لأوامر بيع المبروم",
+        message: "gradeOnlyForRebar",
         path: ["grade"],
       });
     }
     if (data.settlementMode === "CREDIT" && !data.paymentDeadlineDays) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "مهلة السداد مطلوبة لأوامر البيع الآجلة",
+        message: "paymentDeadlineRequiredForCredit",
         path: ["paymentDeadlineDays"],
       });
     }
     if (data.settlementMode === "PAYMENT_PLAN" && data.paymentDeadlineDays) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "مهلة السداد تُحدد فقط لأوامر البيع الآجلة",
+        message: "paymentDeadlineOnlyForCredit",
         path: ["paymentDeadlineDays"],
       });
     }
     if (data.kind !== "REBAR" && data.specialRatioPct != null && data.specialRatioPct > 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "النسبة الخاصة تُستخدم فقط لأوامر بيع المبروم",
+        message: "specialRatioOnlyForRebar",
         path: ["specialRatioPct"],
       });
     }
@@ -70,9 +70,9 @@ export const salesOrderCreateSchema = z
 
 export const salesOrderUpdateSchema = z.object({
   status: z.enum(STATUS_VALUES).optional(),
-  statusReason: z.string().min(1, "سبب تغيير الحالة مطلوب").optional(),
+  statusReason: z.string().min(1, "statusChangeReasonRequired").optional(),
   notes: z.string().max(2000).optional().or(z.literal("")),
-  totalQtyTons: z.number().positive("الكمية يجب أن تكون أكبر من صفر").optional(),
+  totalQtyTons: z.number().positive("quantityMustBePositive").optional(),
   toleranceType: z.enum(TOLERANCE_VALUES).optional(),
   toleranceValue: z.number().min(0).optional(),
   specialRatioPct: z.number().min(0).max(100).optional().nullable(),
@@ -80,12 +80,12 @@ export const salesOrderUpdateSchema = z.object({
 });
 
 export const orderItemSchema = z.object({
-  sizeId: z.number().int().positive("القياس مطلوب"),
-  pricePerTon: z.number().positive("السعر يجب أن يكون أكبر من صفر"),
+  sizeId: z.number().int().positive("sizeRequired"),
+  pricePerTon: z.number().positive("priceMustBePositive"),
 });
 
 export const orderItemsSetSchema = z.object({
-  items: z.array(orderItemSchema).min(1, "يجب إضافة بند سعر واحد على الأقل"),
+  items: z.array(orderItemSchema).min(1, "atLeastOnePriceItemRequired"),
 });
 
 export type SalesOrderCreateInput = z.infer<typeof salesOrderCreateSchema>;

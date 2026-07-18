@@ -3,6 +3,11 @@ import NextAuth from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { LOCALE_COOKIE } from "@/i18n/config";
+import {
+  resolveLocaleFromCookieValue,
+  translateError,
+} from "@/lib/i18n/server-messages";
 
 const LOGIN_RATE_LIMIT = { windowMs: 15 * 60 * 1000, maxAttempts: 10 };
 
@@ -23,8 +28,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ nextauth: 
 
     if (!result.allowed) {
       logger.warn({ ip }, "login rate limited");
+      const locale = resolveLocaleFromCookieValue(
+        req.cookies.get(LOCALE_COOKIE)?.value,
+      );
       return NextResponse.json(
-        { error: "عدد المحاولات تجاوز الحد المسموح، حاول لاحقاً" },
+        { error: translateError(locale, "loginRateLimited") },
         {
           status: 429,
           headers: { "Retry-After": String(Math.ceil(result.retryAfterMs / 1000)) },

@@ -1,15 +1,15 @@
 import { z } from "zod";
 
 export const paymentCreateSchema = z.object({
-  customerId: z.number().int().positive("العميل مطلوب"),
+  customerId: z.number().int().positive("clientRequired"),
   amount: z
     .number()
-    .positive("المبلغ يجب أن يكون أكبر من صفر")
-    .max(999_999_999_999, "المبلغ كبير جداً"),
+    .positive("amountMustBePositive")
+    .max(999_999_999_999, "amountTooLarge"),
   method: z.enum(["CASH", "BANK_TRANSFER", "CHECK"], {
-    message: "طريقة الدفع مطلوبة",
+    message: "paymentMethodRequired",
   }),
-  paymentDate: z.string().min(1, "تاريخ الدفع مطلوب"),
+  paymentDate: z.string().min(1, "paymentDateRequired"),
   referenceNumber: z.string().max(100).optional().or(z.literal("")),
   notes: z.string().max(2000).optional().or(z.literal("")),
 });

@@ -466,7 +466,7 @@ describe("updateTruckBeforeWeigh", () => {
 
     await expect(
       updateTruckBeforeWeigh(1, { requestItems: [{ sizeId: 1, bundleCount: 12 }] }, 0, 7),
-    ).rejects.toThrow(/بعد بدء الوزنات الداخلية/);
+    ).rejects.toThrow("cannotEditTruckAfterInternalWeighs");
     expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
   });
 
@@ -478,7 +478,7 @@ describe("updateTruckBeforeWeigh", () => {
 
     await expect(
       updateTruckBeforeWeigh(1, { plateNumber: "NEW-999" }, 0, 7),
-    ).rejects.toThrow(/لا يمكن تغيير الزبون/);
+    ).rejects.toThrow("afterTareLimitedFieldsEditable");
   });
 
   it("rejects changing customer after tare", async () => {
@@ -489,7 +489,7 @@ describe("updateTruckBeforeWeigh", () => {
 
     await expect(
       updateTruckBeforeWeigh(1, { customerId: 2 }, 0, 7),
-    ).rejects.toThrow(/لا يمكن تغيير الزبون/);
+    ).rejects.toThrow("afterTareLimitedFieldsEditable");
   });
 
   it("clears notes at FirstWeigh when patch sends null", async () => {
@@ -552,7 +552,7 @@ describe("updateTruckBeforeWeigh", () => {
 
     await expect(
       updateTruckBeforeWeigh(1, { requestItems: [{ sizeId: 1, bundleCount: 12 }] }, 0, 7),
-    ).rejects.toThrow(/بعد بدء الوزنات الداخلية/);
+    ).rejects.toThrow("cannotEditTruckAfterInternalWeighs");
     expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
   });
 
@@ -639,7 +639,7 @@ describe("updateTruckNotes", () => {
     });
 
     await expect(updateTruckNotes(1, "x", 3, 7)).rejects.toThrow(
-      /لا يمكن تعديل الملاحظات/,
+      "cannotEditNotesInCurrentStatus",
     );
     expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
   });
@@ -700,7 +700,9 @@ describe("registerTruck", () => {
     mockPrisma.masterContract.findFirst.mockResolvedValue(null);
 
     await expect(registerTruck(validInput, 7)).rejects.toThrow(ServiceError);
-    await expect(registerTruck(validInput, 7)).rejects.toThrow(/عقد عام نشط/);
+    await expect(registerTruck(validInput, 7)).rejects.toThrow(
+      "cannotRegisterTruckWithoutActiveGeneralContract",
+    );
   });
 });
 
@@ -845,12 +847,16 @@ describe("confirmLoadingComplete", () => {
 
   it("refuses when no internal weigh-sessions exist", async () => {
     mockPrisma.weighSession.findMany.mockResolvedValueOnce([]);
-    await expect(confirmLoadingComplete(1, 99)).rejects.toThrow(/وزنة واحدة/);
+    await expect(confirmLoadingComplete(1, 99)).rejects.toThrow(
+      "atLeastOneWeighBeforeLoadingComplete",
+    );
   });
 
   it("refuses when no photo uploaded", async () => {
     mockPrisma.truckPhoto.count.mockResolvedValueOnce(0);
-    await expect(confirmLoadingComplete(1, 99)).rejects.toThrow(/صورة واحدة/);
+    await expect(confirmLoadingComplete(1, 99)).rejects.toThrow(
+      "atLeastOnePhotoBeforeLoadingComplete",
+    );
   });
 
   it("scopes session/photo requirements to the OPEN round, not the whole operation", async () => {
@@ -893,7 +899,7 @@ describe("confirmLoadingComplete", () => {
 
   it("refuses when no open round exists", async () => {
     mockRounds({ open: null });
-    await expect(confirmLoadingComplete(1, 99)).rejects.toThrow(/دورة قبان مفتوحة/);
+    await expect(confirmLoadingComplete(1, 99)).rejects.toThrow("noOpenScaleRound");
   });
 });
 
@@ -937,7 +943,9 @@ describe("confirmLoadingComplete — internal-weighing-exempt trucks", () => {
       { sizeId: 7 },
     ]);
 
-    await expect(confirmLoadingComplete(1, 99)).rejects.toThrow(/أكثر من مادة/);
+    await expect(confirmLoadingComplete(1, 99)).rejects.toThrow(
+      "multiMaterialRoundMaterialRequired",
+    );
   });
 
   it("stamps the loader's chosen material onto the round", async () => {
@@ -963,7 +971,7 @@ describe("confirmLoadingComplete — internal-weighing-exempt trucks", () => {
     ]);
 
     await expect(confirmLoadingComplete(1, 99, undefined, 9)).rejects.toThrow(
-      /تفاصيل الطلبية/,
+      "roundMaterialMustBeInRequestItems",
     );
   });
 
@@ -1052,17 +1060,17 @@ describe("enterGross", () => {
       code: "FORBIDDEN",
     });
     await expect(enterGross(1, 25_000, 7)).rejects.toThrow(
-      /Loading must be confirmed before recording gross weight/,
+      "loadingMustBeConfirmedBeforeGross",
     );
     expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
   });
 
   it("rejects gross <= round start weight (weight integrity)", async () => {
     await expect(enterGross(1, 10_000, 7)).rejects.toThrow(
-      /Gross weight must be greater than the round start weight/,
+      "grossMustExceedRoundStart",
     );
     await expect(enterGross(1, 9_999, 7)).rejects.toThrow(
-      /Gross weight must be greater than the round start weight/,
+      "grossMustExceedRoundStart",
     );
   });
 
@@ -1232,7 +1240,7 @@ describe("enterGross — exit='return' (multi-round)", () => {
 
     // 24_000 is far above the 10_000 tare but BELOW the round start — must fail.
     await expect(enterGross(1, 24_000, 7, "return")).rejects.toThrow(
-      /round start weight/,
+      "grossMustExceedRoundStart",
     );
     expect(mockPrisma.bridgeRound.update).not.toHaveBeenCalled();
   });
@@ -1330,7 +1338,7 @@ describe("correctTare — round chain protection", () => {
     });
 
     await expect(correctTare(1, 9_800, 3, 7)).rejects.toThrow(
-      /استخدم تصحيح آخر وزنة/,
+      "cannotCorrectTareAfterExternalWeigh",
     );
     expect(mockPrisma.truckOperation.updateMany).not.toHaveBeenCalled();
   });
@@ -1430,7 +1438,7 @@ describe("correctGross — last closed round", () => {
     });
 
     await expect(correctGross(1, 25_000, 5, 7)).rejects.toThrow(
-      /أكبر من وزن بداية الدورة/,
+      "grossMustExceedRoundStart",
     );
     expect(mockPrisma.truckOperation.updateMany).not.toHaveBeenCalled();
   });
@@ -1439,7 +1447,7 @@ describe("correctGross — last closed round", () => {
     mockRounds({ open: { id: 11, roundNumber: 1 }, lastClosed: null });
 
     await expect(correctGross(1, 25_000, 5, 7)).rejects.toThrow(
-      /لا توجد وزنة خارجية/,
+      "noExternalWeighToCorrect",
     );
   });
 });
@@ -1471,12 +1479,12 @@ describe("weigh sessions of closed rounds are immutable", () => {
   it("rejects editing a session from a previous round", async () => {
     await expect(
       editWeighSession(1, 10, 1, { weightTons: 7 }, 7),
-    ).rejects.toThrow(/دورة قبان سابقة/);
+    ).rejects.toThrow("cannotEditWeighOfPreviousRoundAfterExternal");
   });
 
   it("rejects deleting a session from a previous round", async () => {
     await expect(deleteWeighSession(1, 10, 1, 7)).rejects.toThrow(
-      /دورة قبان سابقة/,
+      "cannotDeleteWeighOfPreviousRoundAfterExternal",
     );
     expect(mockPrisma.weighSession.deleteMany).not.toHaveBeenCalled();
   });
@@ -1507,9 +1515,7 @@ describe("registerTruck — duplicate active session", () => {
     } catch (e) {
       expect(e).toBeInstanceOf(ServiceError);
       expect((e as ServiceError).code).toBe("CONFLICT");
-      expect((e as ServiceError).message).toMatch(
-        /يوجد عملية مفتوحة|Truck already has an active session/,
-      );
+      expect((e as ServiceError).message).toBe("openTruckForPlateById");
     }
 
     expect(mockPrisma.truckOperation.create).not.toHaveBeenCalled();
@@ -1555,8 +1561,12 @@ describe("closeOperation", () => {
   });
 
   it("refuses to close without a card number (empty / whitespace)", async () => {
-    await expect(closeOperation(1, 7, "")).rejects.toThrow(/رقم كرت القبان/);
-    await expect(closeOperation(1, 7, "   ")).rejects.toThrow(/رقم كرت القبان/);
+    await expect(closeOperation(1, 7, "")).rejects.toThrow(
+      "weighbridgeCardRequiredToClose",
+    );
+    await expect(closeOperation(1, 7, "   ")).rejects.toThrow(
+      "weighbridgeCardRequiredToClose",
+    );
     expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
   });
 
@@ -1589,7 +1599,7 @@ describe("closeOperation", () => {
     );
 
     await expect(closeOperation(1, 7, "WB-1001")).rejects.toThrow(
-      /مستخدم مسبقاً في العملية #99/,
+      "weighbridgeCardAlreadyUsed",
     );
     expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
   });
@@ -1615,7 +1625,7 @@ describe("closeOperation", () => {
     );
 
     await expect(closeOperation(1, 7, "WB-1001")).rejects.toThrow(
-      /وزن الفارغ والمحمّل/,
+      "tareAndGrossRequiredBeforeClose",
     );
   });
 });
@@ -1652,7 +1662,9 @@ describe("cancelOperation", () => {
   });
 
   it("requires a non-empty reason", async () => {
-    await expect(cancelOperation(1, "   ", 7)).rejects.toThrow(/سبب الإلغاء/);
+    await expect(cancelOperation(1, "   ", 7)).rejects.toThrow(
+      "cancelReasonRequired",
+    );
   });
 });
 
@@ -1706,7 +1718,9 @@ describe("reopenBeforeGross", () => {
       loadingConfirmedAt: new Date(),
       loaderId: 99,
     });
-    await expect(reopenBeforeGross(1, 7)).rejects.toThrow(/اكتمال التحميل/);
+    await expect(reopenBeforeGross(1, 7)).rejects.toThrow(
+      "reopenOnlyFromLoadingComplete",
+    );
   });
 });
 
@@ -1767,13 +1781,17 @@ describe("deleteWeighSession", () => {
       status: "LoadingComplete",
     });
 
-    await expect(deleteWeighSession(1, 10, 1, 7)).rejects.toThrow(/اكتمال التحميل/);
+    await expect(deleteWeighSession(1, 10, 1, 7)).rejects.toThrow(
+      "cannotDeleteWeighsAfterLoadingComplete",
+    );
     expect(mockPrisma.weighSession.deleteMany).not.toHaveBeenCalled();
   });
 
   it("rejects stale expectedVersion", async () => {
     mockPrisma.weighSession.deleteMany.mockResolvedValue({ count: 0 });
 
-    await expect(deleteWeighSession(1, 10, 1, 7)).rejects.toThrow(/مستخدم آخر/);
+    await expect(deleteWeighSession(1, 10, 1, 7)).rejects.toThrow(
+      "weighModifiedByAnotherUser",
+    );
   });
 });

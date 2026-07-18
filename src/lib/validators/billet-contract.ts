@@ -8,13 +8,13 @@ const supplierContractStatusValues = Object.values(
 /** One per-length piece counter on a supplier contract. */
 export const contractPieceLineSchema = z.object({
   billetLengthM: z
-    .number({ message: "طول البيلت مطلوب" })
-    .int("طول البيلت يجب أن يكون عدداً صحيحاً")
-    .positive("طول البيلت يجب أن يكون أكبر من صفر"),
+    .number({ message: "billetLengthRequired" })
+    .int("billetLengthMustBeInteger")
+    .positive("billetLengthMustBePositive"),
   contractedPieces: z
-    .number({ message: "عدد القطع مطلوب" })
-    .int("عدد القطع يجب أن يكون عدداً صحيحاً")
-    .positive("عدد القطع يجب أن يكون أكبر من صفر"),
+    .number({ message: "pieceCountRequired" })
+    .int("pieceCountMustBeInteger")
+    .positive("pieceCountMustBePositive"),
 });
 
 export const billetContractCreateSchema = z
@@ -22,24 +22,24 @@ export const billetContractCreateSchema = z
     supplierName: z
       .string()
       .trim()
-      .min(1, "اسم المورّد مطلوب")
-      .max(200, "اسم المورّد طويل جداً"),
+      .min(1, "supplierNameRequired")
+      .max(200, "supplierNameTooLong"),
     contractedWeightKg: z
-      .number({ message: "الوزن الإجمالي مطلوب" })
-      .positive("الوزن الإجمالي يجب أن يكون أكبر من صفر"),
+      .number({ message: "totalWeightRequired" })
+      .positive("totalWeightMustBePositive"),
     // ISO date string (yyyy-mm-dd); defaults to today server-side when empty.
     contractDate: z.string().optional().or(z.literal("")),
     notes: z.string().max(2000).optional().or(z.literal("")),
     pieceLines: z
       .array(contractPieceLineSchema)
-      .min(1, "أضف عدد القطع لطول واحد على الأقل"),
+      .min(1, "atLeastOnePieceCountLineRequired"),
   })
   .superRefine((data, ctx) => {
     const lengths = data.pieceLines.map((l) => l.billetLengthM);
     if (new Set(lengths).size !== lengths.length) {
       ctx.addIssue({
         code: "custom",
-        message: "لا يمكن تكرار نفس الطول في العقد",
+        message: "duplicateLengthInContract",
         path: ["pieceLines"],
       });
     }
@@ -50,20 +50,20 @@ export const billetContractUpdateSchema = z
     supplierName: z
       .string()
       .trim()
-      .min(1, "اسم المورّد مطلوب")
-      .max(200, "اسم المورّد طويل جداً")
+      .min(1, "supplierNameRequired")
+      .max(200, "supplierNameTooLong")
       .optional(),
     contractedWeightKg: z
-      .number({ message: "الوزن الإجمالي مطلوب" })
-      .positive("الوزن الإجمالي يجب أن يكون أكبر من صفر")
+      .number({ message: "totalWeightRequired" })
+      .positive("totalWeightMustBePositive")
       .optional(),
     notes: z.string().max(2000).optional().or(z.literal("")),
     pieceLines: z
       .array(contractPieceLineSchema)
-      .min(1, "أضف عدد القطع لطول واحد على الأقل")
+      .min(1, "atLeastOnePieceCountLineRequired")
       .optional(),
     status: z.enum(supplierContractStatusValues).optional(),
-    statusReason: z.string().min(1, "سبب تغيير الحالة مطلوب").optional(),
+    statusReason: z.string().min(1, "statusChangeReasonRequired").optional(),
   })
   .superRefine((data, ctx) => {
     if (!data.pieceLines) return;
@@ -71,7 +71,7 @@ export const billetContractUpdateSchema = z
     if (new Set(lengths).size !== lengths.length) {
       ctx.addIssue({
         code: "custom",
-        message: "لا يمكن تكرار نفس الطول في العقد",
+        message: "duplicateLengthInContract",
         path: ["pieceLines"],
       });
     }
@@ -79,26 +79,26 @@ export const billetContractUpdateSchema = z
 
 export const priorWithdrawalLineSchema = z.object({
   billetLengthM: z
-    .number({ message: "طول البيلت مطلوب" })
-    .int("طول البيلت يجب أن يكون عدداً صحيحاً")
-    .positive("طول البيلت يجب أن يكون أكبر من صفر"),
+    .number({ message: "billetLengthRequired" })
+    .int("billetLengthMustBeInteger")
+    .positive("billetLengthMustBePositive"),
   acceptedPieces: z
-    .number({ message: "عدد القطع مطلوب" })
-    .int("عدد القطع يجب أن يكون عدداً صحيحاً")
-    .positive("عدد القطع يجب أن يكون أكبر من صفر"),
+    .number({ message: "pieceCountRequired" })
+    .int("pieceCountMustBeInteger")
+    .positive("pieceCountMustBePositive"),
 });
 
 export const priorWithdrawalSchema = z
   .object({
     netWeightKg: z
-      .number({ message: "الوزن الصافي مطلوب" })
-      .positive("الوزن الصافي يجب أن يكون أكبر من صفر"),
+      .number({ message: "netWeightRequired" })
+      .positive("netWeightMustBePositive"),
     withdrawalDate: z.string().optional().or(z.literal("")),
     notes: z
       .string()
       .trim()
-      .min(1, "ملاحظة السحب السابق مطلوبة")
-      .max(2000, "الملاحظة طويلة جداً"),
+      .min(1, "priorWithdrawalNoteRequired")
+      .max(2000, "noteTooLong"),
     /// Piece counts are optional — a prior withdrawal may be weight-only.
     pieceLines: z.array(priorWithdrawalLineSchema).default([]),
   })
@@ -107,7 +107,7 @@ export const priorWithdrawalSchema = z
     if (new Set(lengths).size !== lengths.length) {
       ctx.addIssue({
         code: "custom",
-        message: "لا يمكن تكرار نفس الطول",
+        message: "duplicateLength",
         path: ["pieceLines"],
       });
     }
@@ -115,28 +115,28 @@ export const priorWithdrawalSchema = z
 
 export const contractAdjustmentLineSchema = z.object({
   billetLengthM: z
-    .number({ message: "طول البيلت مطلوب" })
-    .int("طول البيلت يجب أن يكون عدداً صحيحاً")
-    .positive("طول البيلت يجب أن يكون أكبر من صفر"),
+    .number({ message: "billetLengthRequired" })
+    .int("billetLengthMustBeInteger")
+    .positive("billetLengthMustBePositive"),
   /// Signed delta: positive adds to received pieces, negative removes.
   pieces: z
-    .number({ message: "عدد القطع مطلوب" })
-    .int("عدد القطع يجب أن يكون عدداً صحيحاً")
-    .refine((v) => v !== 0, "عدد القطع لا يمكن أن يكون صفراً"),
+    .number({ message: "pieceCountRequired" })
+    .int("pieceCountMustBeInteger")
+    .refine((v) => v !== 0, "pieceCountCannotBeZero"),
 });
 
 export const contractAdjustmentSchema = z
   .object({
     /// Signed delta in kg: positive adds to received weight, negative removes.
     netWeightKg: z
-      .number({ message: "الوزن مطلوب" })
-      .finite("الوزن غير صالح")
+      .number({ message: "weightRequired" })
+      .finite("weightInvalid")
       .default(0),
     notes: z
       .string()
       .trim()
-      .min(1, "سبب التسوية مطلوب")
-      .max(2000, "الملاحظة طويلة جداً"),
+      .min(1, "adjustmentReasonRequired")
+      .max(2000, "noteTooLong"),
     pieceLines: z.array(contractAdjustmentLineSchema).default([]),
   })
   .superRefine((data, ctx) => {
@@ -144,14 +144,14 @@ export const contractAdjustmentSchema = z
     if (new Set(lengths).size !== lengths.length) {
       ctx.addIssue({
         code: "custom",
-        message: "لا يمكن تكرار نفس الطول",
+        message: "duplicateLength",
         path: ["pieceLines"],
       });
     }
     if (data.netWeightKg === 0 && data.pieceLines.length === 0) {
       ctx.addIssue({
         code: "custom",
-        message: "أدخل وزناً أو عدد قطع للتسوية",
+        message: "adjustmentWeightOrPiecesRequired",
         path: ["netWeightKg"],
       });
     }

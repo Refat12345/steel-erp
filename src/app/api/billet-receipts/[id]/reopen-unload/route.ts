@@ -20,7 +20,7 @@ export async function POST(
 
   const { id } = await params;
   const receiptId = parseInt(id, 10);
-  if (isNaN(receiptId)) return badRequest("معرّف غير صالح");
+  if (isNaN(receiptId)) return badRequest("invalidId");
 
   try {
     const receipt = await reopenUnloadResult(receiptId, session.userId);

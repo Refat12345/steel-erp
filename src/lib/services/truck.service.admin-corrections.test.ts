@@ -143,7 +143,7 @@ describe("correctCompletedRoundGrade", () => {
     });
     await expect(
       correctCompletedRoundGrade(1, 11, "SECOND", "x", 0, 7),
-    ).rejects.toThrow(/المكتملة/);
+    ).rejects.toThrow("adminCorrectionOnlyForCompletedTrucks");
     expect(mockPrisma.bridgeRound.updateMany).not.toHaveBeenCalled();
   });
 
@@ -193,7 +193,7 @@ describe("correctCompletedTare", () => {
   it("rejects a tare at or above round 1 end weight", async () => {
     await expect(
       correctCompletedTare(1, 30_000, "x", 0, 7),
-    ).rejects.toThrow(/أصغر من وزن نهاية الدورة/);
+    ).rejects.toThrow("tareMustBeLessThanFirstRoundEnd");
     expect(mockPrisma.truckOperation.updateMany).not.toHaveBeenCalled();
   });
 
@@ -268,20 +268,20 @@ describe("correctCompletedExternalCardNumber", () => {
   it("rejects an empty card number", async () => {
     await expect(
       correctCompletedExternalCardNumber(1, "   ", "x", 0, 7),
-    ).rejects.toThrow(/رقم كرت القبان/);
+    ).rejects.toThrow("weighbridgeCardRequired");
     await expect(
       correctCompletedExternalCardNumber(1, "", "x", 0, 7),
-    ).rejects.toThrow(/رقم كرت القبان/);
+    ).rejects.toThrow("weighbridgeCardRequired");
     expect(mockPrisma.truckOperation.updateMany).not.toHaveBeenCalled();
   });
 
   it("rejects when the new number matches the current one (including after trim)", async () => {
     await expect(
       correctCompletedExternalCardNumber(1, "WB-1001", "x", 0, 7),
-    ).rejects.toThrow(/مطابق/);
+    ).rejects.toThrow("weighbridgeCardUnchanged");
     await expect(
       correctCompletedExternalCardNumber(1, "  WB-1001  ", "x", 0, 7),
-    ).rejects.toThrow(/مطابق/);
+    ).rejects.toThrow("weighbridgeCardUnchanged");
     expect(mockPrisma.truckOperation.updateMany).not.toHaveBeenCalled();
   });
 
@@ -303,7 +303,7 @@ describe("correctCompletedExternalCardNumber", () => {
     ).rejects.toMatchObject({ code: "CONFLICT" });
     await expect(
       correctCompletedExternalCardNumber(1, "WB-9999", "x", 0, 7),
-    ).rejects.toThrow(/مستخدم مسبقاً في العملية #99/);
+    ).rejects.toThrow("weighbridgeCardAlreadyUsed");
     expect(mockPrisma.truckOperation.updateMany).not.toHaveBeenCalled();
   });
 
@@ -341,7 +341,7 @@ describe("correctCompletedExternalCardNumber", () => {
     });
     await expect(
       correctCompletedExternalCardNumber(1, "WB-2002", "x", 0, 7),
-    ).rejects.toThrow(/المكتملة/);
+    ).rejects.toThrow("adminCorrectionOnlyForCompletedTrucks");
     expect(mockPrisma.truckOperation.updateMany).not.toHaveBeenCalled();
   });
 
@@ -419,7 +419,7 @@ describe("correctCompletedRoundExternal", () => {
     });
     await expect(
       correctCompletedRoundExternal(1, 11, 13_000, "x", 0, 7),
-    ).rejects.toThrow(/أكبر من وزن بداية الدورة/);
+    ).rejects.toThrow("grossMustExceedRoundStart");
   });
 });
 
@@ -462,7 +462,7 @@ describe("completed session add/edit/delete", () => {
     });
     await expect(
       addCompletedSession(1, 11, { weightTons: 5 }, "x", 7),
-    ).rejects.toThrow(/خردة/);
+    ).rejects.toThrow("scrapTruckNoInternalWeighs");
     expect(mockPrisma.weighSession.create).not.toHaveBeenCalled();
   });
 
@@ -524,6 +524,6 @@ describe("completed session add/edit/delete", () => {
     });
     await expect(
       editCompletedSession(1, 50, { weightTons: 5 }, "x", 0, 7),
-    ).rejects.toThrow(/المكتملة/);
+    ).rejects.toThrow("adminCorrectionOnlyForCompletedTrucks");
   });
 });

@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { logAudit } from "./audit.service";
-import { ServiceError } from "./errors";
+import { ServiceError, toServiceError } from "./errors";
 import { withRetry } from "./tx-retry";
 import { logger } from "@/lib/logger";
 import { Prisma, type TruckStatus, type SalesOrderGrade } from "@prisma/client";
@@ -82,9 +82,7 @@ const VALID_TRANSITIONS: Record<TruckStatus, TruckStatus[]> = {
 
 function assertTransition(current: TruckStatus, next: TruckStatus) {
   if (!VALID_TRANSITIONS[current]?.includes(next)) {
-    throw new ServiceError(
-      `لا يمكن الانتقال من الحالة "${current}" إلى "${next}"`,
-    );
+    throw new ServiceError("invalidStatusTransition", "BAD_REQUEST", { current: current, next: next });
   }
 }
 
@@ -130,17 +128,15 @@ async function validateTruckReferences(
 ) {
   if (data.customerId) {
     const customer = await tx.customer.findUnique({ where: { id: data.customerId } });
-    if (!customer) throw new ServiceError("الزبون غير موجود", "NOT_FOUND");
-    if (!customer.isActive) throw new ServiceError("الزبون غير نشط");
+    if (!customer) throw new ServiceError("customerNotFound", "NOT_FOUND");
+    if (!customer.isActive) throw new ServiceError("customerInactive");
 
     const activeContract = await tx.masterContract.findFirst({
       where: { customerId: data.customerId, status: "active" },
       select: { contractNumber: true },
     });
     if (!activeContract) {
-      throw new ServiceError(
-        "لا يمكن تسجيل شاحنة لزبون ليس لديه عقد عام نشط (معلّق أو مغلق)",
-      );
+      throw new ServiceError("cannotRegisterTruckWithoutActiveGeneralContract");
     }
   }
 
@@ -149,15 +145,15 @@ async function validateTruckReferences(
       where: { orderNumber: data.salesOrderNumber },
       include: { contract: { select: { status: true, customerId: true } } },
     });
-    if (!so) throw new ServiceError("أمر البيع غير موجود", "NOT_FOUND");
+    if (!so) throw new ServiceError("salesOrderNotFound", "NOT_FOUND");
     if (so.status !== "approved" && so.status !== "in_progress") {
-      throw new ServiceError("أمر البيع غير فعّال");
+      throw new ServiceError("salesOrderNotActive");
     }
     if (so.contract.status !== "active") {
-      throw new ServiceError("العقد المرتبط بأمر البيع غير نشط — لا يمكن تسجيل الشاحنة");
+      throw new ServiceError("salesOrderContractInactiveCannotRegisterTruck");
     }
     if (data.customerId != null && so.contract.customerId !== data.customerId) {
-      throw new ServiceError("أمر البيع لا يخص الزبون المحدد");
+      throw new ServiceError("salesOrderCustomerMismatch");
     }
   }
 
@@ -165,8 +161,8 @@ async function validateTruckReferences(
     const destination = await tx.destination.findUnique({
       where: { id: data.destinationId },
     });
-    if (!destination) throw new ServiceError("الوجهة غير موجودة", "NOT_FOUND");
-    if (!destination.isActive) throw new ServiceError("الوجهة غير نشطة");
+    if (!destination) throw new ServiceError("destinationNotFound", "NOT_FOUND");
+    if (!destination.isActive) throw new ServiceError("destinationInactive");
   }
 }
 
@@ -177,14 +173,14 @@ async function validateTruckRequestItems(tx: TxClient, requestItems?: RequestIte
   // coexist; "12mm" without grade may appear only once.
   const keys = requestItems.map((i) => `${i.sizeId}:${i.grade ?? ""}`);
   if (new Set(keys).size !== keys.length) {
-    throw new ServiceError("لا يمكن تكرار نفس القياس بنفس النخب في الطلبية");
+    throw new ServiceError("duplicateSizeGradeInOrder");
   }
   const sizeIds = [...new Set(requestItems.map((i) => i.sizeId))];
   const sizes = await tx.sizeLookup.findMany({
     where: { id: { in: sizeIds }, isActive: true },
   });
   if (sizes.length !== sizeIds.length) {
-    throw new ServiceError("أحد القياسات غير صالح أو غير نشط");
+    throw new ServiceError("sizeInvalidOrInactive");
   }
 }
 
@@ -214,10 +210,9 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
           if (existingOpen) {
             // 409 Conflict: a resource in the intended state already exists.
             // Not a client bug (400) — the client's input is well-formed.
-            throw new ServiceError(
-              `يوجد عملية مفتوحة لنفس رقم اللوحة (عملية #${existingOpen.id})`,
-              "CONFLICT",
-            );
+            throw new ServiceError("openTruckForPlateById", "CONFLICT", {
+              truckId: existingOpen.id,
+            });
           }
 
           const created = await tx.truckOperation.create({
@@ -282,10 +277,9 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
       const target = e.meta?.target;
       const targetStr = Array.isArray(target) ? target.join(",") : String(target ?? "");
       if (targetStr.includes("plate_number")) {
-        throw new ServiceError(
-          `يوجد عملية مفتوحة لنفس رقم اللوحة (${normalizedPlate})`,
-          "CONFLICT",
-        );
+        throw new ServiceError("openTruckForPlate", "CONFLICT", {
+          plate: normalizedPlate,
+        });
       }
     }
     throw e;
@@ -312,7 +306,7 @@ export async function updateTruckBeforeWeigh(
           SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
         `;
         if (locked.length === 0) {
-          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+          throw new ServiceError("operationNotFound", "NOT_FOUND");
         }
 
         const truck = await tx.truckOperation.findUnique({
@@ -324,13 +318,10 @@ export async function updateTruckBeforeWeigh(
             },
           },
         });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
 
         if (truck.version !== expectedVersion) {
-          throw new ServiceError(
-            "تم تعديل السجل من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
-            "CONFLICT",
-          );
+          throw new ServiceError("recordModifiedByAnotherUser", "CONFLICT");
         }
 
         const APPROVED_ONLY_REQUEST_ITEMS: (keyof UpdateTruckInput)[] = [
@@ -354,28 +345,20 @@ export async function updateTruckBeforeWeigh(
             where: { truckOperationId: truckId },
           });
           if (sessionCount > 0) {
-            throw new ServiceError(
-              "لا يمكن تعديل الشاحنة بعد بدء الوزنات الداخلية. يجب إلغاء العملية وإعادة تسجيلها إذا لزم الأمر.",
-            );
+            throw new ServiceError("cannotEditTruckAfterInternalWeighs");
           }
           const attemptedIdentity = FIRST_WEIGH_LOCKED_IDENTITY.some(
             (field) => data[field] !== undefined,
           );
           if (attemptedIdentity) {
-            throw new ServiceError(
-              "بعد وزن الفارغ لا يمكن تغيير الزبون أو أمر البيع أو رقم اللوحة. يمكن تعديل السائق والوجهة والملاحظات والنخب وتفاصيل الطلبية فقط.",
-            );
+            throw new ServiceError("afterTareLimitedFieldsEditable");
           }
         } else if (truck.status !== "Queued" && truck.status !== "Approved") {
-          throw new ServiceError(
-            "لا يمكن تعديل الشاحنة بعد بدء الوزنات الداخلية. يجب إلغاء العملية وإعادة تسجيلها إذا لزم الأمر.",
-          );
+          throw new ServiceError("cannotEditTruckAfterInternalWeighs");
         } else if (truck.status === "Approved") {
           const attempted = APPROVED_ONLY_REQUEST_ITEMS.some((field) => data[field] !== undefined);
           if (attempted) {
-            throw new ServiceError(
-              "بعد اعتماد الشاحنة يمكن تعديل تفاصيل الطلبية فقط. تغيير بيانات التسجيل يتطلب إلغاء الشاحنة وإعادة تسجيلها.",
-            );
+            throw new ServiceError("afterApprovalOnlyRequestItemsEditable");
           }
         }
 
@@ -406,10 +389,9 @@ export async function updateTruckBeforeWeigh(
               select: { id: true, status: true },
             });
             if (existingOpen) {
-              throw new ServiceError(
-                `يوجد عملية مفتوحة لنفس رقم اللوحة (عملية #${existingOpen.id})`,
-                "CONFLICT",
-              );
+              throw new ServiceError("openTruckForPlateById", "CONFLICT", {
+                truckId: existingOpen.id,
+              });
             }
           }
         } else if (truck.status === "FirstWeigh" && data.destinationId !== undefined) {
@@ -551,7 +533,7 @@ export async function updateTruckBeforeWeigh(
           where: { id: truckId },
           include: DETAIL_INCLUDE,
         });
-        if (!reloaded) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!reloaded) throw new ServiceError("operationNotFound", "NOT_FOUND");
         return reloaded;
       },
       { isolationLevel: "Serializable" },
@@ -581,24 +563,21 @@ export async function updateTruckNotes(
           SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
         `;
         if (locked.length === 0) {
-          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+          throw new ServiceError("operationNotFound", "NOT_FOUND");
         }
 
         const truck = await tx.truckOperation.findUnique({
           where: { id: truckId },
           select: { id: true, version: true, status: true, notes: true },
         });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
 
         if (truck.version !== expectedVersion) {
-          throw new ServiceError(
-            "تم تعديل السجل من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
-            "CONFLICT",
-          );
+          throw new ServiceError("recordModifiedByAnotherUser", "CONFLICT");
         }
 
         if (!NOTES_EDITABLE_STATUSES.includes(truck.status)) {
-          throw new ServiceError("لا يمكن تعديل الملاحظات في الحالة الحالية");
+          throw new ServiceError("cannotEditNotesInCurrentStatus");
         }
 
         const nextNotes = notes?.trim() || null;
@@ -626,7 +605,7 @@ export async function updateTruckNotes(
           where: { id: truckId },
           include: DETAIL_INCLUDE,
         });
-        if (!reloaded) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!reloaded) throw new ServiceError("operationNotFound", "NOT_FOUND");
         return reloaded;
       },
       { isolationLevel: "Serializable" },
@@ -639,9 +618,9 @@ export async function updateTruckNotes(
 export async function enterTare(truckId: number, weightKg: number, userId: number) {
   // Hard-rail check first (catches 0, negative, NaN, Infinity, >100t).
   const rangeError = validateWeightRange(weightKg);
-  if (rangeError) throw new ServiceError(rangeError);
+  if (rangeError) throw toServiceError(rangeError);
   const tareError = validateTareWeight(weightKg);
-  if (tareError) throw new ServiceError(tareError);
+  if (tareError) throw toServiceError(tareError);
 
   return withRetry(() =>
     prisma.$transaction(
@@ -652,19 +631,18 @@ export async function enterTare(truckId: number, weightKg: number, userId: numbe
           SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
         `;
         if (locked.length === 0) {
-          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+          throw new ServiceError("operationNotFound", "NOT_FOUND");
         }
 
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
 
         // Explicit "no double tare" message — clearer than the generic
         // state-machine error for the most common misclick.
         if (truck.tareWeightKg != null) {
-          throw new ServiceError(
-            `تم إدخال وزن الفارغ مسبقاً (${Number(truck.tareWeightKg)} كغ). استخدم تصحيح الوزن إن كان خطأ.`,
-            "CONFLICT",
-          );
+          throw new ServiceError("tareAlreadyEntered", "CONFLICT", {
+            kg: Number(truck.tareWeightKg),
+          });
         }
 
         assertTransition(truck.status, "FirstWeigh");
@@ -726,19 +704,19 @@ export async function correctTare(
   expectedVersion: number,
   userId: number,
 ) {
-  if (newWeightKg <= 0) throw new ServiceError("الوزن يجب أن يكون أكبر من صفر");
+  if (newWeightKg <= 0) throw new ServiceError("weightMustBePositive");
   const tareError = validateTareWeight(newWeightKg);
-  if (tareError) throw new ServiceError(tareError);
+  if (tareError) throw toServiceError(tareError);
 
   return withRetry(() =>
     prisma.$transaction(
       async (tx: TxClient) => {
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
 
         const allowed: TruckStatus[] = ["FirstWeigh", "OnScale", "LoadingComplete"];
         if (!allowed.includes(truck.status)) {
-          throw new ServiceError("لا يمكن تصحيح وزن الفارغ بعد إدخال وزن المحمّل");
+          throw new ServiceError("cannotCorrectTareAfterGross");
         }
 
         // Once any round is closed its end weight chains into the next
@@ -748,9 +726,7 @@ export async function correctTare(
           select: { id: true },
         });
         if (closedRound) {
-          throw new ServiceError(
-            "لا يمكن تصحيح وزن الفارغ بعد تسجيل وزنة خارجية — استخدم تصحيح آخر وزنة",
-          );
+          throw new ServiceError("cannotCorrectTareAfterExternalWeigh");
         }
 
         const oldWeight = truck.tareWeightKg ? Number(truck.tareWeightKg) : null;
@@ -769,9 +745,7 @@ export async function correctTare(
           },
         });
         if (result.count === 0) {
-          throw new ServiceError(
-            "تم تعديل السجل من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
-          );
+          throw new ServiceError("recordModifiedByAnotherUser", "CONFLICT");
         }
 
         // Round 1 starts at the tare — keep its start weight in sync.
@@ -811,13 +785,13 @@ export async function correctGross(
   expectedVersion: number,
   userId: number,
 ) {
-  if (newWeightKg <= 0) throw new ServiceError("الوزن يجب أن يكون أكبر من صفر");
+  if (newWeightKg <= 0) throw new ServiceError("weightMustBePositive");
 
   return withRetry(() =>
     prisma.$transaction(
       async (tx: TxClient) => {
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
 
         const allowed: TruckStatus[] = [
           "FirstWeigh",
@@ -826,7 +800,7 @@ export async function correctGross(
           "SecondWeigh",
         ];
         if (!allowed.includes(truck.status)) {
-          throw new ServiceError("لا يمكن تصحيح وزن المحمّل إلا قبل الإغلاق النهائي");
+          throw new ServiceError("cannotCorrectGrossAfterClose");
         }
 
         // Only the LAST closed round may be corrected: earlier rounds' end
@@ -836,17 +810,15 @@ export async function correctGross(
           orderBy: { roundNumber: "desc" },
         });
         if (!round) {
-          throw new ServiceError("لا توجد وزنة خارجية لتصحيحها");
+          throw new ServiceError("noExternalWeighToCorrect");
         }
 
         const startKg = Number(round.startWeightKg);
         if (new Decimal(newWeightKg).lte(round.startWeightKg)) {
-          throw new ServiceError(
-            "وزن المحمّل يجب أن يكون أكبر من وزن بداية الدورة",
-          );
+          throw new ServiceError("grossMustExceedRoundStart");
         }
         const grossError = validateGrossWeight(newWeightKg, startKg);
-        if (grossError) throw new ServiceError(grossError);
+        if (grossError) throw toServiceError(grossError);
 
         // Exempt trucks (scrap / billet wire) mirror the round net as one
         // system-generated weigh session (see enterGross). When the external
@@ -888,9 +860,7 @@ export async function correctGross(
             : { version: { increment: 1 } },
         });
         if (result.count === 0) {
-          throw new ServiceError(
-            "تم تعديل السجل من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
-          );
+          throw new ServiceError("recordModifiedByAnotherUser", "CONFLICT");
         }
 
         await tx.bridgeRound.update({
@@ -966,18 +936,18 @@ async function resolveWeighSource(
     where: { id: sourceLocationId },
     select: { id: true, isActive: true, unit: true },
   });
-  if (!loc) throw new ServiceError("موقع المخزون المصدر غير موجود");
-  if (!loc.isActive) throw new ServiceError("موقع المخزون المصدر موقوف");
+  if (!loc) throw new ServiceError("sourceStockLocationNotFound");
+  if (!loc.isActive) throw new ServiceError("sourceStockLocationDisabled");
   // Bundle sites must carry a bundle count AND a size so the load-out
   // deduction at close knows how many bundles of which size left the yard.
   // Without the size the LOAD_OUT row would carry a null size at a bundle
   // location and corrupt the per-size balances.
   if (loc.unit === "BUNDLE") {
     if (bundleCount == null || bundleCount <= 0) {
-      throw new ServiceError("عدد الربطات مطلوب عند اختيار موقع مخزون بالربطات");
+      throw new ServiceError("bundleCountRequiredForBundleLocation");
     }
     if (sizeId == null) {
-      throw new ServiceError("المقاس مطلوب عند اختيار موقع مخزون بالربطات");
+      throw new ServiceError("sizeRequiredForBundleLocation");
     }
   }
   return loc.id;
@@ -988,7 +958,7 @@ export async function enterWeighSession(
   data: WeighSessionInput,
   userId: number,
 ) {
-  if (data.weightTons <= 0) throw new ServiceError("الوزن يجب أن يكون أكبر من صفر");
+  if (data.weightTons <= 0) throw new ServiceError("weightMustBePositive");
 
   return withRetry(() =>
     prisma.$transaction(
@@ -1008,31 +978,29 @@ export async function enterWeighSession(
           SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
         `;
         if (locked.length === 0) {
-          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+          throw new ServiceError("operationNotFound", "NOT_FOUND");
         }
 
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
 
         if (truck.skipInternalWeighing) {
-          throw new ServiceError(
-            "هذه الشاحنة (خردة/أسلاك تربيط) لا تأخذ وزنات داخلية — يُسجَّل وزن الفارغ والمحمّل من القبان فقط",
-          );
+          throw new ServiceError("scrapTruckNoInternalWeighsScaleOnly");
         }
 
         if (truck.status !== "FirstWeigh" && truck.status !== "OnScale") {
-          throw new ServiceError("لا يمكن إضافة وزنة في الحالة الحالية");
+          throw new ServiceError("cannotAddWeighInCurrentStatus");
         }
 
         const openRound = await getOpenRound(tx, truckId);
         if (!openRound) {
           // Defensive: FirstWeigh/OnScale always implies an open round.
-          throw new ServiceError("لا توجد دورة قبان مفتوحة لهذه العملية");
+          throw new ServiceError("noOpenScaleRound");
         }
 
         if (data.sizeId) {
           const size = await tx.sizeLookup.findUnique({ where: { id: data.sizeId } });
-          if (!size || !size.isActive) throw new ServiceError("القياس غير صالح");
+          if (!size || !size.isActive) throw new ServiceError("sizeInvalid");
         }
 
         // Direct-from-production cross-dock has no yard source; the two are
@@ -1104,28 +1072,26 @@ export async function editWeighSession(
     prisma.$transaction(
       async (tx: TxClient) => {
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
 
         if (truck.status !== "OnScale" && truck.status !== "FirstWeigh") {
-          throw new ServiceError("لا يمكن تعديل الوزنات بعد تأكيد اكتمال التحميل");
+          throw new ServiceError("cannotEditWeighsAfterLoadingComplete");
         }
 
         const session = await tx.weighSession.findUnique({ where: { id: sessionId } });
         if (!session || session.truckOperationId !== truckId) {
-          throw new ServiceError("الوزنة غير موجودة", "NOT_FOUND");
+          throw new ServiceError("weighNotFound", "NOT_FOUND");
         }
 
         // Sessions of an already-weighed round are frozen — their round's
         // external net is recorded and must stay reconcilable.
         const openRound = await getOpenRound(tx, truckId);
         if (!openRound || session.bridgeRoundId !== openRound.id) {
-          throw new ServiceError(
-            "لا يمكن تعديل وزنة تعود لدورة قبان سابقة بعد تسجيل وزنتها الخارجية",
-          );
+          throw new ServiceError("cannotEditWeighOfPreviousRoundAfterExternal");
         }
 
         if (data.weightTons !== undefined && data.weightTons <= 0) {
-          throw new ServiceError("الوزن يجب أن يكون أكبر من صفر");
+          throw new ServiceError("weightMustBePositive");
         }
 
         // Post-edit cross-dock flag. When on, the source must be null and no
@@ -1175,9 +1141,7 @@ export async function editWeighSession(
           data: updateData,
         });
         if (result.count === 0) {
-          throw new ServiceError(
-            "تم تعديل الوزنة من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
-          );
+          throw new ServiceError("weighModifiedByAnotherUser", "CONFLICT");
         }
 
         const updated = await tx.weighSession.findUnique({ where: { id: sessionId } });
@@ -1213,17 +1177,17 @@ export async function deleteWeighSession(
           SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
         `;
         if (locked.length === 0) {
-          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+          throw new ServiceError("operationNotFound", "NOT_FOUND");
         }
 
         const truck = await tx.truckOperation.findUnique({
           where: { id: truckId },
           select: { id: true, status: true },
         });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
 
         if (truck.status !== "OnScale" && truck.status !== "FirstWeigh") {
-          throw new ServiceError("لا يمكن حذف الوزنات بعد تأكيد اكتمال التحميل");
+          throw new ServiceError("cannotDeleteWeighsAfterLoadingComplete");
         }
 
         const session = await tx.weighSession.findUnique({
@@ -1240,16 +1204,14 @@ export async function deleteWeighSession(
           },
         });
         if (!session || session.truckOperationId !== truckId) {
-          throw new ServiceError("الوزنة غير موجودة", "NOT_FOUND");
+          throw new ServiceError("weighNotFound", "NOT_FOUND");
         }
 
         // Same freeze rule as editWeighSession: only the open round's
         // sessions may be deleted.
         const openRoundForDelete = await getOpenRound(tx, truckId);
         if (!openRoundForDelete || session.bridgeRoundId !== openRoundForDelete.id) {
-          throw new ServiceError(
-            "لا يمكن حذف وزنة تعود لدورة قبان سابقة بعد تسجيل وزنتها الخارجية",
-          );
+          throw new ServiceError("cannotDeleteWeighOfPreviousRoundAfterExternal");
         }
 
         const deletedSnapshot = {
@@ -1264,10 +1226,7 @@ export async function deleteWeighSession(
           where: { id: sessionId, version: expectedVersion },
         });
         if (result.count === 0) {
-          throw new ServiceError(
-            "تم تعديل الوزنة من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
-            "CONFLICT",
-          );
+          throw new ServiceError("weighModifiedByAnotherUser", "CONFLICT");
         }
 
         let newStatus = truck.status;
@@ -1324,9 +1283,7 @@ export async function deleteWeighSession(
 
 function assertCompletedForCorrection(status: TruckStatus) {
   if (status !== "Completed") {
-    throw new ServiceError(
-      "التصحيح الإداري متاح فقط للشاحنات المكتملة",
-    );
+    throw new ServiceError("adminCorrectionOnlyForCompletedTrucks");
   }
 }
 
@@ -1350,12 +1307,12 @@ export async function correctCompletedRoundGrade(
             salesOrder: { select: { grade: true } },
           },
         });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
         assertCompletedForCorrection(truck.status);
 
         const round = await tx.bridgeRound.findUnique({ where: { id: roundId } });
         if (!round || round.truckOperationId !== truckId) {
-          throw new ServiceError("دورة القبان غير موجودة", "NOT_FOUND");
+          throw new ServiceError("scaleRoundNotFound", "NOT_FOUND");
         }
 
         const oldGrade = round.grade;
@@ -1364,10 +1321,7 @@ export async function correctCompletedRoundGrade(
           data: { grade, version: { increment: 1 } },
         });
         if (result.count === 0) {
-          throw new ServiceError(
-            "تم تعديل السجل من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
-            "CONFLICT",
-          );
+          throw new ServiceError("recordModifiedByAnotherUser", "CONFLICT");
         }
 
         // Keep the operation-level DISPLAY grade (`operationalGrade`) in sync
@@ -1433,7 +1387,7 @@ export async function correctCompletedTare(
   userId: number,
 ) {
   const tareError = validateTareWeight(newWeightKg);
-  if (tareError) throw new ServiceError(tareError);
+  if (tareError) throw toServiceError(tareError);
 
   return withRetry(() =>
     prisma.$transaction(
@@ -1442,11 +1396,11 @@ export async function correctCompletedTare(
           SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
         `;
         if (locked.length === 0) {
-          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+          throw new ServiceError("operationNotFound", "NOT_FOUND");
         }
 
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
         assertCompletedForCorrection(truck.status);
 
         // Tare is round 1's START weight. Changing it only shifts round 1's
@@ -1456,12 +1410,10 @@ export async function correctCompletedTare(
           where: { truckOperationId: truckId, roundNumber: 1 },
         });
         if (!round1) {
-          throw new ServiceError("لا توجد دورة قبان أولى لهذه العملية", "NOT_FOUND");
+          throw new ServiceError("noFirstScaleRound", "NOT_FOUND");
         }
         if (round1.endWeightKg != null && new Decimal(newWeightKg).gte(round1.endWeightKg)) {
-          throw new ServiceError(
-            "وزن الفارغ يجب أن يكون أصغر من وزن نهاية الدورة الأولى",
-          );
+          throw new ServiceError("tareMustBeLessThanFirstRoundEnd");
         }
 
         const oldWeight = truck.tareWeightKg ? Number(truck.tareWeightKg) : null;
@@ -1475,10 +1427,7 @@ export async function correctCompletedTare(
           },
         });
         if (result.count === 0) {
-          throw new ServiceError(
-            "تم تعديل السجل من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
-            "CONFLICT",
-          );
+          throw new ServiceError("recordModifiedByAnotherUser", "CONFLICT");
         }
 
         await tx.bridgeRound.update({
@@ -1533,7 +1482,7 @@ export async function correctCompletedExternalCardNumber(
 ) {
   const cardNumber = externalCardNumber.trim();
   if (!cardNumber) {
-    throw new ServiceError("رقم كرت القبان (المالية) مطلوب");
+    throw new ServiceError("weighbridgeCardRequired");
   }
 
   return withRetry(() =>
@@ -1543,7 +1492,7 @@ export async function correctCompletedExternalCardNumber(
           SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
         `;
         if (locked.length === 0) {
-          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+          throw new ServiceError("operationNotFound", "NOT_FOUND");
         }
 
         const truck = await tx.truckOperation.findUnique({
@@ -1554,11 +1503,11 @@ export async function correctCompletedExternalCardNumber(
             externalCardNumber: true,
           },
         });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
         assertCompletedForCorrection(truck.status);
 
         if (truck.externalCardNumber === cardNumber) {
-          throw new ServiceError("الرقم الجديد مطابق لرقم الكرت الحالي");
+          throw new ServiceError("weighbridgeCardUnchanged");
         }
 
         const duplicate = await tx.truckOperation.findUnique({
@@ -1566,10 +1515,10 @@ export async function correctCompletedExternalCardNumber(
           select: { id: true },
         });
         if (duplicate && duplicate.id !== truckId) {
-          throw new ServiceError(
-            `رقم كرت القبان ${cardNumber} مستخدم مسبقاً في العملية #${duplicate.id}`,
-            "CONFLICT",
-          );
+          throw new ServiceError("weighbridgeCardAlreadyUsed", "CONFLICT", {
+            cardNumber,
+            truckId: duplicate.id,
+          });
         }
 
         const oldCardNumber = truck.externalCardNumber;
@@ -1581,10 +1530,7 @@ export async function correctCompletedExternalCardNumber(
           },
         });
         if (result.count === 0) {
-          throw new ServiceError(
-            "تم تعديل السجل من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
-            "CONFLICT",
-          );
+          throw new ServiceError("recordModifiedByAnotherUser", "CONFLICT");
         }
 
         await logAudit(tx, {
@@ -1623,7 +1569,7 @@ export async function correctCompletedRoundExternal(
   expectedVersion: number,
   userId: number,
 ) {
-  if (newWeightKg <= 0) throw new ServiceError("الوزن يجب أن يكون أكبر من صفر");
+  if (newWeightKg <= 0) throw new ServiceError("weightMustBePositive");
 
   return withRetry(() =>
     prisma.$transaction(
@@ -1632,27 +1578,27 @@ export async function correctCompletedRoundExternal(
           SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
         `;
         if (locked.length === 0) {
-          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+          throw new ServiceError("operationNotFound", "NOT_FOUND");
         }
 
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
         assertCompletedForCorrection(truck.status);
 
         const round = await tx.bridgeRound.findUnique({ where: { id: roundId } });
         if (!round || round.truckOperationId !== truckId) {
-          throw new ServiceError("دورة القبان غير موجودة", "NOT_FOUND");
+          throw new ServiceError("scaleRoundNotFound", "NOT_FOUND");
         }
         if (round.endWeightKg == null) {
-          throw new ServiceError("لا توجد وزنة خارجية لهذه الدورة لتصحيحها");
+          throw new ServiceError("noExternalWeighForRoundToCorrect");
         }
 
         const startKg = Number(round.startWeightKg);
         if (new Decimal(newWeightKg).lte(round.startWeightKg)) {
-          throw new ServiceError("وزن المحمّل يجب أن يكون أكبر من وزن بداية الدورة");
+          throw new ServiceError("grossMustExceedRoundStart");
         }
         const grossError = validateGrossWeight(newWeightKg, startKg);
-        if (grossError) throw new ServiceError(grossError);
+        if (grossError) throw toServiceError(grossError);
 
         // Keep the scrap / billet-wire mirror session in sync BEFORE computing
         // the discrepancy so it stays zero for exempt trucks.
@@ -1687,10 +1633,7 @@ export async function correctCompletedRoundExternal(
             : { version: { increment: 1 } },
         });
         if (result.count === 0) {
-          throw new ServiceError(
-            "تم تعديل السجل من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
-            "CONFLICT",
-          );
+          throw new ServiceError("recordModifiedByAnotherUser", "CONFLICT");
         }
 
         await tx.bridgeRound.update({
@@ -1747,7 +1690,7 @@ export async function addCompletedSession(
   reason: string,
   userId: number,
 ) {
-  if (data.weightTons <= 0) throw new ServiceError("الوزن يجب أن يكون أكبر من صفر");
+  if (data.weightTons <= 0) throw new ServiceError("weightMustBePositive");
 
   return withRetry(() =>
     prisma.$transaction(
@@ -1756,26 +1699,24 @@ export async function addCompletedSession(
           SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
         `;
         if (locked.length === 0) {
-          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+          throw new ServiceError("operationNotFound", "NOT_FOUND");
         }
 
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
         assertCompletedForCorrection(truck.status);
         if (truck.skipInternalWeighing) {
-          throw new ServiceError(
-            "هذه الشاحنة (خردة/أسلاك تربيط) لا تأخذ وزنات داخلية",
-          );
+          throw new ServiceError("scrapTruckNoInternalWeighs");
         }
 
         const round = await tx.bridgeRound.findUnique({ where: { id: roundId } });
         if (!round || round.truckOperationId !== truckId) {
-          throw new ServiceError("دورة القبان غير موجودة", "NOT_FOUND");
+          throw new ServiceError("scaleRoundNotFound", "NOT_FOUND");
         }
 
         if (data.sizeId) {
           const size = await tx.sizeLookup.findUnique({ where: { id: data.sizeId } });
-          if (!size || !size.isActive) throw new ServiceError("القياس غير صالح");
+          if (!size || !size.isActive) throw new ServiceError("sizeInvalid");
         }
 
         const lastSession = await tx.weighSession.findFirst({
@@ -1835,25 +1776,23 @@ export async function editCompletedSession(
     prisma.$transaction(
       async (tx: TxClient) => {
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
         assertCompletedForCorrection(truck.status);
         if (truck.skipInternalWeighing) {
-          throw new ServiceError(
-            "هذه الشاحنة (خردة/أسلاك تربيط) لا تأخذ وزنات داخلية",
-          );
+          throw new ServiceError("scrapTruckNoInternalWeighs");
         }
 
         const session = await tx.weighSession.findUnique({ where: { id: sessionId } });
         if (!session || session.truckOperationId !== truckId) {
-          throw new ServiceError("الوزنة غير موجودة", "NOT_FOUND");
+          throw new ServiceError("weighNotFound", "NOT_FOUND");
         }
 
         if (data.weightTons !== undefined && data.weightTons <= 0) {
-          throw new ServiceError("الوزن يجب أن يكون أكبر من صفر");
+          throw new ServiceError("weightMustBePositive");
         }
         if (data.sizeId) {
           const size = await tx.sizeLookup.findUnique({ where: { id: data.sizeId } });
-          if (!size || !size.isActive) throw new ServiceError("القياس غير صالح");
+          if (!size || !size.isActive) throw new ServiceError("sizeInvalid");
         }
 
         const updateData: Prisma.WeighSessionUncheckedUpdateManyInput = {
@@ -1868,10 +1807,7 @@ export async function editCompletedSession(
           data: updateData,
         });
         if (result.count === 0) {
-          throw new ServiceError(
-            "تم تعديل الوزنة من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
-            "CONFLICT",
-          );
+          throw new ServiceError("weighModifiedByAnotherUser", "CONFLICT");
         }
 
         const updated = await tx.weighSession.findUnique({ where: { id: sessionId } });
@@ -1912,19 +1848,17 @@ export async function deleteCompletedSession(
           SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
         `;
         if (locked.length === 0) {
-          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+          throw new ServiceError("operationNotFound", "NOT_FOUND");
         }
 
         const truck = await tx.truckOperation.findUnique({
           where: { id: truckId },
           select: { id: true, status: true, skipInternalWeighing: true },
         });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
         assertCompletedForCorrection(truck.status);
         if (truck.skipInternalWeighing) {
-          throw new ServiceError(
-            "هذه الشاحنة (خردة/أسلاك تربيط) لا تأخذ وزنات داخلية",
-          );
+          throw new ServiceError("scrapTruckNoInternalWeighs");
         }
 
         const session = await tx.weighSession.findUnique({
@@ -1941,7 +1875,7 @@ export async function deleteCompletedSession(
           },
         });
         if (!session || session.truckOperationId !== truckId) {
-          throw new ServiceError("الوزنة غير موجودة", "NOT_FOUND");
+          throw new ServiceError("weighNotFound", "NOT_FOUND");
         }
 
         const deletedSnapshot = {
@@ -1956,10 +1890,7 @@ export async function deleteCompletedSession(
           where: { id: sessionId, version: expectedVersion },
         });
         if (result.count === 0) {
-          throw new ServiceError(
-            "تم تعديل الوزنة من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
-            "CONFLICT",
-          );
+          throw new ServiceError("weighModifiedByAnotherUser", "CONFLICT");
         }
 
         // Deliberately NO status change here — the truck stays `Completed`.
@@ -1997,9 +1928,9 @@ export async function uploadPhoto(truckId: number, filePath: string, userId: num
         // Re-check truck inside the serializable tx so a concurrent cancel or
         // close cannot race a photo upload.
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
         if (truck.status === "Completed" || truck.status === "Cancelled") {
-          throw new ServiceError("لا يمكن رفع صورة لعملية مغلقة أو ملغاة");
+          throw new ServiceError("cannotUploadPhotoForClosedOrCancelled");
         }
 
         // Attach to the open round when one exists; pre-tare photos stay
@@ -2051,18 +1982,18 @@ export async function confirmLoadingComplete(
           SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
         `;
         if (locked.length === 0) {
-          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+          throw new ServiceError("operationNotFound", "NOT_FOUND");
         }
 
         const truck = await tx.truckOperation.findUnique({
           where: { id: truckId },
         });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
         assertTransition(truck.status, "LoadingComplete");
 
         const openRound = await getOpenRound(tx, truckId);
         if (!openRound) {
-          throw new ServiceError("لا توجد دورة قبان مفتوحة لهذه العملية");
+          throw new ServiceError("noOpenScaleRound");
         }
 
         // Re-query after the lock so both collections are up-to-date.
@@ -2079,10 +2010,10 @@ export async function confirmLoadingComplete(
         // Exempt trucks (scrap / billet wire) carry no internal weigh sessions;
         // the round net is recorded once at gross. They still require a photo.
         if (!truck.skipInternalWeighing && sessions.length === 0) {
-          throw new ServiceError("يجب إدخال وزنة واحدة على الأقل قبل تأكيد اكتمال التحميل");
+          throw new ServiceError("atLeastOneWeighBeforeLoadingComplete");
         }
         if (photoCount === 0) {
-          throw new ServiceError("يجب رفع صورة واحدة على الأقل قبل تأكيد اكتمال التحميل");
+          throw new ServiceError("atLeastOnePhotoBeforeLoadingComplete");
         }
 
         // Exempt trucks: resolve which material this round carried, so the
@@ -2098,7 +2029,7 @@ export async function confirmLoadingComplete(
           const distinctSizeIds = [...new Set(requestItems.map((i) => i.sizeId))];
           if (roundSizeId != null) {
             if (!distinctSizeIds.includes(roundSizeId)) {
-              throw new ServiceError("مادة الدورة يجب أن تكون من المواد المسجّلة في تفاصيل الطلبية");
+              throw new ServiceError("roundMaterialMustBeInRequestItems");
             }
             nextRoundSizeId = roundSizeId;
           } else if (distinctSizeIds.length === 1) {
@@ -2107,9 +2038,7 @@ export async function confirmLoadingComplete(
             // Re-confirm after reopen keeps the previously chosen material.
             nextRoundSizeId = openRound.sizeId;
           } else {
-            throw new ServiceError(
-              "هذه الشاحنة تحمل أكثر من مادة — يجب تحديد مادة هذه الدورة قبل تأكيد اكتمال التحميل",
-            );
+            throw new ServiceError("multiMaterialRoundMaterialRequired");
           }
         }
 
@@ -2195,14 +2124,14 @@ export async function reopenBeforeGross(truckId: number, userId: number) {
           SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
         `;
         if (locked.length === 0) {
-          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+          throw new ServiceError("operationNotFound", "NOT_FOUND");
         }
 
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
 
         if (truck.status !== "LoadingComplete") {
-          throw new ServiceError("لا يمكن إعادة الفتح إلا من حالة «اكتمال التحميل»");
+          throw new ServiceError("reopenOnlyFromLoadingComplete");
         }
 
         // Reopen invalidates the prior loader confirmation — the loader must
@@ -2283,7 +2212,7 @@ export async function enterGross(
 ) {
   // Hard-rail weight check before touching the DB.
   const rangeError = validateWeightRange(weightKg);
-  if (rangeError) throw new ServiceError(rangeError);
+  if (rangeError) throw toServiceError(rangeError);
 
   return withRetry(() =>
     prisma.$transaction(
@@ -2296,11 +2225,11 @@ export async function enterGross(
           SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
         `;
         if (locked.length === 0) {
-          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+          throw new ServiceError("operationNotFound", "NOT_FOUND");
         }
 
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
 
         // ── Two-role workflow rule (Part 1) ──────────────────────────
         // Gross weight CANNOT be recorded unless a loader has confirmed
@@ -2308,41 +2237,35 @@ export async function enterGross(
         // so the error message is user-friendly ("wait for the loader")
         // rather than the generic "invalid transition".
         if (!truck.loadingConfirmedAt) {
-          throw new ServiceError(
-            "Loading must be confirmed before recording gross weight / يجب تأكيد انتهاء التحميل من قبل عامل التحميل قبل تسجيل وزن المحمّل",
-            "FORBIDDEN",
-          );
+          throw new ServiceError("loadingMustBeConfirmedBeforeGross", "FORBIDDEN");
         }
 
         // Explicit "no double gross" — friendlier than a state-machine error.
         if (truck.grossWeightKg != null) {
-          throw new ServiceError(
-            `تم إدخال وزن المحمّل مسبقاً (${Number(truck.grossWeightKg)} كغ). استخدم تصحيح الوزن إن كان خطأ.`,
-            "CONFLICT",
-          );
+          throw new ServiceError("grossAlreadyEntered", "CONFLICT", {
+            kg: Number(truck.grossWeightKg),
+          });
         }
 
         assertTransition(truck.status, exit === "final" ? "SecondWeigh" : "FirstWeigh");
 
         const openRound = await getOpenRound(tx, truckId);
         if (!openRound) {
-          throw new ServiceError("لا توجد دورة قبان مفتوحة لهذه العملية");
+          throw new ServiceError("noOpenScaleRound");
         }
 
         if (!truck.tareWeightKg) {
-          throw new ServiceError("يجب إدخال وزن الفارغ أولاً");
+          throw new ServiceError("tareWeightRequiredFirst");
         }
 
         // The weighing must exceed the ROUND's start weight (= previous
         // external weighing), not just the original tare.
         const roundStartKg = Number(openRound.startWeightKg);
         if (new Decimal(weightKg).lte(openRound.startWeightKg)) {
-          throw new ServiceError(
-            "Gross weight must be greater than the round start weight / وزن المحمّل يجب أن يكون أكبر من وزن بداية الدورة",
-          );
+          throw new ServiceError("grossMustExceedRoundStart");
         }
         const grossError = validateGrossWeight(weightKg, roundStartKg);
-        if (grossError) throw new ServiceError(grossError);
+        if (grossError) throw toServiceError(grossError);
 
         // Exempt trucks (scrap / billet wire) record no internal sessions. When
         // the round is closed we mirror its external net as ONE
@@ -2499,7 +2422,7 @@ export async function closeOperation(
   // always share one card number.
   const cardNumber = externalCardNumber.trim();
   if (!cardNumber) {
-    throw new ServiceError("رقم كرت القبان (المالية) مطلوب لإغلاق العملية");
+    throw new ServiceError("weighbridgeCardRequiredToClose");
   }
 
   return withRetry(() =>
@@ -2513,7 +2436,7 @@ export async function closeOperation(
           SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
         `;
         if (locked.length === 0) {
-          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+          throw new ServiceError("operationNotFound", "NOT_FOUND");
         }
 
         const truck = await tx.truckOperation.findUnique({
@@ -2523,11 +2446,11 @@ export async function closeOperation(
             rounds: { orderBy: { roundNumber: "asc" } },
           },
         });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
         assertTransition(truck.status, "Completed");
 
         if (!truck.tareWeightKg || !truck.grossWeightKg) {
-          throw new ServiceError("يجب إدخال وزن الفارغ والمحمّل قبل الإغلاق");
+          throw new ServiceError("tareAndGrossRequiredBeforeClose");
         }
 
         // Friendly duplicate check before the unique index fires. Runs inside
@@ -2538,10 +2461,10 @@ export async function closeOperation(
           select: { id: true },
         });
         if (duplicate && duplicate.id !== truckId) {
-          throw new ServiceError(
-            `رقم كرت القبان ${cardNumber} مستخدم مسبقاً في العملية #${duplicate.id}`,
-            "CONFLICT",
-          );
+          throw new ServiceError("weighbridgeCardAlreadyUsed", "CONFLICT", {
+            cardNumber,
+            truckId: duplicate.id,
+          });
         }
 
         const bridgeNetKg = new Decimal(truck.grossWeightKg).minus(truck.tareWeightKg);
@@ -2615,7 +2538,7 @@ export async function closeOperation(
 // ─── Cancel Operation ─────────────────────────────────────────────
 
 export async function cancelOperation(truckId: number, reason: string, userId: number) {
-  if (!reason.trim()) throw new ServiceError("يجب إدخال سبب الإلغاء");
+  if (!reason.trim()) throw new ServiceError("cancelReasonRequired");
 
   return withRetry(() =>
     prisma.$transaction(
@@ -2628,11 +2551,11 @@ export async function cancelOperation(truckId: number, reason: string, userId: n
           SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
         `;
         if (locked.length === 0) {
-          throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+          throw new ServiceError("operationNotFound", "NOT_FOUND");
         }
 
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
-        if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
         assertTransition(truck.status, "Cancelled");
 
         const updated = await tx.truckOperation.update({
@@ -2723,7 +2646,7 @@ export async function getOperationDetail(truckId: number): Promise<TruckOperatio
     where: { id: truckId },
     include: DETAIL_INCLUDE,
   });
-  if (!truck) throw new ServiceError("العملية غير موجودة", "NOT_FOUND");
+  if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
   return truck;
 }
 

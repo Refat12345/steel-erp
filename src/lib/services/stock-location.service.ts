@@ -63,7 +63,7 @@ async function assertExpectedSizeExists(
     where: { id: expectedSizeId },
     select: { id: true },
   });
-  if (!size) throw new ServiceError("المقاس المحدد غير موجود", "BAD_REQUEST");
+  if (!size) throw new ServiceError("sizeNotFound", "BAD_REQUEST");
 }
 
 export async function createLocation(
@@ -82,8 +82,8 @@ export async function createLocation(
           where: { id: data.yardId },
           select: { id: true, isActive: true },
         });
-        if (!yard) throw new ServiceError("الساحة غير موجودة", "NOT_FOUND");
-        if (!yard.isActive) throw new ServiceError("الساحة موقوفة");
+        if (!yard) throw new ServiceError("yardNotFound", "NOT_FOUND");
+        if (!yard.isActive) throw new ServiceError("yardDisabled");
 
         await assertExpectedSizeExists(tx, data.expectedSizeId);
 
@@ -92,7 +92,7 @@ export async function createLocation(
           select: { id: true },
         });
         if (duplicate) {
-          throw new ServiceError("الكود مستخدم مسبقاً في هذه الساحة", "CONFLICT");
+          throw new ServiceError("locationCodeAlreadyUsedInYard", "CONFLICT");
         }
 
         const location = await tx.stockLocation.create({
@@ -152,7 +152,7 @@ export async function updateLocation(
           where: { id },
           include: { _count: { select: { movements: true } } },
         });
-        if (!existing) throw new ServiceError("الموقع غير موجود", "NOT_FOUND");
+        if (!existing) throw new ServiceError("locationNotFound", "NOT_FOUND");
 
         const hasMovements = existing._count.movements > 0;
         const newCode = data.code?.trim().toUpperCase();
@@ -160,16 +160,14 @@ export async function updateLocation(
         // Code is frozen once the location has any movement.
         if (newCode && newCode !== existing.code) {
           if (hasMovements) {
-            throw new ServiceError(
-              "لا يمكن تعديل كود موقع عليه حركات — عدّل الاسم الظاهر بدلاً من ذلك",
-            );
+            throw new ServiceError("cannotEditLocationCodeWithMovements");
           }
           const duplicate = await tx.stockLocation.findUnique({
             where: { yardId_code: { yardId: existing.yardId, code: newCode } },
             select: { id: true },
           });
           if (duplicate && duplicate.id !== id) {
-            throw new ServiceError("الكود مستخدم مسبقاً في هذه الساحة", "CONFLICT");
+            throw new ServiceError("locationCodeAlreadyUsedInYard", "CONFLICT");
           }
         }
 
@@ -189,9 +187,7 @@ export async function updateLocation(
             (derived.unit !== existing.unit ||
               derived.allowedGrade !== existing.allowedGrade)
           ) {
-            throw new ServiceError(
-              "لا يمكن تغيير تصنيف موقع عليه حركات إذا تغيّرت وحدة العدّ أو النخب",
-            );
+            throw new ServiceError("cannotChangeLocationClassificationWithMovements");
           }
           nextSegment = data.segment as StockLocationSegment;
           nextUnit = derived.unit;
@@ -255,13 +251,13 @@ export async function removeLocation(
           where: { id },
           include: { _count: { select: { movements: true } } },
         });
-        if (!existing) throw new ServiceError("الموقع غير موجود", "NOT_FOUND");
+        if (!existing) throw new ServiceError("locationNotFound", "NOT_FOUND");
 
         const hasMovements = existing._count.movements > 0;
 
         if (hasMovements) {
           if (!existing.isActive) {
-            throw new ServiceError("الموقع موقوف مسبقاً", "CONFLICT");
+            throw new ServiceError("locationAlreadyDisabled", "CONFLICT");
           }
           await tx.stockLocation.update({
             where: { id },

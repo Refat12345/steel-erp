@@ -19,6 +19,7 @@ import {
 import { sessionHasPermission } from "@/lib/client-permissions";
 import { compressImage } from "@/lib/compress-image";
 import { formatInteger } from "@/lib/number-format";
+import { translateValidationMessage } from "@/lib/i18n/validation-message";
 import {
   Loader2,
   Upload,
@@ -41,6 +42,7 @@ interface CustomerOption {
 
 export function NewContractForm() {
   const t = useTranslations("contracts");
+  const tValidation = useTranslations("validation");
   const locale = useLocale() as Locale;
   const dir = getTextDirection(locale);
   const BackIcon = dir === "rtl" ? ArrowRight : ArrowLeft;
@@ -318,7 +320,7 @@ export function NewContractForm() {
                 )}
                 {errors.customerId && (
                   <p className="text-xs text-destructive mt-1">
-                    {errors.customerId.message}
+                    {translateValidationMessage(tValidation, errors.customerId.message)}
                   </p>
                 )}
               </div>

@@ -3,6 +3,11 @@ import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 import { getRoleLandingPage } from "@/lib/rbac-policy";
 import { isStockModuleEnabled } from "@/config/feature-flags";
+import { LOCALE_COOKIE } from "@/i18n/config";
+import {
+  resolveLocaleFromCookieValue,
+  translateError,
+} from "@/lib/i18n/server-messages";
 
 /**
  * Layer 1 of the 3-layer RBAC defence.
@@ -118,6 +123,9 @@ function isStockPath(pathname: string): boolean {
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  const locale = resolveLocaleFromCookieValue(
+    req.cookies.get(LOCALE_COOKIE)?.value,
+  );
 
   if (isPublicPath(pathname)) {
     return NextResponse.next();
@@ -129,7 +137,10 @@ export async function middleware(req: NextRequest) {
   // can be flipped with an env change + reload (no rebuild).
   if (!isStockModuleEnabled() && isStockPath(pathname)) {
     if (isApiPath(pathname)) {
-      return NextResponse.json({ success: false, error: "غير موجود" }, { status: 404 });
+      return NextResponse.json(
+        { success: false, error: translateError(locale, "notFoundDefault") },
+        { status: 404 },
+      );
     }
     return NextResponse.redirect(new URL("/", req.url));
   }
@@ -139,7 +150,7 @@ export async function middleware(req: NextRequest) {
   if (!token) {
     if (isApiPath(pathname)) {
       return NextResponse.json(
-        { success: false, error: "غير مصرح بالدخول" },
+        { success: false, error: translateError(locale, "unauthorized") },
         { status: 401 },
       );
     }
@@ -164,7 +175,7 @@ export async function middleware(req: NextRequest) {
     if (!allowed) {
       if (isApiPath(pathname)) {
         return NextResponse.json(
-          { success: false, error: "لا تملك صلاحية لهذه العملية" },
+          { success: false, error: translateError(locale, "forbidden") },
           { status: 403 },
         );
       }

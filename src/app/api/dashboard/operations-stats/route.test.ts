@@ -35,6 +35,15 @@ vi.mock("@/lib/logger", () => ({
   logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
+vi.mock("@/lib/i18n/request-locale", () => ({
+  getRequestLocale: async () => "ar",
+}));
+
+vi.mock("@/lib/i18n/server-messages", () => ({
+  translateError: (_locale: string, key: string) =>
+    key === "statsFetchFailed" ? "خطأ في جلب الإحصاءات" : key,
+}));
+
 import { GET } from "./route";
 
 function req(period?: string) {

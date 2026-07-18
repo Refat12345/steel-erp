@@ -296,9 +296,9 @@ async function recordInbound(
     const natural = naturalShift(now);
     if (data.shift != null && data.shift !== natural) {
       if (!inShiftGraceWindow(now)) {
-        throw new ServiceError(
-          `لا يمكن نسب الإدخال للوردية السابقة إلا خلال ${SHIFT_GRACE_MINUTES} دقيقة من بداية الوردية الجديدة`,
-        );
+        throw new ServiceError("previousShiftAttributionWindowExpired", "BAD_REQUEST", {
+          graceMinutes: SHIFT_GRACE_MINUTES,
+        });
       }
     }
     shift = data.shift ?? natural;
@@ -311,10 +311,10 @@ async function recordInbound(
           where: { id: data.locationId },
           include: { expectedSize: { select: { id: true, displayName: true } } },
         });
-        if (!location) throw new ServiceError("الموقع غير موجود", "NOT_FOUND");
-        if (!location.isActive) throw new ServiceError("الموقع موقوف");
+        if (!location) throw new ServiceError("locationNotFound", "NOT_FOUND");
+        if (!location.isActive) throw new ServiceError("locationDisabled");
         if (!trackedUnits(location.segment).includes(unit)) {
-          throw new ServiceError("وحدة الإدخال غير مسموحة لهذا الموقع");
+          throw new ServiceError("inputUnitNotAllowedForLocation");
         }
 
         // A size is needed for bundle movements, and for tonnage on rebar sites
@@ -325,22 +325,22 @@ async function recordInbound(
         let grade: SalesOrderGrade | null = null;
 
         if (unit === "BUNDLE" && !quantity.isInteger()) {
-          throw new ServiceError("عدد الربطات يجب أن يكون عدداً صحيحاً");
+          throw new ServiceError("bundleCountMustBeInteger");
         }
 
         if (needsSize) {
           if (data.sizeId == null) {
-            throw new ServiceError("المقاس مطلوب لهذا الموقع");
+            throw new ServiceError("sizeRequiredForLocation");
           }
           const size = await tx.sizeLookup.findUnique({
             where: { id: data.sizeId },
             select: { id: true, displayName: true },
           });
-          if (!size) throw new ServiceError("المقاس غير موجود", "BAD_REQUEST");
+          if (!size) throw new ServiceError("sizeNotFound", "BAD_REQUEST");
           sizeId = size.id;
           grade = location.allowedGrade;
           if (!grade) {
-            throw new ServiceError("نخب الموقع غير محدد");
+            throw new ServiceError("locationGradeUnset");
           }
 
           // One-size-per-location rule (checked on BUNDLE balances only — the
@@ -366,9 +366,10 @@ async function recordInbound(
                 select: { displayName: true },
               });
               const existingName = existing?.displayName ?? "آخر";
-              throw new ServiceError(
-                `الموقع «${location.nameAr}» يحتوي رصيداً بمقاس ${existingName} — يجب تفريغه قبل إدخال مقاس مختلف`,
-              );
+              throw new ServiceError("locationHasOtherSizeEmptyFirst", "BAD_REQUEST", {
+                locationName: location.nameAr,
+                sizeName: existingName,
+              });
             }
           }
         }
@@ -484,13 +485,13 @@ export async function recordTransfer(
           tx.stockLocation.findUnique({ where: { id: data.fromLocationId } }),
           tx.stockLocation.findUnique({ where: { id: data.toLocationId } }),
         ]);
-        if (!from) throw new ServiceError("الموقع المصدر غير موجود", "NOT_FOUND");
-        if (!to) throw new ServiceError("الموقع الوجهة غير موجود", "NOT_FOUND");
-        if (!from.isActive) throw new ServiceError("الموقع المصدر موقوف");
-        if (!to.isActive) throw new ServiceError("الموقع الوجهة موقوف");
-        if (from.id === to.id) throw new ServiceError("لا يمكن الترحيل إلى نفس الموقع");
+        if (!from) throw new ServiceError("sourceLocationNotFound", "NOT_FOUND");
+        if (!to) throw new ServiceError("destLocationNotFound", "NOT_FOUND");
+        if (!from.isActive) throw new ServiceError("sourceLocationDisabled");
+        if (!to.isActive) throw new ServiceError("destLocationDisabled");
+        if (from.id === to.id) throw new ServiceError("cannotTransferToSameLocation");
         if (from.unit !== to.unit) {
-          throw new ServiceError("لا يمكن الترحيل بين موقع بالربطات وآخر بالطن");
+          throw new ServiceError("cannotTransferBetweenBundleAndTon");
         }
 
         const primaryUnit: StockUnit = from.unit;
@@ -500,15 +501,15 @@ export async function recordTransfer(
 
         let sizeId: number | null = null;
         if (primaryUnit === "BUNDLE") {
-          if (data.sizeId == null) throw new ServiceError("المقاس مطلوب لمواقع الربطات");
+          if (data.sizeId == null) throw new ServiceError("sizeRequiredForBundleLocations");
           if (!quantity.isInteger()) {
-            throw new ServiceError("عدد الربطات يجب أن يكون عدداً صحيحاً");
+            throw new ServiceError("bundleCountMustBeInteger");
           }
           const size = await tx.sizeLookup.findUnique({
             where: { id: data.sizeId },
             select: { id: true },
           });
-          if (!size) throw new ServiceError("المقاس غير موجود", "BAD_REQUEST");
+          if (!size) throw new ServiceError("sizeNotFound", "BAD_REQUEST");
           sizeId = size.id;
 
           // Destination one-size rule (BUNDLE balances only): block if it holds
@@ -528,11 +529,10 @@ export async function recordTransfer(
                 where: { id: destBlockId },
                 select: { displayName: true },
               });
-              throw new ServiceError(
-                `الموقع الوجهة «${to.nameAr}» يحتوي رصيداً بمقاس ${
-                  existing?.displayName ?? "آخر"
-                } — يجب تفريغه قبل استقبال مقاس مختلف`,
-              );
+              throw new ServiceError("destLocationHasOtherSizeEmptyFirst", "BAD_REQUEST", {
+              locationName: to.nameAr,
+              sizeName: existing?.displayName ?? "آخر",
+            });
             }
           }
         }
@@ -544,9 +544,10 @@ export async function recordTransfer(
         });
         const available = new Decimal(sourceAgg._sum.quantity ?? 0);
         if (available.lessThan(quantity)) {
-          throw new ServiceError(
-            `الرصيد المتاح في «${from.nameAr}» هو ${available.toString()} فقط`,
-          );
+          throw new ServiceError("insufficientBundleBalance", "BAD_REQUEST", {
+            locationName: from.nameAr,
+            available: available.toString(),
+          });
         }
 
         // For rebar, the actual weight moved is known at transfer time and is
@@ -555,7 +556,7 @@ export async function recordTransfer(
         let tonsToMove = new Decimal(0);
         if (dual) {
           if (data.quantityTons == null || data.quantityTons <= 0) {
-            throw new ServiceError("الوزن المرحَّل (بالطن) مطلوب لمواقع المبروم");
+            throw new ServiceError("transferTonsRequiredForShortbar");
           }
           tonsToMove = new Decimal(data.quantityTons);
           const tonAgg = await tx.stockMovement.aggregate({
@@ -564,9 +565,10 @@ export async function recordTransfer(
           });
           const availableTons = new Decimal(tonAgg._sum.quantity ?? 0);
           if (tonsToMove.greaterThan(availableTons)) {
-            throw new ServiceError(
-              `الوزن المتاح في «${from.nameAr}» هو ${availableTons.toString()} طن فقط`,
-            );
+            throw new ServiceError("insufficientTonBalance", "BAD_REQUEST", {
+              locationName: from.nameAr,
+              availableTons: availableTons.toString(),
+            });
           }
         }
 
@@ -610,7 +612,7 @@ export async function recordTransfer(
         };
 
         const primaryPair = await makePair(primaryUnit, quantity);
-        if (!primaryPair) throw new ServiceError("الكمية يجب أن تكون أكبر من صفر");
+        if (!primaryPair) throw new ServiceError("quantityMustBePositive");
         const tonPair = dual ? await makePair("TON", tonsToMove) : null;
 
         await logAudit(tx, {
@@ -684,12 +686,12 @@ export async function recordAdjustment(
         const location = await tx.stockLocation.findUnique({
           where: { id: data.locationId },
         });
-        if (!location) throw new ServiceError("الموقع غير موجود", "NOT_FOUND");
-        if (!location.isActive) throw new ServiceError("الموقع موقوف");
+        if (!location) throw new ServiceError("locationNotFound", "NOT_FOUND");
+        if (!location.isActive) throw new ServiceError("locationDisabled");
 
         const unit: StockUnit = data.unit;
         if (!trackedUnits(location.segment).includes(unit)) {
-          throw new ServiceError("وحدة التصحيح غير مسموحة لهذا الموقع");
+          throw new ServiceError("correctionUnitNotAllowedForLocation");
         }
         const needsSize = unit === "BUNDLE" || tonNeedsSize(location.segment);
 
@@ -697,16 +699,16 @@ export async function recordAdjustment(
         let grade: SalesOrderGrade | null = null;
 
         if (unit === "BUNDLE" && !actual.isInteger()) {
-          throw new ServiceError("عدد الربطات يجب أن يكون عدداً صحيحاً");
+          throw new ServiceError("bundleCountMustBeInteger");
         }
 
         if (needsSize) {
-          if (data.sizeId == null) throw new ServiceError("المقاس مطلوب لهذا الموقع");
+          if (data.sizeId == null) throw new ServiceError("sizeRequiredForLocation");
           const size = await tx.sizeLookup.findUnique({
             where: { id: data.sizeId },
             select: { id: true },
           });
-          if (!size) throw new ServiceError("المقاس غير موجود", "BAD_REQUEST");
+          if (!size) throw new ServiceError("sizeNotFound", "BAD_REQUEST");
           sizeId = size.id;
           grade = location.allowedGrade;
         }
@@ -718,7 +720,7 @@ export async function recordAdjustment(
         const current = new Decimal(agg._sum.quantity ?? 0);
         const delta = actual.minus(current);
         if (delta.isZero()) {
-          throw new ServiceError("لا يوجد فرق — الرصيد الفعلي يطابق رصيد النظام");
+          throw new ServiceError("noStockDifference");
         }
 
         // Block introducing a new bundle size while another size is still
@@ -743,11 +745,10 @@ export async function recordAdjustment(
               where: { id: blockingId },
               select: { displayName: true },
             });
-            throw new ServiceError(
-              `الموقع «${location.nameAr}» يحتوي رصيداً بمقاس ${
-                existing?.displayName ?? "آخر"
-              } — صحّح رصيده أولاً قبل إدخال مقاس جديد`,
-            );
+            throw new ServiceError("locationHasOtherSizeCorrectFirst", "BAD_REQUEST", {
+              locationName: location.nameAr,
+              sizeName: existing?.displayName ?? "آخر",
+            });
           }
         }
 
@@ -851,7 +852,7 @@ export async function applyLoadOutForClose(
     if (!virtualLocation) {
       // Should never happen — the location is seeded by migration. Fail loudly
       // rather than silently dropping the cross-dock ledger trail.
-      throw new ServiceError("الموقع الافتراضي للتسليم المباشر غير موجود", "NOT_FOUND");
+      throw new ServiceError("defaultDirectDeliveryLocationNotFound", "NOT_FOUND");
     }
   }
 

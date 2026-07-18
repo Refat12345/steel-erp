@@ -56,14 +56,14 @@ export async function POST(req: NextRequest) {
   if (!session) return unauthorized();
 
   const parsedBody = await readJsonBody(req);
-  if (!parsedBody.ok) return badRequest("بيانات غير صالحة");
+  if (!parsedBody.ok) return badRequest("invalidData");
 
   // Wrap in idempotency replay protection so a double-tap or network retry
   // (same Idempotency-Key) does not record the production entry twice.
   return withIdempotency(req, session.userId, parsedBody.text, async () => {
     const parsed = productionInSchema.safeParse(parsedBody.json);
     if (!parsed.success) {
-      return badRequest(parsed.error.issues[0]?.message || "بيانات غير صالحة");
+      return badRequest(parsed.error.issues[0]?.message || "invalidData");
     }
 
     // Production entry is split by unit across two roles: one records tonnage,

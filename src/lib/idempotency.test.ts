@@ -15,6 +15,9 @@ vi.mock("@/lib/db", () => ({ prisma: mockPrisma }));
 vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
+vi.mock("@/lib/i18n/request-locale", () => ({
+  getRequestLocale: async () => "ar",
+}));
 
 import { withIdempotency, cleanupExpiredIdempotencyKeys } from "./idempotency";
 

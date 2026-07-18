@@ -70,7 +70,7 @@ describe("createCustomer", () => {
 
     await expect(createCustomer(validInput, 1)).rejects.toThrow(ServiceError);
     await expect(createCustomer(validInput, 1)).rejects.toThrow(
-      "الرقم الوطني مسجّل مسبقاً",
+      "nationalIdAlreadyRegistered",
     );
   });
 
@@ -125,7 +125,7 @@ describe("updateCustomer", () => {
 
     await expect(
       updateCustomer(1, { nationalId: "TAKEN" }, 1),
-    ).rejects.toThrow("الرقم الوطني مسجّل مسبقاً");
+    ).rejects.toThrow("nationalIdAlreadyRegistered");
   });
 });
 

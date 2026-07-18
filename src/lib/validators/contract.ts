@@ -5,14 +5,14 @@ const contractStatusValues = Object.values(ContractStatus) as [string, ...string
 
 export const contractCreateSchema = z.object({
   customerId: z
-    .number({ message: "يجب اختيار عميل" })
+    .number({ message: "customerMustBeSelected" })
     .int()
-    .positive("يجب اختيار عميل"),
+    .positive("customerMustBeSelected"),
   notes: z.string().max(2000).optional().or(z.literal("")),
 });
 
 export const contractCreateWithAttachmentSchema = contractCreateSchema.extend({
-  attachmentPath: z.string().min(1, "يجب رفع نسخة ممسوحة من العقد الموقّع"),
+  attachmentPath: z.string().min(1, "signedContractScanRequired"),
   attachmentName: z.string().default(""),
   attachmentSize: z.number().int().min(0).default(0),
 });
@@ -20,12 +20,12 @@ export const contractCreateWithAttachmentSchema = contractCreateSchema.extend({
 export const contractUpdateSchema = z.object({
   notes: z.string().max(2000).optional().or(z.literal("")),
   status: z.enum(contractStatusValues).optional(),
-  statusReason: z.string().min(1, "سبب تغيير الحالة مطلوب").optional(),
+  statusReason: z.string().min(1, "statusChangeReasonRequired").optional(),
 });
 
 export const attachmentUploadSchema = z.object({
-  filePath: z.string().min(1, "مسار الملف مطلوب"),
-  fileName: z.string().min(1, "اسم الملف مطلوب"),
+  filePath: z.string().min(1, "filePathRequired"),
+  fileName: z.string().min(1, "fileNameRequired"),
   fileSize: z.number().int().min(0).default(0),
 });
 

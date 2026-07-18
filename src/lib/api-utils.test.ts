@@ -1,8 +1,13 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: () => undefined,
+  }),
 }));
 
 import {
@@ -12,6 +17,7 @@ import {
 } from "./api-utils";
 import type { ApiSession } from "./api-utils";
 import { ServiceError } from "./services/errors";
+import { translateError } from "@/lib/i18n/server-messages";
 
 // ─── hasPermission ─────────────────────────────────────────────
 
@@ -89,32 +95,39 @@ describe("parsePagination", () => {
 // ─── handleServiceError ────────────────────────────────────────
 
 describe("handleServiceError", () => {
-  it("maps BAD_REQUEST to 400", async () => {
-    const res = handleServiceError(new ServiceError("بيانات غير صالحة"));
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("maps BAD_REQUEST to 400 and translates messageKey", async () => {
+    const res = await handleServiceError(new ServiceError("invalidData"));
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body).toEqual({ success: false, error: "بيانات غير صالحة" });
+    expect(body).toEqual({
+      success: false,
+      error: translateError("ar", "invalidData"),
+    });
   });
 
   it("maps NOT_FOUND to 404", async () => {
-    const res = handleServiceError(
-      new ServiceError("غير موجود", "NOT_FOUND"),
+    const res = await handleServiceError(
+      new ServiceError("operationNotFound", "NOT_FOUND"),
     );
     expect(res.status).toBe(404);
   });
 
   it("maps FORBIDDEN to 403", async () => {
-    const res = handleServiceError(
-      new ServiceError("ممنوع", "FORBIDDEN"),
+    const res = await handleServiceError(
+      new ServiceError("forbidden", "FORBIDDEN"),
     );
     expect(res.status).toBe(403);
   });
 
   it("returns generic 500 for unknown errors", async () => {
-    const res = handleServiceError(new Error("unexpected"));
+    const res = await handleServiceError(new Error("unexpected"));
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.success).toBe(false);
-    expect(body.error).toBe("خطأ داخلي في الخادم");
+    expect(body.error).toBe(translateError("ar", "internalServer"));
   });
 });

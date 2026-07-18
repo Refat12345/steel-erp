@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
       try {
         window = getOperationalDayWindow(operationalDate);
       } catch {
-        return badRequest("تاريخ يوم التشغيل غير صالح");
+        return badRequest("invalidOperationalDate");
       }
     }
 
@@ -68,12 +68,12 @@ export async function POST(req: NextRequest) {
   if (!hasPermission(session, "truck.register")) return forbidden();
 
   const parsed = await readJsonBody(req);
-  if (!parsed.ok) return badRequest("بيانات غير صالحة");
+  if (!parsed.ok) return badRequest("invalidData");
 
   return withIdempotency(req, session.userId, parsed.text, async () => {
     const validated = truckRegisterSchema.safeParse(parsed.json);
     if (!validated.success) {
-      return badRequest(validated.error.issues[0]?.message || "بيانات غير صالحة");
+      return badRequest(validated.error.issues[0]?.message || "invalidData");
     }
     try {
       const truck = await registerTruck(

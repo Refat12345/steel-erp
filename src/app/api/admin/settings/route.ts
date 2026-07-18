@@ -4,6 +4,7 @@ import {
   getApiSession,
   unauthorized,
   forbidden,
+  badRequest,
   hasPermission,
   handleServiceError,
 } from "@/lib/api-utils";
@@ -18,7 +19,7 @@ const SETTINGS_PERMISSION = "settings.edit";
 const updateSchema = z.object({
   analyticsStartDate: z
     .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "تاريخ غير صالح — الصيغة المطلوبة YYYY-MM-DD")
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "invalidDateYyyyMmDd")
     .nullable(),
 });
 
@@ -44,21 +45,12 @@ export async function PUT(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json(
-      { success: false, error: "طلب غير صالح" },
-      { status: 400 },
-    );
+    return badRequest("invalidRequest");
   }
 
   const parsed = updateSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة",
-      },
-      { status: 400 },
-    );
+    return badRequest(parsed.error.issues[0]?.message ?? "invalidData");
   }
 
   try {

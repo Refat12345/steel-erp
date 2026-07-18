@@ -19,7 +19,7 @@ export async function POST(
 
   const { id } = await params;
   const userId = parseInt(id, 10);
-  if (isNaN(userId)) return badRequest("معرّف غير صالح");
+  if (isNaN(userId)) return badRequest("invalidId");
 
   try {
     const matrix = await resetUserPermissionOverrides(

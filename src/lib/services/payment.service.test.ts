@@ -93,7 +93,7 @@ describe("createPayment", () => {
     mockPrisma.customer.findUnique.mockResolvedValue(null);
 
     await expect(createPayment(validInput, 1)).rejects.toThrow(ServiceError);
-    await expect(createPayment(validInput, 1)).rejects.toThrow("العميل غير موجود");
+    await expect(createPayment(validInput, 1)).rejects.toThrow("customerNotFound");
   });
 
   it("does not allocate when no SOs have debt (pre-Phase E)", async () => {
@@ -138,7 +138,7 @@ describe("getPaymentById", () => {
     mockPrisma.payment.findUnique.mockResolvedValue(null);
 
     await expect(getPaymentById(999)).rejects.toThrow(ServiceError);
-    await expect(getPaymentById(999)).rejects.toThrow("الدفعة غير موجودة");
+    await expect(getPaymentById(999)).rejects.toThrow("paymentNotFound");
   });
 });
 
@@ -274,7 +274,7 @@ describe("getCustomerBalance", () => {
   it("throws NOT_FOUND for non-existent customer", async () => {
     mockPrisma.customer.findUnique.mockResolvedValue(null);
 
-    await expect(getCustomerBalance(999)).rejects.toThrow("العميل غير موجود");
+    await expect(getCustomerBalance(999)).rejects.toThrow("customerNotFound");
   });
 });
 

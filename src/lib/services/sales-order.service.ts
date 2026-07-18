@@ -95,7 +95,7 @@ export async function getSalesOrderByNumber(orderNumber: string) {
       updater: { select: { username: true, fullName: true } },
     },
   });
-  if (!so) throw new ServiceError("أمر البيع غير موجود", "NOT_FOUND");
+  if (!so) throw new ServiceError("salesOrderNotFound", "NOT_FOUND");
   return so;
 }
 
@@ -107,9 +107,9 @@ export async function createSalesOrder(
     where: { contractNumber: data.contractNumber },
     select: { contractNumber: true, status: true, customerId: true },
   });
-  if (!contract) throw new ServiceError("العقد غير موجود");
+  if (!contract) throw new ServiceError("contractNotFound");
   if (contract.status !== "active") {
-    throw new ServiceError("العقد غير نشط — لا يمكن إنشاء أمر بيع تحته");
+    throw new ServiceError("contractInactiveCannotCreateSalesOrder");
   }
 
   // Check for duplicate kind+grade on same contract
@@ -125,9 +125,11 @@ export async function createSalesOrder(
   if (existing) {
     const kindLabel = KIND_LABELS[data.kind] || data.kind;
     const gradeLabel = data.grade ? ` (${GRADE_LABELS[data.grade]})` : "";
-    throw new ServiceError(
-      `يوجد أمر بيع ${kindLabel}${gradeLabel} على هذا العقد بالفعل: ${existing.orderNumber}`
-    );
+    throw new ServiceError("salesOrderAlreadyExistsOnContract", "BAD_REQUEST", {
+        kindLabel,
+        gradeLabel,
+        orderNumber: existing.orderNumber,
+      });
   }
 
   const MAX_ATTEMPTS = 3;
@@ -215,7 +217,7 @@ export async function updateSalesOrder(
     where: { orderNumber },
     select: { orderNumber: true, status: true },
   });
-  if (!so) throw new ServiceError("أمر البيع غير موجود", "NOT_FOUND");
+  if (!so) throw new ServiceError("salesOrderNotFound", "NOT_FOUND");
 
   if (data.status) {
     validateStatusTransition(so.status, data.status);
@@ -273,9 +275,9 @@ export async function setOrderItems(
     where: { orderNumber },
     select: { orderNumber: true, status: true, kind: true },
   });
-  if (!so) throw new ServiceError("أمر البيع غير موجود", "NOT_FOUND");
+  if (!so) throw new ServiceError("salesOrderNotFound", "NOT_FOUND");
   if (so.status !== "draft" && so.status !== "approved") {
-    throw new ServiceError("لا يمكن تعديل الأسعار بعد بدء التنفيذ");
+    throw new ServiceError("cannotEditPricesAfterExecutionStarted");
   }
 
   // Defense-in-depth: prices may only be set for sizes whose material kind
@@ -289,10 +291,10 @@ export async function setOrderItems(
   for (const item of items) {
     const size = sizeById.get(item.sizeId);
     if (!size || !size.isActive) {
-      throw new ServiceError("أحد القياسات غير صالح أو غير نشط");
+      throw new ServiceError("sizeInvalidOrInactive");
     }
     if (sizeCodeToKind(size.code) !== so.kind) {
-      throw new ServiceError("القياس لا يتوافق مع نوع أمر البيع");
+      throw new ServiceError("sizeMismatchSalesOrderKind");
     }
   }
 
@@ -335,9 +337,10 @@ function validateStatusTransition(current: string, next: string) {
     cancelled: [],
   };
   if (!allowed[current]?.includes(next)) {
-    throw new ServiceError(
-      `لا يمكن تغيير الحالة من "${STATUS_LABELS[current]}" إلى "${STATUS_LABELS[next]}"`
-    );
+    throw new ServiceError("invalidStatusTransitionLabeled", "BAD_REQUEST", {
+      currentLabel: current,
+      nextLabel: next,
+    });
   }
 }
 
@@ -355,12 +358,4 @@ const KIND_LABELS: Record<string, string> = {
 const GRADE_LABELS: Record<string, string> = {
   FIRST: "نخب أول",
   SECOND: "نخب ثاني",
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  draft: "مسودة",
-  approved: "معتمد",
-  in_progress: "قيد التنفيذ",
-  completed: "مكتمل",
-  cancelled: "ملغى",
 };

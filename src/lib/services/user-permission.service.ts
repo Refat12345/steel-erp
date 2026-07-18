@@ -60,7 +60,7 @@ async function loadTargetUser(userId: number) {
     },
   });
   if (!user || user.username === "system") {
-    throw new ServiceError("المستخدم غير موجود", "NOT_FOUND");
+    throw new ServiceError("userNotFound", "NOT_FOUND");
   }
   return user;
 }
@@ -71,10 +71,10 @@ function assertCanMutateTarget(params: {
   actorId: number;
 }) {
   if (params.targetRoleCode === "admin") {
-    throw new ServiceError("صلاحيات المدير العام ثابتة ولا يمكن تعديلها", "FORBIDDEN");
+    throw new ServiceError("superAdminPermissionsImmutable", "FORBIDDEN");
   }
   if (params.targetUserId === params.actorId) {
-    throw new ServiceError("لا يمكنك تعديل صلاحياتك الخاصة", "FORBIDDEN");
+    throw new ServiceError("cannotEditOwnPermissions", "FORBIDDEN");
   }
 }
 
@@ -262,7 +262,7 @@ async function applyOverrideDiff(
 
   for (const { code, enabled } of editableToggles) {
     const meta = catalogByCode.get(code);
-    if (!meta) throw new ServiceError(`صلاحية غير معروفة: ${code}`);
+    if (!meta) throw new ServiceError("unknownPermissionCode", "BAD_REQUEST", { code: code });
     const inRoleDefault = roleDefaultSet.has(code);
     const override = deriveOverride(inRoleDefault, enabled);
     if (override) desiredOverrides.set(code, override);
@@ -328,7 +328,7 @@ export async function setUserPermissionOverrides(
 
   for (const { code } of toggles) {
     if (!catalogCodes.has(code)) {
-      throw new ServiceError(`صلاحية غير معروفة: ${code}`);
+      throw new ServiceError("unknownPermissionCode", "BAD_REQUEST", { code: code });
     }
   }
 
@@ -450,7 +450,7 @@ export async function copyUserPermissionOverrides(
   actorRoleCode: string,
 ): Promise<UserPermissionMatrix> {
   if (targetUserId === sourceUserId) {
-    throw new ServiceError("لا يمكن نسخ الصلاحيات من نفس المستخدم");
+    throw new ServiceError("cannotCopyPermissionsFromSelf");
   }
 
   const [target, source] = await Promise.all([
@@ -465,7 +465,7 @@ export async function copyUserPermissionOverrides(
   });
 
   if (source.roleCode === "admin") {
-    throw new ServiceError("لا يمكن نسخ صلاحيات من حساب المدير العام");
+    throw new ServiceError("cannotCopyPermissionsFromSuperAdmin");
   }
 
   const sourceOverrides = await prisma.userPermissionOverride.findMany({

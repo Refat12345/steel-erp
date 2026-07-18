@@ -65,7 +65,7 @@ export async function POST(
 
   const { id } = await params;
   const truckId = parseInt(id, 10);
-  if (isNaN(truckId)) return badRequest("معرّف غير صالح");
+  if (isNaN(truckId)) return badRequest("invalidId");
 
   // ── Pre-read Content-Length guard (Part 7) ─────────────────────
   // Trust but verify: a malicious client can lie about Content-Length, but
@@ -92,11 +92,11 @@ export async function POST(
   try {
     formData = await req.formData();
   } catch {
-    return badRequest("بيانات غير صالحة");
+    return badRequest("invalidData");
   }
 
   const file = formData.get("file") as File | null;
-  if (!file) return badRequest("لم يتم اختيار صورة");
+  if (!file) return badRequest("imageNotSelected");
   // Post-parse size check catches clients that lied about (or omitted)
   // Content-Length. `file.size` here is authoritative.
   if (file.size > MAX_FILE_SIZE) {
@@ -117,7 +117,7 @@ export async function POST(
   const buffer = Buffer.from(await file.arrayBuffer());
   const detectedType = detectImageType(buffer);
   if (!detectedType) {
-    return badRequest("نوع الملف غير مسموح — يُقبل JPEG أو PNG فقط");
+    return badRequest("fileTypeJpegPngOnly");
   }
 
   const fileName = `${randomUUID()}.${detectedType.extension}`;

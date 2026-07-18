@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   });
 
   if (!parsed.success) {
-    return badRequest(parsed.error.issues[0]?.message ?? "Invalid parameters");
+    return badRequest(parsed.error.issues[0]?.message ?? "invalidParams");
   }
 
   try {

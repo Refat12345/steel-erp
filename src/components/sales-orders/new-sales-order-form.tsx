@@ -28,6 +28,7 @@ import {
 import { sessionHasPermission } from "@/lib/client-permissions";
 import { formatDecimal } from "@/lib/number-format";
 import { getTextDirection, type Locale } from "@/i18n/config";
+import { translateValidationMessage } from "@/lib/i18n/validation-message";
 
 interface ContractOption {
   contractNumber: string;
@@ -62,6 +63,7 @@ function todayISO(): string {
 export function NewSalesOrderForm() {
   const t = useTranslations("salesOrders");
   const tEnums = useTranslations("enums");
+  const tValidation = useTranslations("validation");
   const locale = useLocale() as Locale;
   const dir = getTextDirection(locale);
   const BackIcon = dir === "rtl" ? ArrowRight : ArrowLeft;
@@ -270,7 +272,7 @@ export function NewSalesOrderForm() {
               </Select>
               {errors.contractNumber && (
                 <p className="text-xs text-destructive">
-                  {errors.contractNumber.message}
+                  {translateValidationMessage(tValidation, errors.contractNumber.message)}
                 </p>
               )}
             </div>
@@ -316,7 +318,9 @@ export function NewSalesOrderForm() {
                 </SelectContent>
               </Select>
               {errors.kind && (
-                <p className="text-xs text-destructive">{errors.kind.message}</p>
+                <p className="text-xs text-destructive">
+                  {translateValidationMessage(tValidation, errors.kind.message)}
+                </p>
               )}
             </div>
 
@@ -346,7 +350,7 @@ export function NewSalesOrderForm() {
                 </Select>
                 {errors.grade && (
                   <p className="text-xs text-destructive">
-                    {errors.grade.message}
+                    {translateValidationMessage(tValidation, errors.grade.message)}
                   </p>
                 )}
               </div>
@@ -377,7 +381,7 @@ export function NewSalesOrderForm() {
               </Select>
               {errors.settlementMode && (
                 <p className="text-xs text-destructive">
-                  {errors.settlementMode.message}
+                  {translateValidationMessage(tValidation, errors.settlementMode.message)}
                 </p>
               )}
             </div>
@@ -399,7 +403,7 @@ export function NewSalesOrderForm() {
                 />
                 {errors.paymentDeadlineDays && (
                   <p className="text-xs text-destructive">
-                    {errors.paymentDeadlineDays.message}
+                    {translateValidationMessage(tValidation, errors.paymentDeadlineDays.message)}
                   </p>
                 )}
               </div>
@@ -426,7 +430,7 @@ export function NewSalesOrderForm() {
               />
               {errors.totalQtyTons && (
                 <p className="text-xs text-destructive">
-                  {errors.totalQtyTons.message}
+                  {translateValidationMessage(tValidation, errors.totalQtyTons.message)}
                 </p>
               )}
             </div>
@@ -456,7 +460,7 @@ export function NewSalesOrderForm() {
               </Select>
               {errors.toleranceType && (
                 <p className="text-xs text-destructive">
-                  {errors.toleranceType.message}
+                  {translateValidationMessage(tValidation, errors.toleranceType.message)}
                 </p>
               )}
             </div>
@@ -477,7 +481,7 @@ export function NewSalesOrderForm() {
               />
               {errors.toleranceValue && (
                 <p className="text-xs text-destructive">
-                  {errors.toleranceValue.message}
+                  {translateValidationMessage(tValidation, errors.toleranceValue.message)}
                 </p>
               )}
             </div>
@@ -496,7 +500,7 @@ export function NewSalesOrderForm() {
                 />
                 {errors.specialRatioPct && (
                   <p className="text-xs text-destructive">
-                    {errors.specialRatioPct.message}
+                    {translateValidationMessage(tValidation, errors.specialRatioPct.message)}
                   </p>
                 )}
               </div>
@@ -527,7 +531,7 @@ export function NewSalesOrderForm() {
               <Input id="orderDate" type="date" {...register("orderDate")} />
               {errors.orderDate && (
                 <p className="text-xs text-destructive">
-                  {errors.orderDate.message}
+                  {translateValidationMessage(tValidation, errors.orderDate.message)}
                 </p>
               )}
             </div>
@@ -536,7 +540,7 @@ export function NewSalesOrderForm() {
               <Input id="deliveryDate" type="date" {...register("deliveryDate")} />
               {errors.deliveryDate && (
                 <p className="text-xs text-destructive">
-                  {errors.deliveryDate.message}
+                  {translateValidationMessage(tValidation, errors.deliveryDate.message)}
                 </p>
               )}
             </div>
@@ -554,7 +558,9 @@ export function NewSalesOrderForm() {
               rows={3}
             />
             {errors.notes && (
-              <p className="text-xs text-destructive mt-1">{errors.notes.message}</p>
+              <p className="text-xs text-destructive mt-1">
+                {translateValidationMessage(tValidation, errors.notes.message)}
+              </p>
             )}
           </CardContent>
         </Card>

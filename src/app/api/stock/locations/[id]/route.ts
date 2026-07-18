@@ -25,18 +25,18 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
   const locationId = parseInt(id, 10);
-  if (isNaN(locationId)) return badRequest("معرّف غير صالح");
+  if (isNaN(locationId)) return badRequest("invalidId");
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return badRequest("بيانات غير صالحة");
+    return badRequest("invalidData");
   }
 
   const parsed = stockLocationUpdateSchema.safeParse(body);
   if (!parsed.success) {
-    return badRequest(parsed.error.issues[0]?.message || "بيانات غير صالحة");
+    return badRequest(parsed.error.issues[0]?.message || "invalidData");
   }
 
   try {
@@ -54,7 +54,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
 
   const { id } = await params;
   const locationId = parseInt(id, 10);
-  if (isNaN(locationId)) return badRequest("معرّف غير صالح");
+  if (isNaN(locationId)) return badRequest("invalidId");
 
   try {
     const result = await removeLocation(locationId, session.userId);

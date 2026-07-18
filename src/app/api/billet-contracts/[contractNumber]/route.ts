@@ -42,12 +42,12 @@ export async function PATCH(
   try {
     body = await req.json();
   } catch {
-    return badRequest("بيانات غير صالحة");
+    return badRequest("invalidData");
   }
 
   const parsed = billetContractUpdateSchema.safeParse(body);
   if (!parsed.success) {
-    return badRequest(parsed.error.issues[0]?.message || "بيانات غير صالحة");
+    return badRequest(parsed.error.issues[0]?.message || "invalidData");
   }
 
   const isStatusChange = parsed.data.status != null;
@@ -58,7 +58,7 @@ export async function PATCH(
     parsed.data.pieceLines !== undefined;
 
   if (!isStatusChange && !isContractEdit) {
-    return badRequest("لا توجد تعديلات للحفظ");
+    return badRequest("noChangesToSave");
   }
 
   if (isStatusChange && !hasPermission(session, "billet.contract.change_status")) {

@@ -72,7 +72,7 @@ describe("salesOrderCreateSchema", () => {
     if (!result.success) {
       const gradeIssue = result.error.issues.find((i) => i.path.includes("grade"));
       expect(gradeIssue).toBeDefined();
-      expect(gradeIssue!.message).toContain("النخب يُحدد فقط");
+      expect(gradeIssue!.message).toBe("gradeOnlyForRebar");
     }
   });
 
@@ -110,7 +110,7 @@ describe("salesOrderCreateSchema", () => {
     if (!result.success) {
       const gradeIssue = result.error.issues.find((i) => i.path.includes("grade"));
       expect(gradeIssue).toBeDefined();
-      expect(gradeIssue!.message).toContain("النخب يُحدد فقط");
+      expect(gradeIssue!.message).toBe("gradeOnlyForRebar");
     }
   });
 
@@ -148,7 +148,7 @@ describe("salesOrderCreateSchema", () => {
     if (!result.success) {
       const gradeIssue = result.error.issues.find((i) => i.path.includes("grade"));
       expect(gradeIssue).toBeDefined();
-      expect(gradeIssue!.message).toContain("النخب يُحدد فقط");
+      expect(gradeIssue!.message).toBe("gradeOnlyForRebar");
     }
   });
 
@@ -186,7 +186,7 @@ describe("salesOrderCreateSchema", () => {
     if (!result.success) {
       const gradeIssue = result.error.issues.find((i) => i.path.includes("grade"));
       expect(gradeIssue).toBeDefined();
-      expect(gradeIssue!.message).toContain("النخب يُحدد فقط");
+      expect(gradeIssue!.message).toBe("gradeOnlyForRebar");
     }
   });
 
@@ -211,7 +211,7 @@ describe("salesOrderCreateSchema", () => {
     if (!result.success) {
       const gradeIssue = result.error.issues.find((i) => i.path.includes("grade"));
       expect(gradeIssue).toBeDefined();
-      expect(gradeIssue!.message).toContain("النخب مطلوب");
+      expect(gradeIssue!.message).toBe("gradeRequiredForRebar");
     }
   });
 
@@ -223,7 +223,7 @@ describe("salesOrderCreateSchema", () => {
     if (!result.success) {
       const gradeIssue = result.error.issues.find((i) => i.path.includes("grade"));
       expect(gradeIssue).toBeDefined();
-      expect(gradeIssue!.message).toContain("النخب يُحدد فقط");
+      expect(gradeIssue!.message).toBe("gradeOnlyForRebar");
     }
   });
 
@@ -244,7 +244,7 @@ describe("salesOrderCreateSchema", () => {
     if (!result.success) {
       const issue = result.error.issues.find((i) => i.path.includes("paymentDeadlineDays"));
       expect(issue).toBeDefined();
-      expect(issue!.message).toContain("مهلة السداد مطلوبة");
+      expect(issue!.message).toBe("paymentDeadlineRequiredForCredit");
     }
   });
 
@@ -262,7 +262,7 @@ describe("salesOrderCreateSchema", () => {
     if (!result.success) {
       const issue = result.error.issues.find((i) => i.path.includes("paymentDeadlineDays"));
       expect(issue).toBeDefined();
-      expect(issue!.message).toContain("مهلة السداد تُحدد فقط");
+      expect(issue!.message).toBe("paymentDeadlineOnlyForCredit");
     }
   });
 
@@ -282,7 +282,7 @@ describe("salesOrderCreateSchema", () => {
     if (!result.success) {
       const issue = result.error.issues.find((i) => i.path.includes("specialRatioPct"));
       expect(issue).toBeDefined();
-      expect(issue!.message).toContain("النسبة الخاصة تُستخدم فقط");
+      expect(issue!.message).toBe("specialRatioOnlyForRebar");
     }
   });
 

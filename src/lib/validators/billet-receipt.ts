@@ -3,44 +3,44 @@ import { z } from "zod";
 /** Declared (order) piece counter per length, entered at pre-registration. */
 export const receiptExpectedLineSchema = z.object({
   billetLengthM: z
-    .number({ message: "طول البيلت مطلوب" })
-    .int("طول البيلت يجب أن يكون عدداً صحيحاً")
-    .positive("طول البيلت يجب أن يكون أكبر من صفر"),
+    .number({ message: "billetLengthRequired" })
+    .int("billetLengthMustBeInteger")
+    .positive("billetLengthMustBePositive"),
   expectedPieces: z
-    .number({ message: "عدد القطع المعلن مطلوب" })
-    .int("عدد القطع يجب أن يكون عدداً صحيحاً")
-    .positive("عدد القطع يجب أن يكون أكبر من صفر"),
+    .number({ message: "expectedPiecesRequired" })
+    .int("pieceCountMustBeInteger")
+    .positive("pieceCountMustBePositive"),
 });
 
 export const registerReceiptSchema = z
   .object({
-    supplierContractNumber: z.string().min(1, "يجب اختيار عقد المورّد"),
+    supplierContractNumber: z.string().min(1, "supplierContractRequired"),
     driverName: z
       .string()
       .trim()
-      .min(1, "اسم السائق مطلوب")
-      .max(120, "اسم السائق طويل جداً"),
+      .min(1, "driverNameRequired")
+      .max(120, "driverNameTooLong"),
     plateNumber: z
       .string()
       .trim()
-      .min(1, "رقم اللوحة مطلوب")
-      .max(40, "رقم اللوحة طويل جداً"),
+      .min(1, "plateNumberRequired")
+      .max(40, "plateNumberTooLong"),
     driverNationalId: z.string().max(40).optional().or(z.literal("")),
     declaredWeightKg: z
-      .number({ message: "وزن الطلبية المعلن مطلوب" })
-      .positive("وزن الطلبية يجب أن يكون أكبر من صفر"),
+      .number({ message: "declaredWeightRequired" })
+      .positive("declaredWeightMustBePositive"),
     bundleCount: z.number().int().positive().nullable().optional(),
     notes: z.string().max(2000).optional().or(z.literal("")),
     pieceLines: z
       .array(receiptExpectedLineSchema)
-      .min(1, "أضف عدد القطع المعلن لطول واحد على الأقل"),
+      .min(1, "atLeastOnePieceLineRequired"),
   })
   .superRefine((data, ctx) => {
     const lengths = data.pieceLines.map((l) => l.billetLengthM);
     if (new Set(lengths).size !== lengths.length) {
       ctx.addIssue({
         code: "custom",
-        message: "لا يمكن تكرار نفس الطول في الطلبية",
+        message: "duplicateLengthInReceipt",
         path: ["pieceLines"],
       });
     }
@@ -51,34 +51,34 @@ export const updateReceiptRegistrationSchema = registerReceiptSchema;
 /** External weighbridge: loaded (gross) weight on entry. */
 export const loadedWeightSchema = z.object({
   weightKg: z
-    .number({ message: "الوزن مطلوب" })
-    .positive("الوزن يجب أن يكون أكبر من صفر"),
+    .number({ message: "weightRequired" })
+    .positive("weightMustBePositive"),
 });
 
 /** External weighbridge: empty (tare) weight on exit → closes the receipt. */
 export const completeReceiptSchema = z.object({
   weightKg: z
-    .number({ message: "الوزن مطلوب" })
-    .positive("الوزن يجب أن يكون أكبر من صفر"),
+    .number({ message: "weightRequired" })
+    .positive("weightMustBePositive"),
 });
 
 /** Internal loader: counted + rejected pieces per registered length. */
 export const unloadResultLineSchema = z.object({
   billetLengthM: z.number().int().positive(),
   countedPieces: z
-    .number({ message: "عدد القطع المعدود مطلوب" })
-    .int("عدد القطع يجب أن يكون عدداً صحيحاً")
-    .min(0, "عدد القطع لا يمكن أن يكون سالباً"),
+    .number({ message: "countedPiecesRequired" })
+    .int("pieceCountMustBeInteger")
+    .min(0, "pieceCountCannotBeNegative"),
   rejectedPieces: z
     .number()
-    .int("عدد المرتجع يجب أن يكون عدداً صحيحاً")
-    .min(0, "عدد المرتجع لا يمكن أن يكون سالباً")
+    .int("rejectedPiecesMustBeInteger")
+    .min(0, "rejectedPiecesCannotBeNegative")
     .default(0),
 });
 
 export const unloadResultSchema = z
   .object({
-    lines: z.array(unloadResultLineSchema).min(1, "أدخل عدد القطع المعدود"),
+    lines: z.array(unloadResultLineSchema).min(1, "enterCountedPieces"),
     mismatchReason: z.string().max(1000).optional().or(z.literal("")),
   })
   .superRefine((data, ctx) => {
@@ -86,7 +86,7 @@ export const unloadResultSchema = z
     if (new Set(lengths).size !== lengths.length) {
       ctx.addIssue({
         code: "custom",
-        message: "لا يمكن تكرار نفس الطول",
+        message: "duplicateLength",
         path: ["lines"],
       });
     }
@@ -94,7 +94,7 @@ export const unloadResultSchema = z
       if (line.rejectedPieces > line.countedPieces) {
         ctx.addIssue({
           code: "custom",
-          message: "المرتجع لا يمكن أن يتجاوز المعدود",
+          message: "rejectedCannotExceedCounted",
           path: ["lines", i, "rejectedPieces"],
         });
       }
@@ -102,7 +102,7 @@ export const unloadResultSchema = z
   });
 
 export const cancelReceiptSchema = z.object({
-  reason: z.string().trim().min(1, "يجب إدخال سبب الإلغاء").max(500),
+  reason: z.string().trim().min(1, "cancelReasonMustBeEntered").max(500),
 });
 
 export type RegisterReceiptInput = z.infer<typeof registerReceiptSchema>;

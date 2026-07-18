@@ -23,6 +23,7 @@ import {
 } from "@/lib/validators/customer";
 import { Loader2 } from "lucide-react";
 import { getTextDirection, type Locale } from "@/i18n/config";
+import { translateValidationMessage } from "@/lib/i18n/validation-message";
 
 const EMPTY_CUSTOMER_FORM: CustomerCreateInput = {
   fullName: "",
@@ -59,6 +60,7 @@ export function CustomerFormDialog({
   editData,
 }: CustomerFormDialogProps) {
   const t = useTranslations("contracts");
+  const tValidation = useTranslations("validation");
   const locale = useLocale() as Locale;
   const dir = getTextDirection(locale);
   const [loading, setLoading] = useState(false);
@@ -146,7 +148,7 @@ export function CustomerFormDialog({
               <Input id="fullName" {...register("fullName")} />
               {errors.fullName && (
                 <p className="text-xs text-destructive">
-                  {errors.fullName.message}
+                  {translateValidationMessage(tValidation, errors.fullName.message)}
                 </p>
               )}
             </div>
@@ -156,7 +158,7 @@ export function CustomerFormDialog({
               <Input id="fatherName" {...register("fatherName")} />
               {errors.fatherName && (
                 <p className="text-xs text-destructive">
-                  {errors.fatherName.message}
+                  {translateValidationMessage(tValidation, errors.fatherName.message)}
                 </p>
               )}
             </div>
@@ -171,7 +173,7 @@ export function CustomerFormDialog({
               />
               {errors.nationalId && (
                 <p className="text-xs text-destructive">
-                  {errors.nationalId.message}
+                  {translateValidationMessage(tValidation, errors.nationalId.message)}
                 </p>
               )}
             </div>
@@ -186,7 +188,7 @@ export function CustomerFormDialog({
               />
               {errors.phonePrimary && (
                 <p className="text-xs text-destructive">
-                  {errors.phonePrimary.message}
+                  {translateValidationMessage(tValidation, errors.phonePrimary.message)}
                 </p>
               )}
             </div>
@@ -219,7 +221,7 @@ export function CustomerFormDialog({
             <Input id="companyAddress" {...register("companyAddress")} />
             {errors.companyAddress && (
               <p className="text-xs text-destructive">
-                {errors.companyAddress.message}
+                {translateValidationMessage(tValidation, errors.companyAddress.message)}
               </p>
             )}
           </div>

@@ -45,7 +45,7 @@ export async function createCustomer(data: CustomerCreateInput, createdById: num
     where: { nationalId: data.nationalId },
   });
   if (existingNationalId) {
-    throw new ServiceError("الرقم الوطني مسجّل مسبقاً لعميل آخر");
+    throw new ServiceError("nationalIdAlreadyRegistered");
   }
 
   let phoneWarning: string | null = null;
@@ -99,20 +99,20 @@ export async function getCustomerById(id: number) {
       contracts: { orderBy: { createdAt: "desc" } },
     },
   });
-  if (!customer) throw new ServiceError("العميل غير موجود", "NOT_FOUND");
+  if (!customer) throw new ServiceError("customerNotFound", "NOT_FOUND");
   return customer;
 }
 
 export async function updateCustomer(id: number, data: CustomerUpdateInput, updatedById: number) {
   const existing = await prisma.customer.findUnique({ where: { id } });
-  if (!existing) throw new ServiceError("العميل غير موجود", "NOT_FOUND");
+  if (!existing) throw new ServiceError("customerNotFound", "NOT_FOUND");
 
   if (data.nationalId && data.nationalId !== existing.nationalId) {
     const dup = await prisma.customer.findUnique({
       where: { nationalId: data.nationalId },
     });
     if (dup && dup.id !== id) {
-      throw new ServiceError("الرقم الوطني مسجّل مسبقاً لعميل آخر");
+      throw new ServiceError("nationalIdAlreadyRegistered");
     }
   }
 

@@ -23,14 +23,14 @@ export async function POST(req: NextRequest) {
 
   const formData = await req.formData();
   const file = formData.get("file") as File | null;
-  if (!file) return badRequest("لم يتم اختيار ملف");
+  if (!file) return badRequest("fileNotSelected");
 
   if (file.size > MAX_SIZE) {
-    return badRequest("حجم الملف يتجاوز الحد المسموح (10 ميغابايت)");
+    return badRequest("fileTooLarge10Mb");
   }
 
   if (!ALLOWED_TYPES.includes(file.type)) {
-    return badRequest("نوع الملف غير مسموح — يُقبل PDF أو صور أو Word");
+    return badRequest("fileTypePdfImagesWord");
   }
 
   await mkdir(UPLOAD_DIR, { recursive: true });

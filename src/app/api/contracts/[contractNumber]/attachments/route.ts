@@ -23,7 +23,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { contractNumber } = await params;
 
   let body: unknown;
-  try { body = await req.json(); } catch { return badRequest("بيانات غير صالحة"); }
+  try { body = await req.json(); } catch { return badRequest("invalidData"); }
 
   const parsed = attachmentUploadSchema.safeParse(body);
   if (!parsed.success) {

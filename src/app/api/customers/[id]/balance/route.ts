@@ -21,7 +21,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
   const { id } = await params;
   const customerId = parseInt(id, 10);
-  if (isNaN(customerId)) return badRequest("معرّف غير صالح");
+  if (isNaN(customerId)) return badRequest("invalidId");
 
   try {
     const balance = await getCustomerBalance(customerId);

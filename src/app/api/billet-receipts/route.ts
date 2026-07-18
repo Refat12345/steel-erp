@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
       try {
         window = getOperationalDayWindow(operationalDate);
       } catch {
-        return badRequest("تاريخ يوم التشغيل غير صالح");
+        return badRequest("invalidOperationalDate");
       }
     }
 
@@ -68,12 +68,12 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return badRequest("بيانات غير صالحة");
+    return badRequest("invalidData");
   }
 
   const parsed = registerReceiptSchema.safeParse(body);
   if (!parsed.success) {
-    return badRequest(parsed.error.issues[0]?.message || "بيانات غير صالحة");
+    return badRequest(parsed.error.issues[0]?.message || "invalidData");
   }
 
   try {

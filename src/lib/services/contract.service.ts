@@ -68,7 +68,7 @@ export async function createContract(
     where: { id: data.customerId },
   });
   if (!customer || !customer.isActive) {
-    throw new ServiceError("العميل غير موجود أو غير نشط");
+    throw new ServiceError("customerNotFoundOrInactive");
   }
 
   const currentYear = new Date().getFullYear();
@@ -81,9 +81,10 @@ export async function createContract(
     },
   });
   if (existingContract) {
-    throw new ServiceError(
-      `العميل لديه عقد لهذه السنة بالفعل: ${existingContract.contractNumber} (${existingContract.status === "active" ? "نشط" : existingContract.status === "suspended" ? "معلّق" : "مغلق"})`,
-    );
+    throw new ServiceError("customerAlreadyHasContractForYear", "BAD_REQUEST", {
+          contractNumber: existingContract.contractNumber,
+          statusLabel: existingContract.status,
+        });
   }
 
   const MAX_ATTEMPTS = 3;
@@ -166,7 +167,7 @@ export async function getContractByNumber(contractNumber: string) {
       },
     },
   });
-  if (!contract) throw new ServiceError("العقد غير موجود", "NOT_FOUND");
+  if (!contract) throw new ServiceError("contractNotFound", "NOT_FOUND");
   return contract;
 }
 
@@ -174,11 +175,11 @@ export async function updateContract(contractNumber: string, data: ContractUpdat
   const existing = await prisma.masterContract.findUnique({
     where: { contractNumber },
   });
-  if (!existing) throw new ServiceError("العقد غير موجود", "NOT_FOUND");
+  if (!existing) throw new ServiceError("contractNotFound", "NOT_FOUND");
 
   const isStatusChange = data.status && data.status !== existing.status;
   if (isStatusChange && !data.statusReason) {
-    throw new ServiceError("سبب تغيير الحالة مطلوب");
+    throw new ServiceError("statusChangeReasonRequired");
   }
 
   const updated = await prisma.$transaction(async (tx) => {
@@ -228,7 +229,7 @@ export async function addAttachment(
   const contract = await prisma.masterContract.findUnique({
     where: { contractNumber },
   });
-  if (!contract) throw new ServiceError("العقد غير موجود", "NOT_FOUND");
+  if (!contract) throw new ServiceError("contractNotFound", "NOT_FOUND");
 
   const attachment = await prisma.$transaction(async (tx) => {
     const att = await tx.contractAttachment.create({
