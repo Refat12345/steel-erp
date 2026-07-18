@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
   Plus,
@@ -12,6 +13,8 @@ import {
   UserCheck,
   UserX,
   Loader2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { sessionHasPermission } from "@/lib/client-permissions";
 import { UserPermissionsDialog } from "@/components/admin/user-permissions-dialog";
@@ -43,8 +46,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { formatDate } from "@/lib/date-format";
+import { formatInteger } from "@/lib/number-format";
+import { getTextDirection, type Locale } from "@/i18n/config";
 
 interface RoleInfo {
   code: string;
@@ -63,6 +68,10 @@ interface UserItem {
 }
 
 export function UserManagement() {
+  const t = useTranslations("admin.users");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+  const isRtl = dir === "rtl";
   const { data: session } = useSession();
   const canSetPermissions = sessionHasPermission(session, "user.set_permissions");
 
@@ -122,14 +131,12 @@ export function UserManagement() {
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-bold tracking-tight">إدارة المستخدمين</h1>
-          <p className="text-sm text-muted-foreground">
-            إنشاء وتعديل وإدارة حسابات المستخدمين
-          </p>
+          <h1 className="text-xl font-bold tracking-tight">{t("title")}</h1>
+          <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
         </div>
         <Button onClick={() => setCreateOpen(true)} size="sm">
-          <Plus className="ml-1.5 h-4 w-4" />
-          مستخدم جديد
+          <Plus className="h-4 w-4" />
+          {t("newUser")}
         </Button>
       </div>
 
@@ -139,15 +146,15 @@ export function UserManagement() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div className="flex-1">
               <div className="relative">
-                <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Search className="absolute end-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="بحث بالاسم أو اسم المستخدم..."
+                  placeholder={t("searchPlaceholder")}
                   value={search}
                   onChange={(e) => {
                     setSearch(e.target.value);
                     setPage(1);
                   }}
-                  className="pr-9"
+                  className="pe-9"
                 />
               </div>
             </div>
@@ -159,10 +166,10 @@ export function UserManagement() {
               }}
             >
               <SelectTrigger className="w-full sm:w-[180px]">
-                <SelectValue placeholder="الدور" />
+                <SelectValue placeholder={t("role")} />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">جميع الأدوار</SelectItem>
+              <SelectContent dir={dir}>
+                <SelectItem value="all">{t("allRoles")}</SelectItem>
                 {roles.map((r) => (
                   <SelectItem key={r.code} value={r.code}>
                     {r.displayName}
@@ -178,12 +185,12 @@ export function UserManagement() {
               }}
             >
               <SelectTrigger className="w-full sm:w-[140px]">
-                <SelectValue placeholder="الحالة" />
+                <SelectValue placeholder={t("status")} />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">الكل</SelectItem>
-                <SelectItem value="true">نشط</SelectItem>
-                <SelectItem value="false">معطّل</SelectItem>
+              <SelectContent dir={dir}>
+                <SelectItem value="all">{t("all")}</SelectItem>
+                <SelectItem value="true">{t("active")}</SelectItem>
+                <SelectItem value="false">{t("inactive")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -196,12 +203,12 @@ export function UserManagement() {
           <Table className="min-w-[700px]">
             <TableHeader>
               <TableRow>
-                <TableHead className="text-right">اسم المستخدم</TableHead>
-                <TableHead className="text-right">الاسم الكامل</TableHead>
-                <TableHead className="text-right">الدور</TableHead>
-                <TableHead className="text-right">الحالة</TableHead>
-                <TableHead className="text-right">تاريخ الإنشاء</TableHead>
-                <TableHead className="text-right">الإجراءات</TableHead>
+                <TableHead className="text-start">{t("colUsername")}</TableHead>
+                <TableHead className="text-start">{t("colFullName")}</TableHead>
+                <TableHead className="text-start">{t("colRole")}</TableHead>
+                <TableHead className="text-start">{t("colStatus")}</TableHead>
+                <TableHead className="text-start">{t("colCreatedAt")}</TableHead>
+                <TableHead className="text-start">{t("colActions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -218,7 +225,7 @@ export function UserManagement() {
               ) : users.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                    لا يوجد مستخدمون
+                    {t("empty")}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -232,10 +239,10 @@ export function UserManagement() {
                     <TableCell>
                       {user.isActive ? (
                         <Badge className="bg-emerald-500/15 text-emerald-700 border-emerald-500/25">
-                          نشط
+                          {t("active")}
                         </Badge>
                       ) : (
-                        <Badge variant="destructive">معطّل</Badge>
+                        <Badge variant="destructive">{t("inactive")}</Badge>
                       )}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
@@ -250,8 +257,8 @@ export function UserManagement() {
                             className="h-8 w-8"
                             title={
                               user.roleCode === "admin"
-                                ? "صلاحيات المدير ثابتة"
-                                : "الصلاحيات"
+                                ? t("tooltipAdminPermissionsFixed")
+                                : t("tooltipPermissions")
                             }
                             onClick={() => setPermissionsUser(user)}
                           >
@@ -262,7 +269,7 @@ export function UserManagement() {
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8"
-                          title="تعديل"
+                          title={t("tooltipEdit")}
                           onClick={() => setEditUser(user)}
                         >
                           <Pencil className="h-3.5 w-3.5" />
@@ -271,7 +278,7 @@ export function UserManagement() {
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8"
-                          title="إعادة تعيين كلمة المرور"
+                          title={t("tooltipResetPassword")}
                           onClick={() => setResetPwUser(user)}
                         >
                           <KeyRound className="h-3.5 w-3.5" />
@@ -280,7 +287,11 @@ export function UserManagement() {
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8"
-                          title={user.isActive ? "تعطيل" : "تفعيل"}
+                          title={
+                            user.isActive
+                              ? t("tooltipDeactivate")
+                              : t("tooltipActivate")
+                          }
                           onClick={() => void toggleActive(user)}
                         >
                           {user.isActive ? (
@@ -301,7 +312,7 @@ export function UserManagement() {
         {totalPages > 1 && (
           <div className="flex items-center justify-between border-t px-4 py-3">
             <span className="text-sm text-muted-foreground">
-              {total} مستخدم
+              {t("userCount", { total: formatInteger(total) })}
             </span>
             <div className="flex items-center gap-2">
               <Button
@@ -309,19 +320,32 @@ export function UserManagement() {
                 size="sm"
                 disabled={page <= 1}
                 onClick={() => setPage((p) => p - 1)}
+                aria-label={t("previous")}
               >
-                السابق
+                {isRtl ? (
+                  <ChevronRight className="h-4 w-4" />
+                ) : (
+                  <ChevronLeft className="h-4 w-4" />
+                )}
               </Button>
               <span className="text-sm">
-                {page} / {totalPages}
+                {t("pageOf", {
+                  page: formatInteger(page),
+                  totalPages: formatInteger(totalPages),
+                })}
               </span>
               <Button
                 variant="outline"
                 size="sm"
                 disabled={page >= totalPages}
                 onClick={() => setPage((p) => p + 1)}
+                aria-label={t("next")}
               >
-                التالي
+                {isRtl ? (
+                  <ChevronLeft className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
               </Button>
             </div>
           </div>
@@ -387,8 +411,16 @@ export function UserManagement() {
   );
 
   async function toggleActive(user: UserItem) {
-    const action = user.isActive ? "تعطيل" : "تفعيل";
-    if (!confirm(`هل أنت متأكد من ${action} حساب "${user.fullName}"؟`)) return;
+    const action = user.isActive
+      ? t("actionDeactivate")
+      : t("actionActivate");
+    if (
+      !confirm(
+        t("confirmToggle", { action, name: user.fullName }),
+      )
+    ) {
+      return;
+    }
 
     try {
       const res = await fetch(`/api/admin/users/${user.id}`, {
@@ -398,13 +430,15 @@ export function UserManagement() {
       });
       const json = await res.json();
       if (json.success) {
-        toast.success(`تم ${action} الحساب بنجاح`);
+        toast.success(
+          user.isActive ? t("toastDeactivated") : t("toastActivated"),
+        );
         void fetchUsers();
       } else {
-        toast.error(json.error || "حدث خطأ");
+        toast.error(json.error || t("errorGeneric"));
       }
     } catch {
-      toast.error("حدث خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     }
   }
 }
@@ -422,6 +456,9 @@ function CreateUserDialog({
   roles: RoleInfo[];
   onSuccess: () => void;
 }) {
+  const t = useTranslations("admin.users");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
   const [username, setUsername] = useState("");
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
@@ -446,14 +483,14 @@ function CreateUserDialog({
       });
       const json = await res.json();
       if (json.success) {
-        toast.success("تم إنشاء المستخدم بنجاح");
+        toast.success(t("toastCreated"));
         reset();
         onSuccess();
       } else {
-        toast.error(json.error || "حدث خطأ");
+        toast.error(json.error || t("errorGeneric"));
       }
     } catch {
-      toast.error("حدث خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setSaving(false);
     }
@@ -467,35 +504,35 @@ function CreateUserDialog({
         onOpenChange(v);
       }}
     >
-      <DialogContent className="sm:max-w-md" dir="rtl">
+      <DialogContent className="sm:max-w-md" dir={dir}>
         <DialogHeader>
-          <DialogTitle>مستخدم جديد</DialogTitle>
-          <DialogDescription>أدخل بيانات المستخدم الجديد</DialogDescription>
+          <DialogTitle>{t("createTitle")}</DialogTitle>
+          <DialogDescription>{t("createDescription")}</DialogDescription>
         </DialogHeader>
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
           <div className="space-y-2">
-            <Label>اسم المستخدم (إنجليزي)</Label>
+            <Label>{t("usernameLabel")}</Label>
             <Input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="username"
+              placeholder={t("usernamePlaceholder")}
               dir="ltr"
               required
               minLength={3}
             />
           </div>
           <div className="space-y-2">
-            <Label>الاسم الكامل</Label>
+            <Label>{t("fullName")}</Label>
             <Input
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
-              placeholder="الاسم الكامل"
+              placeholder={t("fullNamePlaceholder")}
               required
               minLength={2}
             />
           </div>
           <div className="space-y-2">
-            <Label>كلمة المرور</Label>
+            <Label>{t("password")}</Label>
             <Input
               type="password"
               value={password}
@@ -507,16 +544,16 @@ function CreateUserDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label>الدور</Label>
+            <Label>{t("role")}</Label>
             <Select
               value={roleCode}
               onValueChange={(v) => setRoleCode(v ?? "")}
               required
             >
               <SelectTrigger>
-                <SelectValue placeholder="اختر الدور" />
+                <SelectValue placeholder={t("selectRole")} />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent dir={dir}>
                 {roles.map((r) => (
                   <SelectItem key={r.code} value={r.code}>
                     {r.displayName}
@@ -527,8 +564,8 @@ function CreateUserDialog({
           </div>
           <DialogFooter>
             <Button type="submit" disabled={saving || !roleCode}>
-              {saving && <Loader2 className="ml-1.5 h-4 w-4 animate-spin" />}
-              إنشاء
+              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+              {t("create")}
             </Button>
           </DialogFooter>
         </form>
@@ -552,6 +589,9 @@ function EditUserDialog({
   roles: RoleInfo[];
   onSuccess: () => void;
 }) {
+  const t = useTranslations("admin.users");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
   const [fullName, setFullName] = useState(user.fullName);
   const [roleCode, setRoleCode] = useState(user.roleCode);
   const [saving, setSaving] = useState(false);
@@ -567,13 +607,13 @@ function EditUserDialog({
       });
       const json = await res.json();
       if (json.success) {
-        toast.success("تم تحديث المستخدم بنجاح");
+        toast.success(t("toastUpdated"));
         onSuccess();
       } else {
-        toast.error(json.error || "حدث خطأ");
+        toast.error(json.error || t("errorGeneric"));
       }
     } catch {
-      toast.error("حدث خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setSaving(false);
     }
@@ -581,14 +621,14 @@ function EditUserDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md" dir="rtl">
+      <DialogContent className="sm:max-w-md" dir={dir}>
         <DialogHeader>
-          <DialogTitle>تعديل المستخدم: {user.username}</DialogTitle>
-          <DialogDescription>عدّل بيانات المستخدم</DialogDescription>
+          <DialogTitle>{t("editTitle", { username: user.username })}</DialogTitle>
+          <DialogDescription>{t("editDescription")}</DialogDescription>
         </DialogHeader>
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
           <div className="space-y-2">
-            <Label>الاسم الكامل</Label>
+            <Label>{t("fullName")}</Label>
             <Input
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
@@ -597,7 +637,7 @@ function EditUserDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label>الدور</Label>
+            <Label>{t("role")}</Label>
             <Select
               value={roleCode}
               onValueChange={(v) => setRoleCode(v ?? user.roleCode)}
@@ -605,7 +645,7 @@ function EditUserDialog({
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent dir={dir}>
                 {roles.map((r) => (
                   <SelectItem key={r.code} value={r.code}>
                     {r.displayName}
@@ -616,8 +656,8 @@ function EditUserDialog({
           </div>
           <DialogFooter>
             <Button type="submit" disabled={saving}>
-              {saving && <Loader2 className="ml-1.5 h-4 w-4 animate-spin" />}
-              حفظ
+              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+              {t("save")}
             </Button>
           </DialogFooter>
         </form>
@@ -639,6 +679,9 @@ function ResetPasswordDialog({
   onOpenChange: (v: boolean) => void;
   onSuccess: () => void;
 }) {
+  const t = useTranslations("admin.users");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
   const [newPassword, setNewPassword] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -653,14 +696,14 @@ function ResetPasswordDialog({
       });
       const json = await res.json();
       if (json.success) {
-        toast.success(`تم تغيير كلمة مرور "${user.fullName}" بنجاح`);
+        toast.success(t("toastPasswordChanged", { fullName: user.fullName }));
         setNewPassword("");
         onSuccess();
       } else {
-        toast.error(json.error || "حدث خطأ");
+        toast.error(json.error || t("errorGeneric"));
       }
     } catch {
-      toast.error("حدث خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setSaving(false);
     }
@@ -674,16 +717,19 @@ function ResetPasswordDialog({
         onOpenChange(v);
       }}
     >
-      <DialogContent className="sm:max-w-md" dir="rtl">
+      <DialogContent className="sm:max-w-md" dir={dir}>
         <DialogHeader>
-          <DialogTitle>إعادة تعيين كلمة المرور</DialogTitle>
+          <DialogTitle>{t("resetPasswordTitle")}</DialogTitle>
           <DialogDescription>
-            تغيير كلمة مرور المستخدم: {user.fullName} ({user.username})
+            {t("resetPasswordDescription", {
+              fullName: user.fullName,
+              username: user.username,
+            })}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
           <div className="space-y-2">
-            <Label>كلمة المرور الجديدة</Label>
+            <Label>{t("newPassword")}</Label>
             <Input
               type="password"
               value={newPassword}
@@ -696,8 +742,8 @@ function ResetPasswordDialog({
           </div>
           <DialogFooter>
             <Button type="submit" disabled={saving || newPassword.length < 6}>
-              {saving && <Loader2 className="ml-1.5 h-4 w-4 animate-spin" />}
-              تغيير كلمة المرور
+              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+              {t("changePassword")}
             </Button>
           </DialogFooter>
         </form>

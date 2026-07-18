@@ -1,145 +1,50 @@
 /**
- * Human-readable Arabic formatter for AuditLog `details` JSON.
+ * Human-readable formatter for AuditLog `details` JSON.
  *
  * The audit log stores arbitrary JSON shapes per operation. This formatter
- * walks the structure dynamically and produces a single Arabic sentence
- * that managers can read at a glance, without requiring code updates for
- * every new event type. Unknown keys are still surfaced (humanized) so
+ * walks the structure dynamically and produces a single sentence that
+ * managers can read at a glance, without requiring code updates for every
+ * new event type. Unknown keys are still surfaced (humanized) so
  * information is never lost.
  *
- * Contract: `formatAuditDetails(action, details) => string`
+ * Contract: `formatAuditDetails(action, details, locale?) => string`
+ *   - `locale` defaults to `"ar"` for backward compatibility.
  *   - `details` can be a JS object, an array, a JSON-encoded string,
  *     a plain string, null or undefined.
  *   - On invalid JSON or unsupported value, falls back to a readable
  *     textual representation (original string or JSON.stringify).
  */
 
+import { createTranslator } from "next-intl";
+import { DEFAULT_LOCALE, isLocale, type Locale } from "@/i18n/config";
+import { formatDecimal, formatInteger } from "@/lib/number-format";
+import arMessages from "../../messages/ar.json";
+import enMessages from "../../messages/en.json";
+
 type JsonObject = Record<string, unknown>;
 
-const arabicInteger = new Intl.NumberFormat("ar-EG", {
-  maximumFractionDigits: 0,
-});
+/** Minimal translator surface used by this formatter (avoids IntlMessages generics). */
+interface MessageT {
+  (key: string, values?: Record<string, string | number | Date>): string;
+  has(key: string): boolean;
+}
 
-const arabicDecimal = new Intl.NumberFormat("ar-EG", {
-  maximumFractionDigits: 3,
-});
+const catalogs = {
+  ar: arMessages,
+  en: enMessages,
+} as const;
 
-const EVENT_LABELS: Record<string, string> = {
-  truck_registered: "تم تسجيل الشاحنة",
-  tare_recorded: "تم تسجيل وزن التار",
-  gross_recorded: "تم تسجيل الوزن الإجمالي",
-  round_weighed_return: "وزنة خارجية ورجوع للتحميل (دورة جديدة)",
-  gross_correction: "تصحيح وزنة خارجية",
-  completed_grade_corrected: "تصحيح إداري: نخب دورة لشاحنة مكتملة",
-  completed_tare_corrected: "تصحيح إداري: وزن الفارغ لشاحنة مكتملة",
-  completed_external_card_corrected: "تصحيح إداري: رقم كرت القبان لشاحنة مكتملة",
-  completed_external_corrected: "تصحيح إداري: وزنة خارجية لشاحنة مكتملة",
-  completed_session_added: "تصحيح إداري: إضافة وزنة داخلية لشاحنة مكتملة",
-  completed_session_edited: "تصحيح إداري: تعديل وزنة داخلية لشاحنة مكتملة",
-  completed_session_deleted: "تصحيح إداري: حذف وزنة داخلية لشاحنة مكتملة",
-  loading_confirmed: "تم تأكيد التحميل",
-  loading_reopened: "تم إعادة فتح التحميل",
-  session_reopened: "تم إعادة فتح التحميل قبل الوزن",
-  session_cancelled: "تم إلغاء العملية",
-  cancelled: "تم الإلغاء",
-  approved: "تمت الموافقة",
-  rejected: "تم الرفض",
-  password_reset: "إعادة تعيين كلمة المرور",
-};
+function resolveLocale(locale?: string): Locale {
+  return isLocale(locale) ? locale : DEFAULT_LOCALE;
+}
 
-const STATUS_LABELS: Record<string, string> = {
-  Queued: "في الانتظار",
-  Approved: "موافق عليها",
-  FirstWeigh: "الوزن الأول",
-  SecondWeigh: "الوزن الثاني",
-  LoadingComplete: "اكتمل التحميل",
-  Completed: "اكتملت",
-  Cancelled: "ملغاة",
-  draft: "مسودة",
-  approved: "موافق عليه",
-  in_progress: "قيد التنفيذ",
-  completed: "مكتمل",
-  cancelled: "ملغى",
-  pending: "قيد الانتظار",
-  partial: "جزئي",
-};
-
-const GRADE_VALUE_LABELS: Record<string, string> = {
-  FIRST: "نخب أول",
-  SECOND: "نخب ثاني",
-};
-
-const ACTION_LABELS: Record<string, string> = {
-  create: "إنشاء",
-  update: "تعديل",
-  status_change: "تغيير حالة",
-  upload: "رفع ملف",
-  delete: "حذف",
-};
-
-const FIELD_LABELS: Record<string, string> = {
-  tareWeightKg: "وزن التار",
-  grossWeightKg: "الوزن الإجمالي",
-  bridgeNetKg: "صافي الميزان",
-  bridgeNetTons: "صافي الميزان (طن)",
-  internalTotalTons: "مجموع الوزنات الداخلية (طن)",
-  discrepancyKg: "فرق القبان والداخلي (كغ)",
-  discrepancyWarning: "تنبيه فرق الوزن",
-  discrepancyThresholdKg: "حد التنبيه (كغ)",
-  weightTons: "الوزن",
-  weightKg: "الوزن",
-  loaderId: "المحمّل",
-  truckId: "الشاحنة",
-  sizeId: "المقاس",
-  roundNumber: "دورة القبان",
-  nextRoundNumber: "الدورة التالية",
-  roundGrade: "نخب الدورة",
-  roundStartWeightKg: "وزن بداية الدورة",
-  roundEndWeightKg: "وزن نهاية الدورة",
-  roundNetKg: "صافي الدورة",
-  isFinalRound: "وزنة الخروج النهائي",
-  cascadedToNextRound: "انعكس على بداية الدورة التالية",
-  rounds: "الدورات",
-  grade: "النخب",
-  oldGrossWeightKg: "الوزن الإجمالي السابق",
-  newGrossWeightKg: "الوزن الإجمالي الجديد",
-  oldTareWeightKg: "وزن التار السابق",
-  newTareWeightKg: "وزن التار الجديد",
-  oldExternalCardNumber: "رقم كرت القبان السابق",
-  newExternalCardNumber: "رقم كرت القبان الجديد",
-  externalCardNumber: "رقم كرت القبان",
-  oldEndWeightKg: "وزن نهاية الدورة السابق",
-  newEndWeightKg: "وزن نهاية الدورة الجديد",
-  oldGrade: "النخب السابق",
-  newGrade: "النخب الجديد",
-  changes: "التعديلات",
-  deleted: "الوزنة المحذوفة",
-  bundleCount: "عدد الربطات",
-  expectedVersion: "الإصدار المتوقّع",
-  sessionCount: "عدد الوزنات",
-  photoCount: "عدد الصور",
-  customerId: "الزبون",
-  contractId: "العقد",
-  salesOrderId: "أمر البيع",
-  orderId: "أمر البيع",
-  userId: "المستخدم",
-  sessionNumber: "جلسة الوزن",
-  reason: "السبب",
-  fullName: "الاسم",
-  nationalId: "الرقم الوطني",
-  phoneNumber: "رقم الهاتف",
-  fileName: "اسم الملف",
-  fileSize: "حجم الملف",
-  filePath: "الملف",
-  notes: "ملاحظات",
-  status: "الحالة",
-  from: "من",
-  to: "إلى",
-  event: "الحدث",
-  action: "الإجراء",
-  previousValue: "القيمة السابقة",
-  newValue: "القيمة الجديدة",
-};
+function getTranslators(locale: Locale): { t: MessageT; tEnums: MessageT } {
+  const messages = catalogs[locale];
+  return {
+    t: createTranslator({ locale, messages, namespace: "audit" }) as MessageT,
+    tEnums: createTranslator({ locale, messages, namespace: "enums" }) as MessageT,
+  };
+}
 
 function isPlainObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -162,16 +67,20 @@ function humanizeKey(key: string): string {
     .toLowerCase();
 }
 
-function labelFor(key: string): string {
-  return FIELD_LABELS[key] ?? humanizeKey(key);
+function labelFor(key: string, t: MessageT): string {
+  const fieldKey = `details.fields.${key}`;
+  return t.has(fieldKey) ? t(fieldKey) : humanizeKey(key);
 }
 
-function safeParse(details: unknown): { value: unknown; raw: string } {
-  if (details == null) return { value: null, raw: "—" };
+function safeParse(
+  details: unknown,
+  emDash: string,
+): { value: unknown; raw: string } {
+  if (details == null) return { value: null, raw: emDash };
 
   if (typeof details === "string") {
     const trimmed = details.trim();
-    if (trimmed === "") return { value: null, raw: "—" };
+    if (trimmed === "") return { value: null, raw: emDash };
     if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
       try {
         return { value: JSON.parse(trimmed), raw: trimmed };
@@ -185,14 +94,22 @@ function safeParse(details: unknown): { value: unknown; raw: string } {
   try {
     return { value: details, raw: JSON.stringify(details) };
   } catch {
-    return { value: details, raw: "—" };
+    return { value: details, raw: emDash };
   }
 }
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${arabicInteger.format(bytes)} بايت`;
-  if (bytes < 1024 * 1024) return `${arabicDecimal.format(bytes / 1024)} ك.ب`;
-  return `${arabicDecimal.format(bytes / 1024 / 1024)} م.ب`;
+function formatFileSize(bytes: number, t: MessageT): string {
+  if (bytes < 1024) {
+    return t("details.fileSizeBytes", { value: formatInteger(bytes) });
+  }
+  if (bytes < 1024 * 1024) {
+    return t("details.fileSizeKb", {
+      value: formatDecimal(bytes / 1024, 3),
+    });
+  }
+  return t("details.fileSizeMb", {
+    value: formatDecimal(bytes / 1024 / 1024, 3),
+  });
 }
 
 function formatPathTail(value: string): string {
@@ -200,22 +117,61 @@ function formatPathTail(value: string): string {
   return tail && tail.length > 0 ? tail : value;
 }
 
+function statusLabel(value: string, t: MessageT, tEnums: MessageT): string {
+  const truckKey = `truckStatus.${value}`;
+  if (tEnums.has(truckKey)) return tEnums(truckKey);
+
+  const orderKey = `salesOrderStatus.${value}`;
+  if (tEnums.has(orderKey)) return tEnums(orderKey);
+
+  const auditKey = `details.statuses.${value}`;
+  if (t.has(auditKey)) return t(auditKey);
+
+  return value;
+}
+
+function gradeLabel(value: string, tEnums: MessageT): string {
+  const key = `grade.${value}`;
+  return tEnums.has(key) ? tEnums(key) : value;
+}
+
+function eventLabel(value: string, t: MessageT): string {
+  const key = `details.events.${value}`;
+  return t.has(key) ? t(key) : humanizeKey(value);
+}
+
+function actionLabel(action: string, t: MessageT): string {
+  const key = `actions.${action}`;
+  return t.has(key) ? t(key) : action;
+}
+
 /** Format one leaf value, choosing units/format from the key name. */
-function formatScalar(key: string, value: unknown): string {
-  if (value == null) return "—";
-  if (typeof value === "boolean") return value ? "نعم" : "لا";
+function formatScalar(
+  key: string,
+  value: unknown,
+  t: MessageT,
+  tEnums: MessageT,
+): string {
+  if (value == null) return t("details.emDash");
+  if (typeof value === "boolean") {
+    return value ? t("details.yes") : t("details.no");
+  }
 
   if (/Kg$/.test(key)) {
     const n = asNumber(value);
-    if (n !== null) return `${arabicInteger.format(n)} كغ`;
+    if (n !== null) {
+      return t("details.kgValue", { value: formatInteger(n) });
+    }
   }
   if (/Tons?$/i.test(key)) {
     const n = asNumber(value);
-    if (n !== null) return `${arabicDecimal.format(n)} طن`;
+    if (n !== null) {
+      return t("details.tonsValue", { value: formatDecimal(n, 3) });
+    }
   }
   if (key === "fileSize") {
     const n = asNumber(value);
-    if (n !== null) return formatFileSize(n);
+    if (n !== null) return formatFileSize(n, t);
   }
 
   // Numeric reference fields (loaderId, truckId, sessionNumber, …).
@@ -226,22 +182,22 @@ function formatScalar(key: string, value: unknown): string {
     typeof value === "number" &&
     Number.isFinite(value)
   ) {
-    return `#${arabicInteger.format(value)}`;
+    return t("details.idRef", { id: formatInteger(value) });
   }
 
   if (typeof value === "number" && Number.isFinite(value)) {
-    return arabicDecimal.format(value);
+    return formatDecimal(value, 3);
   }
 
   if (typeof value === "string") {
     if (key === "status" || key === "from" || key === "to") {
-      return STATUS_LABELS[value] ?? value;
+      return statusLabel(value, t, tEnums);
     }
     if (key === "event" || key === "action") {
-      return EVENT_LABELS[value] ?? humanizeKey(value);
+      return eventLabel(value, t);
     }
     if (key === "grade" || key === "roundGrade" || key === "operationalGrade") {
-      return GRADE_VALUE_LABELS[value] ?? value;
+      return gradeLabel(value, tEnums);
     }
     if (key === "filePath" || key === "path") {
       return formatPathTail(value);
@@ -258,18 +214,25 @@ function formatScalar(key: string, value: unknown): string {
 
 interface RenderContext {
   consumed: Set<string>;
+  t: MessageT;
+  tEnums: MessageT;
 }
 
-/** Walk an object and produce Arabic "label: value" fragments. */
+/** Walk an object and produce "label: value" fragments. */
 function renderObject(obj: JsonObject, ctx: RenderContext): string[] {
+  const { t, tEnums } = ctx;
   const fragments: string[] = [];
+  const listSep = t("details.listSep");
 
   if ("bridgeNetKg" in obj && "bridgeNetTons" in obj) {
     const kg = asNumber(obj.bridgeNetKg);
     const tons = asNumber(obj.bridgeNetTons);
     if (kg !== null && tons !== null) {
       fragments.push(
-        `صافي الميزان: ${arabicInteger.format(kg)} كغ (${arabicDecimal.format(tons)} طن)`,
+        t("details.bridgeNetCombined", {
+          kg: formatInteger(kg),
+          tons: formatDecimal(tons, 3),
+        }),
       );
       ctx.consumed.add("bridgeNetKg");
       ctx.consumed.add("bridgeNetTons");
@@ -280,13 +243,18 @@ function renderObject(obj: JsonObject, ctx: RenderContext): string[] {
     if (ctx.consumed.has(key)) continue;
     if (value == null) continue;
 
-    if ((key === "newValue" || key === "previousValue" || key === "oldValue") && isPlainObject(value)) {
+    if (
+      (key === "newValue" || key === "previousValue" || key === "oldValue") &&
+      isPlainObject(value)
+    ) {
       const nested = renderObject(value, ctx);
       if (nested.length === 0) continue;
       if (key === "newValue") {
         fragments.push(...nested);
       } else {
-        fragments.push(`القيمة السابقة (${nested.join("، ")})`);
+        fragments.push(
+          t("details.previousValueWrapped", { value: nested.join(listSep) }),
+        );
       }
       continue;
     }
@@ -294,46 +262,66 @@ function renderObject(obj: JsonObject, ctx: RenderContext): string[] {
     if (isPlainObject(value)) {
       const nested = renderObject(value, ctx);
       if (nested.length > 0) {
-        fragments.push(`${labelFor(key)}: { ${nested.join("، ")} }`);
+        fragments.push(
+          t("details.fieldValue", {
+            label: labelFor(key, t),
+            value: `{ ${nested.join(listSep)} }`,
+          }),
+        );
       }
       continue;
     }
 
     if (Array.isArray(value)) {
       if (value.length === 0) continue;
+      const arraySep = t("details.arraySep");
       const items = value.map((item) =>
         isPlainObject(item)
-          ? `{ ${renderObject(item, ctx).join("، ")} }`
-          : formatScalar(key, item),
+          ? `{ ${renderObject(item, ctx).join(listSep)} }`
+          : formatScalar(key, item, t, tEnums),
       );
-      fragments.push(`${labelFor(key)}: [${items.join(", ")}]`);
+      fragments.push(
+        t("details.fieldValue", {
+          label: labelFor(key, t),
+          value: `[${items.join(arraySep)}]`,
+        }),
+      );
       continue;
     }
 
-    fragments.push(`${labelFor(key)}: ${formatScalar(key, value)}`);
+    fragments.push(
+      t("details.fieldValue", {
+        label: labelFor(key, t),
+        value: formatScalar(key, value, t, tEnums),
+      }),
+    );
   }
 
   return fragments;
 }
 
-function statusLabel(value: string): string {
-  return STATUS_LABELS[value] ?? value;
-}
-
-export function formatAuditDetails(action: string, details: unknown): string {
-  const { value, raw } = safeParse(details);
+export function formatAuditDetails(
+  action: string,
+  details: unknown,
+  locale: string = DEFAULT_LOCALE,
+): string {
+  const resolved = resolveLocale(locale);
+  const { t, tEnums } = getTranslators(resolved);
+  const emDash = t("details.emDash");
+  const { value, raw } = safeParse(details, emDash);
 
   if (value === null || value === undefined) return raw;
   if (typeof value === "string") return value;
   if (!isPlainObject(value)) return raw;
 
-  const ctx: RenderContext = { consumed: new Set() };
+  const ctx: RenderContext = { consumed: new Set(), t, tEnums };
+  const listSep = t("details.listSep");
 
   // ── Composite patterns (single-sentence shortcuts) ───────────────────
   const topTruckId = asNumber(value.truckId);
   const topFilePath = typeof value.filePath === "string" ? value.filePath : null;
   if (topFilePath && topTruckId !== null && /uploads[\\/]+trucks/i.test(topFilePath)) {
-    return `تم رفع صورة للشاحنة #${arabicInteger.format(topTruckId)}`;
+    return t("details.photoUploaded", { truckId: formatInteger(topTruckId) });
   }
 
   const topSessionNumber = asNumber(value.sessionNumber);
@@ -342,40 +330,55 @@ export function formatAuditDetails(action: string, details: unknown): string {
     ctx.consumed.add("sessionNumber");
     ctx.consumed.add("truckId");
     ctx.consumed.add("weightTons");
-    const head = `إنشاء جلسة وزن #${arabicInteger.format(topSessionNumber)} للشاحنة #${arabicInteger.format(topTruckId)} — الوزن: ${arabicDecimal.format(topWeightTons)} طن`;
+    const head = t("details.sessionCreated", {
+      sessionNumber: formatInteger(topSessionNumber),
+      truckId: formatInteger(topTruckId),
+      weight: formatDecimal(topWeightTons, 3),
+    });
     const extras = renderObject(value, ctx);
-    return extras.length > 0 ? `${head}، ${extras.join("، ")}` : head;
+    return extras.length > 0 ? `${head}${listSep}${extras.join(listSep)}` : head;
   }
 
   // ── Headline: event → status transition → action ─────────────────────
   const headlineParts: string[] = [];
 
   if (typeof value.event === "string") {
-    headlineParts.push(EVENT_LABELS[value.event] ?? humanizeKey(value.event));
+    headlineParts.push(eventLabel(value.event, t));
     ctx.consumed.add("event");
-  } else if (typeof value.action === "string" && EVENT_LABELS[value.action]) {
-    headlineParts.push(EVENT_LABELS[value.action]);
+  } else if (typeof value.action === "string" && t.has(`details.events.${value.action}`)) {
+    headlineParts.push(eventLabel(value.action, t));
     ctx.consumed.add("action");
   }
 
   const fromStatus = typeof value.from === "string" ? value.from : null;
   const toStatus = typeof value.to === "string" ? value.to : null;
   if (fromStatus && toStatus) {
-    const phrase = `من ${statusLabel(fromStatus)} إلى ${statusLabel(toStatus)}`;
-    headlineParts.push(headlineParts.length === 0 ? `تغيير الحالة ${phrase}` : `(${phrase})`);
+    const phrase = t("details.statusFromTo", {
+      from: statusLabel(fromStatus, t, tEnums),
+      to: statusLabel(toStatus, t, tEnums),
+    });
+    headlineParts.push(
+      headlineParts.length === 0
+        ? t("details.statusChangeWithPhrase", { phrase })
+        : t("details.statusChangeParen", { phrase }),
+    );
     ctx.consumed.add("from");
     ctx.consumed.add("to");
   } else if (toStatus && !fromStatus) {
-    const t = statusLabel(toStatus);
-    headlineParts.push(headlineParts.length === 0 ? `تغيير الحالة إلى ${t}` : `(إلى ${t})`);
+    const to = statusLabel(toStatus, t, tEnums);
+    headlineParts.push(
+      headlineParts.length === 0
+        ? t("details.statusChangeTo", { to })
+        : t("details.statusChangeToParen", { to }),
+    );
     ctx.consumed.add("to");
   }
 
   if (headlineParts.length === 0) {
-    headlineParts.push(ACTION_LABELS[action] ?? action);
+    headlineParts.push(actionLabel(action, t));
   }
 
   const body = renderObject(value, ctx);
   if (body.length === 0) return headlineParts.join(" ");
-  return `${headlineParts.join(" ")} — ${body.join("، ")}`;
+  return `${headlineParts.join(" ")}${t("details.headlineBodySep")}${body.join(listSep)}`;
 }
