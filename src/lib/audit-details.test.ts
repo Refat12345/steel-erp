@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { formatAuditDetails } from "./audit-details";
-
-const intFmt = new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 0 });
-const decFmt = new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 3 });
+import { formatDecimal, formatInteger } from "./number-format";
 
 describe("formatAuditDetails", () => {
   it("returns a placeholder for null/undefined", () => {
@@ -23,7 +21,7 @@ describe("formatAuditDetails", () => {
   it("parses stringified JSON before formatting", () => {
     expect(
       formatAuditDetails("upload", '{"truckId":7,"filePath":"uploads/trucks/a.jpg"}'),
-    ).toBe(`تم رفع صورة للشاحنة #${intFmt.format(7)}`);
+    ).toBe(`تم رفع صورة للشاحنة #${formatInteger(7)}`);
   });
 
   it("describes tare-recorded events with the new weight and status", () => {
@@ -32,8 +30,8 @@ describe("formatAuditDetails", () => {
       newValue: { status: "FirstWeigh", tareWeightKg: 12499 },
     });
     expect(out).toContain("تم تسجيل وزن التار");
-    expect(out).toContain("الحالة: الوزن الأول");
-    expect(out).toContain(`وزن التار: ${intFmt.format(12499)} كغ`);
+    expect(out).toContain("الحالة: وزن أوّلي");
+    expect(out).toContain(`وزن التار: ${formatInteger(12499)} كغ`);
   });
 
   it("describes gross-recorded events with the loader id", () => {
@@ -42,7 +40,7 @@ describe("formatAuditDetails", () => {
       newValue: { status: "SecondWeigh", loaderId: 14 },
     });
     expect(out).toContain("تم تسجيل الوزن الإجمالي");
-    expect(out).toContain(`المحمّل: #${intFmt.format(14)}`);
+    expect(out).toContain(`المحمّل: #${formatInteger(14)}`);
   });
 
   it("describes loading-confirmed events", () => {
@@ -51,7 +49,7 @@ describe("formatAuditDetails", () => {
       newValue: { status: "LoadingComplete", loaderId: 1 },
     });
     expect(out).toContain("تم تأكيد التحميل");
-    expect(out).toContain(`المحمّل: #${intFmt.format(1)}`);
+    expect(out).toContain(`المحمّل: #${formatInteger(1)}`);
   });
 
   it("describes a round-weighed-return event with round details in Arabic", () => {
@@ -66,10 +64,10 @@ describe("formatAuditDetails", () => {
       },
     });
     expect(out).toContain("وزنة خارجية ورجوع للتحميل");
-    expect(out).toContain(`دورة القبان: #${intFmt.format(1)}`);
+    expect(out).toContain(`دورة القبان: #${formatInteger(1)}`);
     expect(out).toContain("نخب الدورة: نخب أول");
-    expect(out).toContain(`صافي الدورة: ${intFmt.format(15000)} كغ`);
-    expect(out).toContain(`الدورة التالية: #${intFmt.format(2)}`);
+    expect(out).toContain(`صافي الدورة: ${formatInteger(15000)} كغ`);
+    expect(out).toContain(`الدورة التالية: #${formatInteger(2)}`);
   });
 
   it("describes a gross correction with old/new weights and cascade flag", () => {
@@ -82,8 +80,8 @@ describe("formatAuditDetails", () => {
       newGrossWeightKg: 24700,
     });
     expect(out).toContain("تصحيح وزنة خارجية");
-    expect(out).toContain(`الوزن الإجمالي السابق: ${intFmt.format(25000)} كغ`);
-    expect(out).toContain(`الوزن الإجمالي الجديد: ${intFmt.format(24700)} كغ`);
+    expect(out).toContain(`الوزن الإجمالي السابق: ${formatInteger(25000)} كغ`);
+    expect(out).toContain(`الوزن الإجمالي الجديد: ${formatInteger(24700)} كغ`);
     expect(out).toContain("انعكس على بداية الدورة التالية: نعم");
     expect(out).toContain("وزنة الخروج النهائي: لا");
   });
@@ -122,10 +120,10 @@ describe("formatAuditDetails", () => {
       bridgeNetTons: 6.201,
     });
     expect(out).toContain("تغيير الحالة");
-    expect(out).toContain("الوزن الثاني");
-    expect(out).toContain("اكتملت");
+    expect(out).toContain("وزن ثاني");
+    expect(out).toContain("مكتملة");
     expect(out).toContain(
-      `صافي الميزان: ${intFmt.format(6201)} كغ (${decFmt.format(6.201)} طن)`,
+      `صافي الميزان: ${formatInteger(6201)} كغ (${formatDecimal(6.201, 3)} طن)`,
     );
   });
 
@@ -137,9 +135,9 @@ describe("formatAuditDetails", () => {
       sessionNumber: 1,
     });
     expect(out).toContain(
-      `إنشاء جلسة وزن #${intFmt.format(1)} للشاحنة #${intFmt.format(7)} — الوزن: ${decFmt.format(6.13)} طن`,
+      `إنشاء جلسة وزن #${formatInteger(1)} للشاحنة #${formatInteger(7)} — الوزن: ${formatDecimal(6.13, 3)} طن`,
     );
-    expect(out).toContain(`المقاس: #${intFmt.format(4)}`);
+    expect(out).toContain(`المقاس: #${formatInteger(4)}`);
   });
 
   it("surfaces unknown keys via humanized labels without losing data", () => {
@@ -162,7 +160,7 @@ describe("formatAuditDetails", () => {
     });
     expect(out).toContain("تغيير الحالة");
     expect(out).toContain("من مسودة");
-    expect(out).toContain("إلى موافق عليه");
+    expect(out).toContain("إلى معتمد");
     expect(out).toContain("السبب: اعتماد الإدارة");
   });
 
@@ -175,7 +173,75 @@ describe("formatAuditDetails", () => {
     });
     expect(out).toContain("تعديل");
     expect(out).toContain("items");
-    expect(out).toContain(`${decFmt.format(2.5)} طن`);
-    expect(out).toContain(`${decFmt.format(3.75)} طن`);
+    expect(out).toContain(`${formatDecimal(2.5, 3)} طن`);
+    expect(out).toContain(`${formatDecimal(3.75, 3)} طن`);
+  });
+
+  describe("English locale", () => {
+    it("formats status_change headlines and truck statuses", () => {
+      const out = formatAuditDetails(
+        "status_change",
+        {
+          to: "Completed",
+          from: "SecondWeigh",
+          bridgeNetKg: 6201,
+          bridgeNetTons: 6.201,
+        },
+        "en",
+      );
+      expect(out).toContain("Status change");
+      expect(out).toContain("Loaded weigh");
+      expect(out).toContain("Completed");
+      expect(out).toContain(
+        `Bridge net: ${formatInteger(6201)} kg (${formatDecimal(6.201, 3)} t)`,
+      );
+    });
+
+    it("formats create / weigh-session headlines", () => {
+      const out = formatAuditDetails(
+        "create",
+        {
+          sizeId: 4,
+          truckId: 7,
+          weightTons: 6.13,
+          sessionNumber: 1,
+        },
+        "en",
+      );
+      expect(out).toContain(
+        `Created weigh session #${formatInteger(1)} for truck #${formatInteger(7)} — weight: ${formatDecimal(6.13, 3)} t`,
+      );
+      expect(out).toContain(`Size: #${formatInteger(4)}`);
+    });
+
+    it("translates grade enum values", () => {
+      const out = formatAuditDetails("update", { grade: "SECOND" }, "en");
+      expect(out).toContain("Grade: Second grade");
+    });
+
+    it("translates event labels", () => {
+      const out = formatAuditDetails(
+        "status_change",
+        {
+          event: "tare_recorded",
+          newValue: { status: "FirstWeigh", tareWeightKg: 12499 },
+        },
+        "en",
+      );
+      expect(out).toContain("Tare weight recorded");
+      expect(out).toContain("Status: Empty weigh");
+      expect(out).toContain(`Tare weight: ${formatInteger(12499)} kg`);
+    });
+
+    it("translates action headlines for unknown-detail updates", () => {
+      const out = formatAuditDetails(
+        "update",
+        { fullName: "Ahmed", customCode: "ABC" },
+        "en",
+      );
+      expect(out).toContain("Update");
+      expect(out).toContain("Name: Ahmed");
+      expect(out).toContain("custom code: ABC");
+    });
   });
 });

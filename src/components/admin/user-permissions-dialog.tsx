@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Loader2, AlertTriangle, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,7 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getPermissionModuleLabel } from "@/lib/rbac-policy";
+import { getTextDirection, type Locale } from "@/i18n/config";
 import type {
   PermissionMatrixItem,
   PermissionSource,
@@ -53,17 +54,6 @@ interface UserPermissionsDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-function sourceLabel(source: PermissionSource): string {
-  switch (source) {
-    case "grant":
-      return "مخصص (إضافة)";
-    case "revoke":
-      return "ملغى";
-    default:
-      return "من الدور";
-  }
-}
-
 function sourceBadgeVariant(
   source: PermissionSource,
 ): "secondary" | "outline" | "destructive" {
@@ -82,6 +72,10 @@ export function UserPermissionsDialog({
   open,
   onOpenChange,
 }: UserPermissionsDialogProps) {
+  const t = useTranslations("admin.permissions");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+
   const [matrix, setMatrix] = useState<UserPermissionMatrix | null>(null);
   const [enabledByCode, setEnabledByCode] = useState<Map<string, boolean>>(new Map());
   const [initialEnabled, setInitialEnabled] = useState<Map<string, boolean>>(new Map());
@@ -94,6 +88,17 @@ export function UserPermissionsDialog({
   const [copyCandidates, setCopyCandidates] = useState<UserSummary[]>([]);
   const [copying, setCopying] = useState(false);
 
+  function sourceLabel(source: PermissionSource): string {
+    switch (source) {
+      case "grant":
+        return t("sourceGrant");
+      case "revoke":
+        return t("sourceRevoke");
+      default:
+        return t("sourceRole");
+    }
+  }
+
   const loadMatrix = useCallback(async () => {
     setLoading(true);
     try {
@@ -102,7 +107,7 @@ export function UserPermissionsDialog({
       });
       const json = await res.json();
       if (!json.success) {
-        toast.error(json.error || "تعذّر تحميل الصلاحيات");
+        toast.error(json.error || t("errorLoad"));
         return;
       }
       const data = json.data as UserPermissionMatrix;
@@ -114,11 +119,11 @@ export function UserPermissionsDialog({
       setEnabledByCode(new Map(map));
       setInitialEnabled(new Map(map));
     } catch {
-      toast.error("حدث خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setLoading(false);
     }
-  }, [user.id]);
+  }, [user.id, t]);
 
   useEffect(() => {
     if (open) void loadMatrix();
@@ -152,12 +157,15 @@ export function UserPermissionsDialog({
     }
     return order
       .filter((m) => byModule.has(m))
-      .map((m) => ({
-        module: m,
-        label: getPermissionModuleLabel(m),
-        items: byModule.get(m)!,
-      }));
-  }, [matrix]);
+      .map((m) => {
+        const key = `modules.${m}` as const;
+        return {
+          module: m,
+          label: t.has(key) ? t(key) : m,
+          items: byModule.get(m)!,
+        };
+      });
+  }, [matrix, t]);
 
   const dirty = useMemo(() => {
     if (enabledByCode.size !== initialEnabled.size) return true;
@@ -190,7 +198,7 @@ export function UserPermissionsDialog({
       });
       const json = await res.json();
       if (json.success) {
-        toast.success("تم حفظ الصلاحيات بنجاح");
+        toast.success(t("toastSaved"));
         const data = json.data as UserPermissionMatrix;
         setMatrix(data);
         setWarnings(json.warnings ?? data.warnings ?? []);
@@ -200,10 +208,10 @@ export function UserPermissionsDialog({
         setEnabledByCode(new Map(map));
         setInitialEnabled(new Map(map));
       } else {
-        toast.error(json.error || "حدث خطأ");
+        toast.error(json.error || t("errorGeneric"));
       }
     } catch {
-      toast.error("حدث خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setSaving(false);
     }
@@ -211,11 +219,7 @@ export function UserPermissionsDialog({
 
   async function handleReset() {
     if (!matrix || matrix.readOnly) return;
-    if (
-      !confirm(
-        `إعادة صلاحيات «${matrix.user.fullName}» إلى افتراضيات الدور؟ سيتم حذف كل التخصيصات.`,
-      )
-    ) {
+    if (!confirm(t("confirmReset", { name: matrix.user.fullName }))) {
       return;
     }
     setResetting(true);
@@ -225,7 +229,7 @@ export function UserPermissionsDialog({
       });
       const json = await res.json();
       if (json.success) {
-        toast.success("تمت إعادة الصلاحيات للافتراضي");
+        toast.success(t("toastReset"));
         const data = json.data as UserPermissionMatrix;
         setMatrix(data);
         setWarnings(json.warnings ?? data.warnings ?? []);
@@ -235,10 +239,10 @@ export function UserPermissionsDialog({
         setEnabledByCode(new Map(map));
         setInitialEnabled(new Map(map));
       } else {
-        toast.error(json.error || "حدث خطأ");
+        toast.error(json.error || t("errorGeneric"));
       }
     } catch {
-      toast.error("حدث خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setResetting(false);
     }
@@ -246,7 +250,7 @@ export function UserPermissionsDialog({
 
   async function handleCopy() {
     if (!copySourceId) {
-      toast.error("اختر مستخدماً للنسخ منه");
+      toast.error(t("errorSelectCopySource"));
       return;
     }
     setCopying(true);
@@ -258,7 +262,7 @@ export function UserPermissionsDialog({
       });
       const json = await res.json();
       if (json.success) {
-        toast.success("تم نسخ التخصيصات بنجاح");
+        toast.success(t("toastCopied"));
         setCopyOpen(false);
         setCopySourceId("");
         const data = json.data as UserPermissionMatrix;
@@ -270,10 +274,10 @@ export function UserPermissionsDialog({
         setEnabledByCode(new Map(map));
         setInitialEnabled(new Map(map));
       } else {
-        toast.error(json.error || "حدث خطأ");
+        toast.error(json.error || t("errorGeneric"));
       }
     } catch {
-      toast.error("حدث خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setCopying(false);
     }
@@ -283,18 +287,18 @@ export function UserPermissionsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="!flex max-h-[90dvh] min-h-0 flex-col gap-0 overflow-hidden p-0 sm:max-w-lg"
-        dir="rtl"
+        dir={dir}
       >
-        <DialogHeader className="shrink-0 border-b px-4 py-3 text-right">
+        <DialogHeader className="shrink-0 border-b px-4 py-3 text-start">
           <DialogTitle className="flex items-center gap-2">
             <Shield className="h-4 w-4" />
-            صلاحيات المستخدم
+            {t("title")}
           </DialogTitle>
-          <DialogDescription className="text-right">
+          <DialogDescription className="text-start">
             {user.fullName}{" "}
             <span className="font-mono text-xs">({user.username})</span>
             {matrix && (
-              <Badge variant="secondary" className="mr-2">
+              <Badge variant="secondary" className="ms-2">
                 {matrix.user.roleDisplayName}
               </Badge>
             )}
@@ -303,7 +307,7 @@ export function UserPermissionsDialog({
 
         {matrix?.readOnly && (
           <div className="mx-4 mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900">
-            صلاحيات المدير العام ثابتة ولا يمكن تعديلها.
+            {t("adminReadOnly")}
           </div>
         )}
 
@@ -311,9 +315,9 @@ export function UserPermissionsDialog({
           <div className="mx-4 mt-3 space-y-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900">
             <div className="flex items-center gap-1.5 font-medium">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-              تنبيهات
+              {t("warnings")}
             </div>
-            <ul className="list-disc space-y-0.5 pr-4">
+            <ul className="list-disc space-y-0.5 ps-4">
               {warnings.map((w) => (
                 <li key={w}>{w}</li>
               ))}
@@ -371,12 +375,12 @@ export function UserPermissionsDialog({
                               </Badge>
                               {p.reservedUnused && (
                                 <Badge variant="outline" className="text-[10px]">
-                                  محجوز
+                                  {t("reserved")}
                                 </Badge>
                               )}
                               {!p.editableByActor && !matrix?.readOnly && (
                                 <Badge variant="outline" className="text-[10px]">
-                                  خارج نطاقك
+                                  {t("outOfScope")}
                                 </Badge>
                               )}
                             </span>
@@ -395,15 +399,15 @@ export function UserPermissionsDialog({
           {!matrix?.readOnly && !loading && copyOpen && (
             <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-end">
               <div className="min-w-0 flex-1 space-y-1">
-                <Label className="text-xs">نسخ من</Label>
+                <Label className="text-xs">{t("copyFrom")}</Label>
                 <Select
                   value={copySourceId}
                   onValueChange={(v) => setCopySourceId(v ?? "")}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="اختر مستخدماً" />
+                    <SelectValue placeholder={t("selectUser")} />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent dir={dir}>
                     {copyCandidates.map((c) => (
                       <SelectItem key={c.id} value={String(c.id)}>
                         {c.fullName} ({c.username})
@@ -418,8 +422,8 @@ export function UserPermissionsDialog({
                 disabled={copying || !copySourceId}
                 onClick={() => void handleCopy()}
               >
-                {copying && <Loader2 className="ml-1 h-3 w-3 animate-spin" />}
-                نسخ
+                {copying && <Loader2 className="h-3 w-3 animate-spin" />}
+                {t("copy")}
               </Button>
               <Button
                 type="button"
@@ -430,7 +434,7 @@ export function UserPermissionsDialog({
                   setCopySourceId("");
                 }}
               >
-                إلغاء
+                {t("cancel")}
               </Button>
             </div>
           )}
@@ -445,8 +449,8 @@ export function UserPermissionsDialog({
                   disabled={resetting || saving}
                   onClick={() => void handleReset()}
                 >
-                  {resetting && <Loader2 className="ml-1.5 h-4 w-4 animate-spin" />}
-                  إعادة للافتراضي
+                  {resetting && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {t("resetToDefault")}
                 </Button>
                 {!copyOpen && (
                   <Button
@@ -455,14 +459,14 @@ export function UserPermissionsDialog({
                     size="sm"
                     onClick={() => setCopyOpen(true)}
                   >
-                    نسخ التخصيصات من مستخدم آخر
+                    {t("copyFromOther")}
                   </Button>
                 )}
               </div>
             )}
             <div className="flex w-full gap-2 sm:ms-auto sm:w-auto">
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-                إغلاق
+                {t("close")}
               </Button>
               {!matrix?.readOnly && (
                 <Button
@@ -470,8 +474,8 @@ export function UserPermissionsDialog({
                   disabled={!dirty || saving || loading}
                   onClick={() => void handleSave()}
                 >
-                  {saving && <Loader2 className="ml-1.5 h-4 w-4 animate-spin" />}
-                  حفظ
+                  {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {t("save")}
                 </Button>
               )}
             </div>

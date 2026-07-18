@@ -1,13 +1,14 @@
+import { getTranslations } from "next-intl/server";
 import { AuditLogList } from "@/components/admin/audit-log-list";
 
-export default function AuditLogPage() {
+export default async function AuditLogPage() {
+  const t = await getTranslations("audit");
+
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-bold tracking-tight">سجل التدقيق</h1>
-        <p className="text-sm text-muted-foreground">
-          عرض من قام بأي عملية، وعلى أي كيان، ومتى.
-        </p>
+        <h1 className="text-xl font-bold tracking-tight">{t("title")}</h1>
+        <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
       </div>
 
       <AuditLogList />

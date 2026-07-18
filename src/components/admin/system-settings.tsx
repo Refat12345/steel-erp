@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { CalendarClock, Eraser, Loader2, Save, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 
 export function SystemSettings() {
+  const t = useTranslations("admin.settings");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedValue, setSavedValue] = useState<string | null>(null);
@@ -30,11 +32,11 @@ export function SystemSettings() {
           setSavedValue(j.data.analyticsStartDate);
           setInputValue(j.data.analyticsStartDate ?? "");
         } else {
-          toast.error(j.error || "تعذّر تحميل الإعدادات");
+          toast.error(j.error || t("errorLoad"));
         }
       })
       .catch(() => {
-        if (!cancelled) toast.error("حدث خطأ في الاتصال");
+        if (!cancelled) toast.error(t("errorConnection"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -42,7 +44,7 @@ export function SystemSettings() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   async function persist(value: string | null) {
     setSaving(true);
@@ -56,12 +58,12 @@ export function SystemSettings() {
       if (json.success) {
         setSavedValue(value);
         setInputValue(value ?? "");
-        toast.success(value ? "تم حفظ التاريخ" : "تم إلغاء التاريخ");
+        toast.success(value ? t("toastSaved") : t("toastCleared"));
       } else {
-        toast.error(json.error || "حدث خطأ");
+        toast.error(json.error || t("errorGeneric"));
       }
     } catch {
-      toast.error("حدث خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setSaving(false);
     }
@@ -73,20 +75,17 @@ export function SystemSettings() {
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         <Settings className="h-5 w-5 text-muted-foreground" />
-        <h1 className="text-xl font-bold tracking-tight">الإعدادات العامة</h1>
+        <h1 className="text-xl font-bold tracking-tight">{t("title")}</h1>
       </div>
 
       <Card className="max-w-2xl shadow-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <CalendarClock className="h-4 w-4 text-primary" />
-            بداية احتساب التحليلات
+            {t("analyticsStartTitle")}
           </CardTitle>
           <p className="text-sm leading-relaxed text-muted-foreground">
-            لوحة المؤشرات تتجاهل كل العمليات المغلقة قبل هذا التاريخ (بداية
-            يوم التشغيل 08:00). يُستخدم لاستبعاد فترة التجريب الأولى من الرقم
-            القياسي والاتجاهات والمقارنات. البيانات نفسها لا تُحذف — تبقى
-            كاملة في التقارير وسجل التدقيق.
+            {t("analyticsStartDescription")}
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -95,9 +94,7 @@ export function SystemSettings() {
           ) : (
             <>
               <div className="space-y-2">
-                <Label htmlFor="analytics-start-date">
-                  التاريخ (يوم التشغيل)
-                </Label>
+                <Label htmlFor="analytics-start-date">{t("dateLabel")}</Label>
                 <Input
                   id="analytics-start-date"
                   type="date"
@@ -108,8 +105,8 @@ export function SystemSettings() {
                 />
                 <p className="text-xs text-muted-foreground">
                   {savedValue
-                    ? `المفعّل حالياً: ${savedValue}`
-                    : "غير مفعّل — اللوحة تحتسب كامل البيانات منذ البداية"}
+                    ? t("currentlyActive", { date: savedValue })
+                    : t("notActive")}
                 </p>
               </div>
 
@@ -123,7 +120,7 @@ export function SystemSettings() {
                   ) : (
                     <Save className="h-4 w-4" />
                   )}
-                  حفظ
+                  {t("save")}
                 </Button>
                 {savedValue && (
                   <Button
@@ -132,7 +129,7 @@ export function SystemSettings() {
                     disabled={saving}
                   >
                     <Eraser className="h-4 w-4" />
-                    إلغاء التاريخ
+                    {t("clearDate")}
                   </Button>
                 )}
               </div>
