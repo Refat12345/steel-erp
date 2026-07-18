@@ -1,0 +1,65 @@
+{
+  "common": {
+    "language": "Language",
+    "languageArabic": "العربية",
+    "languageEnglish": "English",
+    "languageChangeError": "Could not change the language, please try again",
+    "navigation": "Navigation",
+    "signOut": "Sign out",
+    "goBack": "Go back",
+    "home": "Home",
+    "retry": "Try again"
+  },
+  "brand": {
+    "tagline": "Factory management system — ERP",
+    "metadataTitle": "steelTech | ERP",
+    "metadataDescription": "Steel factory ERP system",
+    "header": "steelTech · ERP",
+    "welcome": "Welcome to the steelTech system",
+    "footer": "steelTech · ERP",
+    "sidebarSubtitle": "ERP System",
+    "helloName": "Hello, <highlight>{name}</highlight>"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "contracts": "Contracts",
+    "salesOrders": "Sales orders",
+    "trucks": "Trucks",
+    "billetContracts": "Supplier contracts",
+    "billetReceipts": "Billet receiving",
+    "stock": "Stock",
+    "stockMovements": "Stock movements",
+    "stockProductionIn": "Production in",
+    "stockTransfer": "Stock transfer",
+    "stockAdjust": "Stock adjustment",
+    "stockLocations": "Stock locations",
+    "loadedTrucks": "Loaded trucks",
+    "finance": "Finance",
+    "reports": "Reports",
+    "admin": "Admin",
+    "auditLog": "Audit log",
+    "settings": "Settings"
+  },
+  "auth": {
+    "title": "Sign in",
+    "subtitle": "Enter your account credentials to continue",
+    "username": "Username",
+    "usernamePlaceholder": "Username",
+    "password": "Password",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password",
+    "submit": "Sign in",
+    "submitting": "Signing in...",
+    "errorInvalidCredentials": "Invalid username or password",
+    "errorTooManyRequests": "Too many sign-in attempts. Please wait a minute and try again. (429 Too Many Requests)",
+    "errorGeneric": "Could not complete sign-in. Please try again.",
+    "errorNoSession": "No session was created after sign-in. If you are opening the app from a phone or via an IP address, add this line to .env.local: NEXTAUTH_URL=http://YOUR-DEVICE-IP:3000 (same address as in the browser bar, with no trailing slash)"
+  },
+  "errors": {
+    "forbiddenTitle": "Access denied",
+    "forbiddenBody": "You do not have permission to access this page.",
+    "forbiddenHint": "Contact an administrator if you believe this is a mistake.",
+    "globalTitle": "Something went wrong",
+    "globalBody": "Sorry, an unexpected error occurred. Please refresh the page."
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "common": {
+    "language": "اللغة",
+    "languageArabic": "العربية",
+    "languageEnglish": "English",
+    "languageChangeError": "تعذر تغيير اللغة، حاول مرة أخرى",
+    "navigation": "التنقل",
+    "signOut": "تسجيل الخروج",
+    "goBack": "العودة",
+    "home": "الصفحة الرئيسية",
+    "retry": "إعادة المحاولة"
+  },
+  "brand": {
+    "tagline": "نظام إدارة المصنع — ERP",
+    "metadataTitle": "steelTech | نظام ERP",
+    "metadataDescription": "نظام إدارة مصنع الحديد — ERP",
+    "header": "steelTech · نظام ERP",
+    "welcome": "مرحباً بك في نظام steelTech",
+    "footer": "steelTech · نظام ERP",
+    "sidebarSubtitle": "نظام ERP",
+    "helloName": "أهلاً، <highlight>{name}</highlight>"
+  },
+  "nav": {
+    "dashboard": "لوحة المؤشرات",
+    "contracts": "العقود",
+    "salesOrders": "أوامر البيع",
+    "trucks": "الشاحنات",
+    "billetContracts": "عقود الموردين",
+    "billetReceipts": "استلام البيلت",
+    "stock": "المخزون",
+    "stockMovements": "سجل الحركات",
+    "stockProductionIn": "دخول إنتاج",
+    "stockTransfer": "ترحيل المخزون",
+    "stockAdjust": "تصحيح الجرد",
+    "stockLocations": "مواقع المخزون",
+    "loadedTrucks": "حركة الشاحنات",
+    "finance": "المالية",
+    "reports": "التقارير",
+    "admin": "الإدارة",
+    "auditLog": "سجل التدقيق",
+    "settings": "الإعدادات"
+  },
+  "auth": {
+    "title": "تسجيل الدخول",
+    "subtitle": "أدخل بيانات حسابك للمتابعة",
+    "username": "اسم المستخدم",
+    "usernamePlaceholder": "اسم المستخدم",
+    "password": "كلمة المرور",
+    "showPassword": "إظهار كلمة المرور",
+    "hidePassword": "إخفاء كلمة المرور",
+    "submit": "تسجيل الدخول",
+    "submitting": "جارٍ التحقق...",
+    "errorInvalidCredentials": "اسم المستخدم أو كلمة المرور غير صحيحة",
+    "errorTooManyRequests": "عدد محاولات الدخول كبير جداً. الرجاء الانتظار دقيقة والمحاولة مجدداً. (429 Too Many Requests)",
+    "errorGeneric": "تعذر إكمال تسجيل الدخول. حاول مرة أخرى.",
+    "errorNoSession": "لم تُنشأ جلسة بعد تسجيل الدخول. إذا كنت تفتح النظام من الهاتف أو عبر عنوان IP، أضف في ملف .env.local السطر: NEXTAUTH_URL=http://عنوان-جهازك-هنا:3000 (نفس العنوان الذي يظهر في شريط المتصفح بدون شرطة في النهاية)"
+  },
+  "errors": {
+    "forbiddenTitle": "غير مصرّح بالدخول",
+    "forbiddenBody": "لا تملك الصلاحيات اللازمة للوصول إلى هذه الصفحة.",
+    "forbiddenHint": "تواصل مع المدير إذا كنت تعتقد أن هذا خطأ.",
+    "globalTitle": "حدث خطأ في النظام",
+    "globalBody": "عذراً، حدث خطأ غير متوقع. يرجى تحديث الصفحة."
+  }
+}

@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useSession, signOut } from "next-auth/react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useLocale, useTranslations } from "next-intl";
 import {
   FileText,
   ShoppingCart,
@@ -41,8 +42,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { isNavUrlSuspended } from "@/config/suspended-pages";
 import { isAnalyticsRestrictedRole } from "@/lib/rbac-policy";
-import { BRAND } from "@/lib/brand";
 import { BrandWordmark } from "@/components/layout/brand-wordmark";
+import { getTextDirection, type Locale } from "@/i18n/config";
 
 /* CSS custom properties defined in globals.css */
 const BLUE = "oklch(0.620 0.175 222)";
@@ -56,117 +57,135 @@ const WHITE_6 = "oklch(1 0 0 / 6%)";
 const EMERALD = "oklch(0.630 0.155 152)";
 
 const navItems: {
-  title: string;
+  titleKey:
+    | "dashboard"
+    | "contracts"
+    | "salesOrders"
+    | "trucks"
+    | "billetContracts"
+    | "billetReceipts"
+    | "stock"
+    | "stockMovements"
+    | "stockProductionIn"
+    | "stockTransfer"
+    | "stockAdjust"
+    | "stockLocations"
+    | "loadedTrucks"
+    | "finance"
+    | "reports"
+    | "admin"
+    | "auditLog"
+    | "settings";
   url: string;
   icon: typeof LayoutDashboard;
   permission: string | string[] | null;
 }[] = [
   {
-    title: "لوحة المؤشرات",
+    titleKey: "dashboard",
     url: "/",
     icon: LayoutDashboard,
     permission: "dashboard.view",
   },
   {
-    title: "العقود",
+    titleKey: "contracts",
     url: "/contracts",
     icon: FileText,
     permission: "contract.view",
   },
   {
-    title: "أوامر البيع",
+    titleKey: "salesOrders",
     url: "/sales-orders",
     icon: ShoppingCart,
     permission: "salesorder.view",
   },
   {
-    title: "الشاحنات",
+    titleKey: "trucks",
     url: "/trucks",
     icon: Truck,
     permission: ["truck.view_queue", "truck.view_approved"],
   },
   {
-    title: "عقود الموردين",
+    titleKey: "billetContracts",
     url: "/billet-contracts",
     icon: Boxes,
     permission: "billet.contract.view",
   },
   {
-    title: "استلام البيلت",
+    titleKey: "billetReceipts",
     url: "/billet-receipts",
     icon: PackageCheck,
     permission: "billet.receipt.view",
   },
   {
-    title: "المخزون",
+    titleKey: "stock",
     url: "/stock",
     icon: Boxes,
     permission: "stock.view",
   },
   {
-    title: "سجل الحركات",
+    titleKey: "stockMovements",
     url: "/stock/movements",
     icon: ScrollText,
     permission: "stock.movements.view",
   },
   {
-    title: "دخول إنتاج",
+    titleKey: "stockProductionIn",
     url: "/stock/production-in",
     icon: PackagePlus,
     permission: ["stock.production.ton", "stock.production.bundle"],
   },
-  // "الرصيد الافتتاحي" (/stock/opening-balance) مخفي عمداً — «تصحيح الجرد»
-  // يغطيه. الصفحة والحماية ما زالت موجودة (للأدمن) ويمكن إعادتها هنا.
+  // Opening-balance (/stock/opening-balance) intentionally hidden — stock
+  // adjust covers it. Page + guards remain (admin) and can be restored here.
   {
-    title: "ترحيل المخزون",
+    titleKey: "stockTransfer",
     url: "/stock/transfer",
     icon: ArrowLeftRight,
     permission: "stock.transfer",
   },
   {
-    title: "تصحيح الجرد",
+    titleKey: "stockAdjust",
     url: "/stock/adjust",
     icon: ClipboardCheck,
     permission: "stock.adjust",
   },
   {
-    title: "مواقع المخزون",
+    titleKey: "stockLocations",
     url: "/stock/locations",
     icon: Warehouse,
     permission: "stock.location.manage",
   },
   {
-    title: "حركة الشاحنات",
+    titleKey: "loadedTrucks",
     url: "/loaded-trucks",
     icon: Truck,
     permission: "report.daily_trucks",
   },
   {
-    title: "المالية",
+    titleKey: "finance",
     url: "/finance",
     icon: Wallet,
     permission: "payment.view",
   },
   {
-    title: "التقارير",
+    titleKey: "reports",
     url: "/reports",
     icon: BarChart3,
     permission: "reports.view",
   },
   {
-    title: "الإدارة",
+    titleKey: "admin",
     url: "/admin",
     icon: Shield,
     permission: "user.manage",
   },
   {
-    title: "سجل التدقيق",
+    titleKey: "auditLog",
     url: "/admin/audit-log",
     icon: ClipboardList,
     permission: "user.manage",
   },
   {
-    title: "الإعدادات",
+    titleKey: "settings",
     url: "/admin/settings",
     icon: Settings,
     permission: "settings.edit",
@@ -182,6 +201,15 @@ export function AppSidebar({
   const pathname = usePathname();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
+  const tNav = useTranslations("nav");
+  const tCommon = useTranslations("common");
+  const tBrand = useTranslations("brand");
+  const locale = useLocale() as Locale;
+  // The sidebar sits on the reading-start edge: right in RTL, left in LTR.
+  // `dir` must be passed explicitly because the mobile Sheet portals outside
+  // the <html dir> root (see mobile-responsive rules).
+  const dir = getTextDirection(locale);
+  const side = dir === "rtl" ? "right" : "left";
 
   function closeMobileNav() {
     if (isMobile) setOpenMobile(false);
@@ -250,8 +278,10 @@ export function AppSidebar({
     .join("")
     .slice(0, 2);
 
+  const signOutLabel = tCommon("signOut");
+
   return (
-    <Sidebar side="right" collapsible="icon" dir="rtl">
+    <Sidebar side={side} collapsible="icon" dir={dir}>
 
       {/* ── Brand Header ─────────────────────────────────────────────── */}
       <SidebarHeader className="px-3 py-4">
@@ -275,7 +305,7 @@ export function AppSidebar({
               className="text-[10px] font-semibold uppercase tracking-widest leading-tight"
               style={{ color: BLUE_70 }}
             >
-              {BRAND.sidebarSubtitle}
+              {tBrand("sidebarSubtitle")}
             </span>
           </div>
         </div>
@@ -292,20 +322,21 @@ export function AppSidebar({
             className="mb-1 h-auto px-1 text-[10px] font-semibold uppercase tracking-widest group-data-[collapsible=icon]:hidden"
             style={{ color: BLUE_55 }}
           >
-            التنقل
+            {tCommon("navigation")}
           </SidebarGroupLabel>
 
           <SidebarGroupContent>
             <SidebarMenu className="gap-0.5" onClick={closeMobileNav}>
               {visibleItems.map((item) => {
                 const isActive = item.url === activeUrl;
+                const title = tNav(item.titleKey);
                 return (
                   <SidebarMenuItem key={item.url} className="relative">
 
                     {/* Active indicator — small glowing dot on the inner edge */}
                     {isActive && (
                       <div
-                        className="absolute top-1/2 left-2 -translate-y-1/2 h-1.5 w-1.5 rounded-full group-data-[collapsible=icon]:hidden"
+                        className="absolute top-1/2 end-2 -translate-y-1/2 h-1.5 w-1.5 rounded-full group-data-[collapsible=icon]:hidden"
                         style={{
                           background: BLUE,
                           boxShadow: `0 0 6px ${BLUE_70}`,
@@ -316,7 +347,7 @@ export function AppSidebar({
                     <SidebarMenuButton
                       render={<Link href={item.url} />}
                       isActive={isActive}
-                      tooltip={item.title}
+                      tooltip={title}
                       className="h-10 gap-2.5 rounded-lg px-2"
                     >
                       {/* Icon in styled bubble */}
@@ -350,7 +381,7 @@ export function AppSidebar({
                             : "font-medium text-sidebar-foreground/70 group-hover/menu-button:text-sidebar-foreground"
                         )}
                       >
-                        {item.title}
+                        {title}
                       </span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -386,7 +417,7 @@ export function AppSidebar({
               </AvatarFallback>
             </Avatar>
             <span
-              className="absolute -bottom-0.5 -left-0.5 block h-2.5 w-2.5 rounded-full border-2"
+              className="absolute -bottom-0.5 -end-0.5 block h-2.5 w-2.5 rounded-full border-2"
               style={{
                 background: EMERALD,
                 borderColor: "var(--sidebar)",
@@ -412,14 +443,14 @@ export function AppSidebar({
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
-              tooltip="تسجيل الخروج"
+              tooltip={signOutLabel}
               onClick={() => void handleSignOut()}
               className="h-9 gap-2.5 rounded-lg px-2 text-sidebar-foreground/50 hover:bg-destructive/12 hover:text-destructive transition-colors duration-200"
             >
               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-all duration-200">
                 <LogOut className="h-3.5 w-3.5" />
               </div>
-              <span className="text-sm font-medium">تسجيل الخروج</span>
+              <span className="text-sm font-medium">{signOutLabel}</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

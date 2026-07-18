@@ -219,6 +219,29 @@ export async function resetPassword(id: number, newPassword: string, adminId: nu
   logger.info({ userId: id, by: adminId }, "user password reset");
 }
 
+/**
+ * Self-service UI language preference. Scope is strictly the caller's own
+ * `locale` column — no other field, no other user.
+ */
+export async function updateOwnLocale(userId: number, locale: string) {
+  await prisma.$transaction(async (tx: TxClient) => {
+    await tx.user.update({
+      where: { id: userId },
+      data: { locale },
+    });
+
+    await logAudit(tx, {
+      userId,
+      action: "update",
+      entityType: "User",
+      entityId: String(userId),
+      details: { action: "locale_change", locale },
+    });
+  });
+
+  logger.info({ userId, locale }, "user locale updated");
+}
+
 export async function listRoles() {
   return prisma.role.findMany({
     orderBy: { code: "asc" },

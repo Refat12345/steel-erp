@@ -38,7 +38,7 @@ Tables are wider than mobile viewports. NEVER let a table overflow the page.
 
 - The mobile sidebar uses `<Sheet>` from base-ui. The backdrop MUST be opaque enough to hide content behind it (`bg-black/50` minimum)
 - Sidebar width on mobile: use viewport-relative units (`85vw`) not fixed `rem` values
-- Always pass `dir="rtl"` to `<Sidebar>` since the Sheet portals outside the RTL root
+- Always pass the locale-derived `dir` (`getTextDirection(locale)`) to `<Sidebar>` since the Sheet portals outside the `<html dir>` root
 - Avoid `backdrop-blur` on mobile overlays — causes GPU rendering artifacts (black strips) on some Android devices
 - Use `h-dvh` instead of `h-full` for Sheet panels to account for mobile browser address bar
 
