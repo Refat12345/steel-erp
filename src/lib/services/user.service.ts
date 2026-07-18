@@ -17,7 +17,7 @@ const USER_SELECT = {
   isActive: true,
   createdAt: true,
   updatedAt: true,
-  role: { select: { code: true, displayName: true } },
+  role: { select: { code: true, displayName: true, displayNameEn: true } },
   creator: { select: { id: true, fullName: true } },
 } satisfies Prisma.UserSelect;
 
@@ -245,6 +245,6 @@ export async function updateOwnLocale(userId: number, locale: string) {
 export async function listRoles() {
   return prisma.role.findMany({
     orderBy: { code: "asc" },
-    select: { code: true, displayName: true },
+    select: { code: true, displayName: true, displayNameEn: true },
   });
 }

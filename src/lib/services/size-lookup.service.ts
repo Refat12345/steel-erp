@@ -8,6 +8,7 @@ export async function listActiveSizes() {
       id: true,
       code: true,
       displayName: true,
+      displayNameEn: true,
       isBundleType: true,
       isSpecialRatio: true,
     },

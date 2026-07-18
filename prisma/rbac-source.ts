@@ -21,91 +21,97 @@
 export interface RbacRoleDef {
   code: string;
   displayName: string;
+  /** English display name (bilingual i18n phase 5). Arabic `displayName` stays authoritative. */
+  displayNameEn: string;
 }
 
 export interface RbacPermissionDef {
   code: string;
   displayName: string;
+  /** English display name (bilingual i18n phase 5). Arabic `displayName` stays authoritative. */
+  displayNameEn: string;
   module: string;
 }
 
 export const RBAC_ROLES: ReadonlyArray<RbacRoleDef> = [
-  { code: "admin", displayName: "المدير العام" },
-  { code: "finance", displayName: "المالية" },
-  { code: "logistics", displayName: "اللوجستيك" },
-  { code: "scale_operator", displayName: "عامل القبان الخارجي" },
-  { code: "internal_loader", displayName: "عامل التحميل الداخلي" },
-  { code: "manager", displayName: "صاحب المصنع" },
+  { code: "admin", displayName: "المدير العام", displayNameEn: "General Manager" },
+  { code: "finance", displayName: "المالية", displayNameEn: "Finance" },
+  { code: "logistics", displayName: "اللوجستيك", displayNameEn: "Logistics" },
+  { code: "scale_operator", displayName: "عامل القبان الخارجي", displayNameEn: "External Scale Operator" },
+  { code: "internal_loader", displayName: "عامل التحميل الداخلي", displayNameEn: "Internal Loader" },
+  { code: "manager", displayName: "صاحب المصنع", displayNameEn: "Factory Owner" },
 ];
 
 export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
   // Contracts
-  { code: "contract.create", displayName: "إنشاء عقد", module: "contracts" },
-  { code: "contract.edit", displayName: "تعديل عقد", module: "contracts" },
-  { code: "contract.change_status", displayName: "تغيير حالة عقد", module: "contracts" },
-  { code: "contract.view", displayName: "عرض العقود", module: "contracts" },
+  { code: "contract.create", displayName: "إنشاء عقد", displayNameEn: "Create contract", module: "contracts" },
+  { code: "contract.edit", displayName: "تعديل عقد", displayNameEn: "Edit contract", module: "contracts" },
+  { code: "contract.change_status", displayName: "تغيير حالة عقد", displayNameEn: "Change contract status", module: "contracts" },
+  { code: "contract.view", displayName: "عرض العقود", displayNameEn: "View contracts", module: "contracts" },
   // Sales Orders
-  { code: "salesorder.create", displayName: "إنشاء أمر بيع", module: "sales" },
-  { code: "salesorder.edit_draft", displayName: "تعديل مسودة أمر بيع", module: "sales" },
-  { code: "salesorder.set_price", displayName: "تثبيت الأسعار", module: "sales" },
-  { code: "salesorder.approve", displayName: "اعتماد أمر بيع", module: "sales" },
-  { code: "salesorder.edit_approved", displayName: "تعديل بعد الاعتماد", module: "sales" },
-  { code: "salesorder.cancel", displayName: "إلغاء أمر بيع", module: "sales" },
-  { code: "salesorder.view", displayName: "عرض أوامر البيع", module: "sales" },
+  { code: "salesorder.create", displayName: "إنشاء أمر بيع", displayNameEn: "Create sales order", module: "sales" },
+  { code: "salesorder.edit_draft", displayName: "تعديل مسودة أمر بيع", displayNameEn: "Edit draft sales order", module: "sales" },
+  { code: "salesorder.set_price", displayName: "تثبيت الأسعار", displayNameEn: "Set prices", module: "sales" },
+  { code: "salesorder.approve", displayName: "اعتماد أمر بيع", displayNameEn: "Approve sales order", module: "sales" },
+  { code: "salesorder.edit_approved", displayName: "تعديل بعد الاعتماد", displayNameEn: "Edit after approval", module: "sales" },
+  { code: "salesorder.cancel", displayName: "إلغاء أمر بيع", displayNameEn: "Cancel sales order", module: "sales" },
+  { code: "salesorder.view", displayName: "عرض أوامر البيع", displayNameEn: "View sales orders", module: "sales" },
   // Trucks / Logistics
-  { code: "truck.register", displayName: "تسجيل شاحنة", module: "logistics" },
-  { code: "truck.edit_queued", displayName: "تعديل شاحنة بالطابور", module: "logistics" },
-  { code: "truck.edit_approved", displayName: "تعديل طلبية شاحنة معتمدة", module: "logistics" },
-  { code: "truck.view_queue", displayName: "عرض الطابور", module: "logistics" },
-  { code: "truck.view_approved", displayName: "عرض المعتمدة فقط", module: "logistics" },
+  { code: "truck.register", displayName: "تسجيل شاحنة", displayNameEn: "Register truck", module: "logistics" },
+  { code: "truck.edit_queued", displayName: "تعديل شاحنة بالطابور", displayNameEn: "Edit queued truck", module: "logistics" },
+  { code: "truck.edit_approved", displayName: "تعديل طلبية شاحنة معتمدة", displayNameEn: "Edit approved truck request", module: "logistics" },
+  { code: "truck.view_queue", displayName: "عرض الطابور", displayNameEn: "View queue", module: "logistics" },
+  { code: "truck.view_approved", displayName: "عرض المعتمدة فقط", displayNameEn: "View approved only", module: "logistics" },
   // Finance
-  { code: "payment.create", displayName: "إدخال دفعة مالية", module: "finance" },
-  { code: "payment.view", displayName: "عرض الدفعات", module: "finance" },
-  { code: "creditlimit.set", displayName: "محجوز — غير مستخدم في v1", module: "finance" },
-  { code: "buffer.grant", displayName: "منح Buffer", module: "finance" },
-  { code: "specialratio.override", displayName: "موافقة تجاوز النسبة الخاصة", module: "finance" },
+  { code: "payment.create", displayName: "إدخال دفعة مالية", displayNameEn: "Record payment", module: "finance" },
+  { code: "payment.view", displayName: "عرض الدفعات", displayNameEn: "View payments", module: "finance" },
+  { code: "creditlimit.set", displayName: "محجوز — غير مستخدم في v1", displayNameEn: "Reserved — unused in v1", module: "finance" },
+  { code: "buffer.grant", displayName: "منح Buffer", displayNameEn: "Grant buffer", module: "finance" },
+  { code: "specialratio.override", displayName: "موافقة تجاوز النسبة الخاصة", displayNameEn: "Approve special-ratio override", module: "finance" },
   // Scale
-  { code: "scale.start", displayName: "بدء عملية وزن", module: "scale" },
-  { code: "scale.enter_tare", displayName: "إدخال وزن الفارغ", module: "scale" },
-  { code: "scale.enter_gross", displayName: "إدخال وزن المحمّل", module: "scale" },
-  { code: "scale.enter_session", displayName: "إدخال وزنة داخلية", module: "scale" },
-  { code: "scale.edit_session", displayName: "تعديل وزنة", module: "scale" },
-  { code: "scale.delete_session", displayName: "حذف وزنة داخلية", module: "scale" },
-  { code: "scale.upload_photo", displayName: "رفع صورة", module: "scale" },
-  { code: "scale.loading_complete", displayName: "تأكيد اكتمال التحميل", module: "scale" },
-  { code: "scale.reopen_before_gross", displayName: "إعادة فتح التحميل قبل الجروس", module: "scale" },
-  { code: "scale.close", displayName: "إغلاق نهائي وطباعة كرت", module: "scale" },
-  { code: "scale.cancel", displayName: "إلغاء عملية مع سبب", module: "scale" },
+  { code: "scale.start", displayName: "بدء عملية وزن", displayNameEn: "Start weighing operation", module: "scale" },
+  { code: "scale.enter_tare", displayName: "إدخال وزن الفارغ", displayNameEn: "Enter tare weight", module: "scale" },
+  { code: "scale.enter_gross", displayName: "إدخال وزن المحمّل", displayNameEn: "Enter gross weight", module: "scale" },
+  { code: "scale.enter_session", displayName: "إدخال وزنة داخلية", displayNameEn: "Enter internal weigh", module: "scale" },
+  { code: "scale.edit_session", displayName: "تعديل وزنة", displayNameEn: "Edit weigh session", module: "scale" },
+  { code: "scale.delete_session", displayName: "حذف وزنة داخلية", displayNameEn: "Delete internal weigh", module: "scale" },
+  { code: "scale.upload_photo", displayName: "رفع صورة", displayNameEn: "Upload photo", module: "scale" },
+  { code: "scale.loading_complete", displayName: "تأكيد اكتمال التحميل", displayNameEn: "Confirm loading complete", module: "scale" },
+  { code: "scale.reopen_before_gross", displayName: "إعادة فتح التحميل قبل الجروس", displayNameEn: "Reopen loading before gross", module: "scale" },
+  { code: "scale.close", displayName: "إغلاق نهائي وطباعة كرت", displayNameEn: "Final close and print card", module: "scale" },
+  { code: "scale.cancel", displayName: "إلغاء عملية مع سبب", displayNameEn: "Cancel operation with reason", module: "scale" },
   {
     code: "scale.correct_completed",
     displayName: "تصحيح إداري لشاحنة مكتملة",
+    displayNameEn: "Administrative correction of completed truck",
     module: "scale",
   },
   // Admin
-  { code: "forcepass.execute", displayName: "تمرير إجباري", module: "admin" },
-  { code: "user.manage", displayName: "إدارة المستخدمين", module: "admin" },
-  { code: "user.set_permissions", displayName: "تعديل صلاحيات المستخدمين", module: "admin" },
-  { code: "settings.edit", displayName: "تعديل الإعدادات العامة", module: "admin" },
+  { code: "forcepass.execute", displayName: "تمرير إجباري", displayNameEn: "Force pass", module: "admin" },
+  { code: "user.manage", displayName: "إدارة المستخدمين", displayNameEn: "Manage users", module: "admin" },
+  { code: "user.set_permissions", displayName: "تعديل صلاحيات المستخدمين", displayNameEn: "Edit user permissions", module: "admin" },
+  { code: "settings.edit", displayName: "تعديل الإعدادات العامة", displayNameEn: "Edit general settings", module: "admin" },
   // Purchasing — Billet Receiving (supplier contracts + inbound receipts)
-  { code: "billet.contract.view", displayName: "عرض عقود الموردين", module: "purchasing" },
-  { code: "billet.contract.create", displayName: "إنشاء عقد مورّد", module: "purchasing" },
-  { code: "billet.contract.edit", displayName: "تعديل عقد مورّد", module: "purchasing" },
+  { code: "billet.contract.view", displayName: "عرض عقود الموردين", displayNameEn: "View supplier contracts", module: "purchasing" },
+  { code: "billet.contract.create", displayName: "إنشاء عقد مورّد", displayNameEn: "Create supplier contract", module: "purchasing" },
+  { code: "billet.contract.edit", displayName: "تعديل عقد مورّد", displayNameEn: "Edit supplier contract", module: "purchasing" },
   {
     code: "billet.contract.prior_withdrawal",
     displayName: "تسجيل سحب سابق على عقد مورّد",
+    displayNameEn: "Record prior withdrawal on supplier contract",
     module: "purchasing",
   },
-  { code: "billet.contract.change_status", displayName: "تغيير حالة عقد مورّد", module: "purchasing" },
-  { code: "billet.contract.upload", displayName: "رفع مرفقات عقد مورّد", module: "purchasing" },
-  { code: "billet.receipt.view", displayName: "عرض سجلات استلام البيلت", module: "purchasing" },
-  { code: "billet.receipt.register", displayName: "تسجيل شاحنة بيلت مسبقاً", module: "purchasing" },
-  { code: "billet.receipt.weigh", displayName: "إدخال وزن البيلت المحمّل", module: "purchasing" },
-  { code: "billet.receipt.unload", displayName: "تفريغ البيلت (صورة + عدّ + مرتجع)", module: "purchasing" },
-  { code: "billet.receipt.close", displayName: "إغلاق استلام البيلت (وزن فارغ)", module: "purchasing" },
-  { code: "billet.receipt.upload", displayName: "رفع مرفقات استلام البيلت", module: "purchasing" },
-  { code: "billet.receipt.cancel", displayName: "إلغاء استلام بيلت", module: "purchasing" },
+  { code: "billet.contract.change_status", displayName: "تغيير حالة عقد مورّد", displayNameEn: "Change supplier contract status", module: "purchasing" },
+  { code: "billet.contract.upload", displayName: "رفع مرفقات عقد مورّد", displayNameEn: "Upload supplier contract attachments", module: "purchasing" },
+  { code: "billet.receipt.view", displayName: "عرض سجلات استلام البيلت", displayNameEn: "View billet receipts", module: "purchasing" },
+  { code: "billet.receipt.register", displayName: "تسجيل شاحنة بيلت مسبقاً", displayNameEn: "Pre-register billet truck", module: "purchasing" },
+  { code: "billet.receipt.weigh", displayName: "إدخال وزن البيلت المحمّل", displayNameEn: "Enter loaded billet weight", module: "purchasing" },
+  { code: "billet.receipt.unload", displayName: "تفريغ البيلت (صورة + عدّ + مرتجع)", displayNameEn: "Unload billet (photo + count + rejects)", module: "purchasing" },
+  { code: "billet.receipt.close", displayName: "إغلاق استلام البيلت (وزن فارغ)", displayNameEn: "Close billet receipt (empty weight)", module: "purchasing" },
+  { code: "billet.receipt.upload", displayName: "رفع مرفقات استلام البيلت", displayNameEn: "Upload billet receipt attachments", module: "purchasing" },
+  { code: "billet.receipt.cancel", displayName: "إلغاء استلام بيلت", displayNameEn: "Cancel billet receipt", module: "purchasing" },
   // Stock (Finished-Goods Warehouse)
-  { code: "stock.view", displayName: "عرض المخزون وخريطة المستودع", module: "stock" },
+  { code: "stock.view", displayName: "عرض المخزون وخريطة المستودع", displayNameEn: "View stock and warehouse map", module: "stock" },
   // Add-on permission on top of `stock.view` (same pattern as
   // `dashboard.ops.view`): grants access to the full movements ledger
   // (/stock/movements) — every adjustment, transfer, and truck deduction with
@@ -113,11 +119,13 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
   {
     code: "stock.movements.view",
     displayName: "عرض سجل حركات المخزون",
+    displayNameEn: "View stock movements ledger",
     module: "stock",
   },
   {
     code: "stock.location.manage",
     displayName: "إدارة مواقع المخزون (إضافة/تعديل/إيقاف)",
+    displayNameEn: "Manage stock locations (add/edit/disable)",
     module: "stock",
   },
   // Production entry is split across two roles by counting unit: one records
@@ -126,34 +134,38 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
   {
     code: "stock.production.ton",
     displayName: "تسجيل دخول إنتاج بالطن",
+    displayNameEn: "Record production entry in tons",
     module: "stock",
   },
   {
     code: "stock.production.bundle",
     displayName: "تسجيل دخول إنتاج بالربطات",
+    displayNameEn: "Record production entry in bundles",
     module: "stock",
   },
-  { code: "stock.transfer", displayName: "ترحيل مخزون بين المواقع", module: "stock" },
+  { code: "stock.transfer", displayName: "ترحيل مخزون بين المواقع", displayNameEn: "Transfer stock between locations", module: "stock" },
   // Opening-balance is superseded by stock.adjust (kept wired, unassigned).
   {
     code: "stock.opening_balance",
     displayName: "إدخال الرصيد الافتتاحي — موقوف حالياً",
+    displayNameEn: "Enter opening balance — currently disabled",
     module: "stock",
   },
-  { code: "stock.adjust", displayName: "تصحيح جرد المخزون", module: "stock" },
+  { code: "stock.adjust", displayName: "تصحيح جرد المخزون", displayNameEn: "Adjust stock inventory", module: "stock" },
   // Reports
-  { code: "reports.view", displayName: "الوصول إلى قسم التقارير", module: "reports" },
-  { code: "report.daily_trucks", displayName: "تقرير شاحنات يومي", module: "reports" },
+  { code: "reports.view", displayName: "الوصول إلى قسم التقارير", displayNameEn: "Access reports section", module: "reports" },
+  { code: "report.daily_trucks", displayName: "تقرير شاحنات يومي", displayNameEn: "Daily trucks report", module: "reports" },
   {
     code: "report.daily_trucks.sensitive_tonnage",
     displayName: "عرض الداخلي والفرق في تقرير الشاحنات",
+    displayNameEn: "View internal and difference in trucks report",
     module: "reports",
   },
-  { code: "report.customer_balance", displayName: "تقرير رصيد زبون", module: "reports" },
-  { code: "report.salesorder_status", displayName: "تقرير حالة أمر بيع", module: "reports" },
-  { code: "report.audit", displayName: "تقرير التدقيق", module: "reports" },
+  { code: "report.customer_balance", displayName: "تقرير رصيد زبون", displayNameEn: "Customer balance report", module: "reports" },
+  { code: "report.salesorder_status", displayName: "تقرير حالة أمر بيع", displayNameEn: "Sales order status report", module: "reports" },
+  { code: "report.audit", displayName: "تقرير التدقيق", displayNameEn: "Audit report", module: "reports" },
   // Analytics / Dashboard
-  { code: "dashboard.view", displayName: "عرض لوحة المؤشرات والإحصاءات", module: "analytics" },
+  { code: "dashboard.view", displayName: "عرض لوحة المؤشرات والإحصاءات", displayNameEn: "View dashboard and statistics", module: "analytics" },
   // Stricter add-on permission: when present in addition to `dashboard.view`,
   // the dashboard payload is expanded with operationally sensitive sections
   // (live fleet status, stuck trucks, cycle-time averages, cancellation %).
@@ -162,6 +174,7 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
   {
     code: "dashboard.ops.view",
     displayName: "عرض المؤشرات التشغيلية الحساسة",
+    displayNameEn: "View sensitive operational metrics",
     module: "analytics",
   },
 ];

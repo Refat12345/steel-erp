@@ -12,6 +12,7 @@ import {
   getUserPermissionMatrix,
   setUserPermissionOverrides,
 } from "@/lib/services/user-permission.service";
+import { getRequestLocale } from "@/lib/i18n/request-locale";
 
 export async function GET(
   _req: NextRequest,
@@ -26,7 +27,8 @@ export async function GET(
   if (isNaN(userId)) return badRequest("invalidId");
 
   try {
-    const matrix = await getUserPermissionMatrix(userId, session.role);
+    const locale = await getRequestLocale();
+    const matrix = await getUserPermissionMatrix(userId, session.role, locale);
     return NextResponse.json({ success: true, data: matrix });
   } catch (e) {
     return handleServiceError(e);
@@ -52,11 +54,13 @@ export async function PUT(
   }
 
   try {
+    const locale = await getRequestLocale();
     const matrix = await setUserPermissionOverrides(
       userId,
       parsed.data.permissions,
       session.userId,
       session.role,
+      locale,
     );
     return NextResponse.json({
       success: true,

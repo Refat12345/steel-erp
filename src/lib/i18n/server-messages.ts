@@ -44,6 +44,37 @@ function lookup(tree: MessageTree, path: string): string | undefined {
   return typeof cur === "string" ? cur : undefined;
 }
 
+/**
+ * Resolve enum-reference tokens inside a param value against the message
+ * catalog. A token has the form `@namespace.path.to.key` (e.g.
+ * `@enums.materialKind.REBAR`). Unresolved tokens are left untouched so
+ * incidental `@` characters (emails, etc.) pass through unchanged.
+ *
+ * This lets locale-agnostic services pass an enum code as a message param
+ * and have it translated at the API/middleware boundary — the "codes
+ * translated at display time" pattern from the bilingual i18n plan.
+ */
+export function resolveEnumRefs(locale: Locale, value: string): string {
+  if (!value.includes("@")) return value;
+  return value.replace(/@([A-Za-z][\w]*(?:\.[\w-]+)+)/g, (token, path: string) => {
+    const resolved =
+      lookup(CATALOG[locale], path) ?? lookup(CATALOG[DEFAULT_LOCALE], path);
+    return resolved ?? token;
+  });
+}
+
+function resolveParams(
+  locale: Locale,
+  params?: TranslateParams,
+): TranslateParams | undefined {
+  if (!params) return params;
+  const out: TranslateParams = {};
+  for (const [key, value] of Object.entries(params)) {
+    out[key] = typeof value === "string" ? resolveEnumRefs(locale, value) : value;
+  }
+  return out;
+}
+
 /** Replace `{name}` placeholders (next-intl-compatible, no plural/select). */
 export function interpolate(
   template: string,
@@ -75,7 +106,7 @@ export function translateMessage(
     lookup(CATALOG[locale], `${namespace}.${bare}`) ??
     lookup(CATALOG[DEFAULT_LOCALE], `${namespace}.${bare}`);
   if (!template) return bare;
-  return interpolate(template, params);
+  return interpolate(template, resolveParams(locale, params));
 }
 
 export function translateError(
@@ -110,15 +141,17 @@ export function resolveApiErrorMessage(
     ? keyOrMessage.slice("errors.".length)
     : keyOrMessage;
 
+  const resolvedParams = resolveParams(locale, params);
+
   const fromValidation =
     lookup(CATALOG[locale], `validation.${bareValidation}`) ??
     lookup(CATALOG[DEFAULT_LOCALE], `validation.${bareValidation}`);
-  if (fromValidation) return interpolate(fromValidation, params);
+  if (fromValidation) return interpolate(fromValidation, resolvedParams);
 
   const fromErrors =
     lookup(CATALOG[locale], `errors.${bareErrors}`) ??
     lookup(CATALOG[DEFAULT_LOCALE], `errors.${bareErrors}`);
-  if (fromErrors) return interpolate(fromErrors, params);
+  if (fromErrors) return interpolate(fromErrors, resolvedParams);
 
   return keyOrMessage;
 }

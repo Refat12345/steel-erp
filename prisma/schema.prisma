@@ -197,6 +197,9 @@ model User {
 model Role {
   code        String @id
   displayName String @map("display_name")
+  /// English display name. Nullable until backfilled from rbac-source.ts;
+  /// rendered via localizedName() with an Arabic fallback when empty.
+  displayNameEn String? @map("display_name_en")
 
   users              User[]
   defaultPermissions RoleDefaultPermission[]
@@ -207,6 +210,9 @@ model Role {
 model Permission {
   code        String @id
   displayName String @map("display_name")
+  /// English display name. Nullable until backfilled from rbac-source.ts;
+  /// rendered via localizedName() with an Arabic fallback when empty.
+  displayNameEn String? @map("display_name_en")
   module      String
   description String @default("")
 
@@ -276,6 +282,9 @@ model Customer {
 model Destination {
   id        Int      @id @default(autoincrement())
   name      String   @unique
+  /// English display name. Nullable until backfilled from en-labels.ts;
+  /// rendered via localizedName() with an Arabic fallback when empty.
+  nameEn    String?  @map("name_en")
   details   String?
   isActive  Boolean  @default(true) @map("is_active")
   sortOrder Int      @default(0) @map("sort_order")
@@ -459,6 +468,9 @@ model SizeLookup {
   id                 Int     @id @default(autoincrement())
   code               String  @unique
   displayName        String  @map("display_name")
+  /// English display name. Nullable until backfilled from en-labels.ts;
+  /// rendered via localizedName() with an Arabic fallback when empty.
+  displayNameEn      String? @map("display_name_en")
   isSpecialRatio     Boolean @default(false) @map("is_special_ratio")
   subjectToTolerance Boolean @default(true) @map("subject_to_tolerance")
   isBundleType       Boolean @default(true) @map("is_bundle_type")
@@ -487,6 +499,9 @@ model StockYard {
   id       Int     @id @default(autoincrement())
   code     String  @unique // FRONT | BACK
   nameAr   String  @map("name_ar")
+  /// English display name. Nullable; rendered via localizedName() with an
+  /// Arabic fallback when empty.
+  nameEn   String? @map("name_en")
   isActive Boolean @default(true) @map("is_active")
 
   locations StockLocation[]
@@ -502,6 +517,9 @@ model StockLocation {
   code           String
   /// Free, editable display label (e.g. «A5 محافظات»).
   nameAr         String               @map("name_ar")
+  /// Optional English display label. Nullable; rendered via localizedName()
+  /// with an Arabic fallback when empty.
+  nameEn         String?              @map("name_en")
   segment        StockLocationSegment
   unit           StockUnit
   /// Commercial grade this site holds. FIRST for GENERAL/GOVERNORATES,

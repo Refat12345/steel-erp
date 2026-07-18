@@ -31,6 +31,7 @@ export async function listActiveDestinations({
     select: {
       id: true,
       name: true,
+      nameEn: true,
       details: true,
     },
   });

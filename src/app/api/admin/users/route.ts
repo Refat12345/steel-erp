@@ -10,6 +10,8 @@ import {
 } from "@/lib/api-utils";
 import { createUserSchema } from "@/lib/validators/user";
 import { listUsers, createUser } from "@/lib/services/user.service";
+import { getRequestLocale } from "@/lib/i18n/request-locale";
+import { localizedRole } from "@/lib/localized-name";
 
 export async function GET(req: NextRequest) {
   const session = await getApiSession();
@@ -25,8 +27,13 @@ export async function GET(req: NextRequest) {
     isActiveParam === "true" ? true : isActiveParam === "false" ? false : undefined;
 
   try {
+    const locale = await getRequestLocale();
     const result = await listUsers({ roleCode, isActive, search }, pagination);
-    return NextResponse.json({ success: true, ...result });
+    const data = result.data.map((u) => ({
+      ...u,
+      role: { ...u.role, displayName: localizedRole(u.role, locale) },
+    }));
+    return NextResponse.json({ success: true, ...result, data });
   } catch (e) {
     return handleServiceError(e);
   }

@@ -9,6 +9,7 @@ import {
 } from "@/lib/api-utils";
 import { copyUserPermissionsSchema } from "@/lib/validators/user-permissions";
 import { copyUserPermissionOverrides } from "@/lib/services/user-permission.service";
+import { getRequestLocale } from "@/lib/i18n/request-locale";
 
 export async function POST(
   req: NextRequest,
@@ -29,11 +30,13 @@ export async function POST(
   }
 
   try {
+    const locale = await getRequestLocale();
     const matrix = await copyUserPermissionOverrides(
       userId,
       parsed.data.sourceUserId,
       session.userId,
       session.role,
+      locale,
     );
     return NextResponse.json({
       success: true,
