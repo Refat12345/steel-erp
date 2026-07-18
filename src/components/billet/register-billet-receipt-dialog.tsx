@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -20,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { getTextDirection, type Locale } from "@/i18n/config";
 
 interface ContractOption {
   contractNumber: string;
@@ -34,6 +36,9 @@ interface Props {
 }
 
 export function RegisterBilletReceiptDialog({ open, onOpenChange, onSuccess }: Props) {
+  const t = useTranslations("billet");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
   const [contracts, setContracts] = useState<ContractOption[]>([]);
   const [loadingRef, setLoadingRef] = useState(true);
   const [contractNumber, setContractNumber] = useState("");
@@ -43,7 +48,6 @@ export function RegisterBilletReceiptDialog({ open, onOpenChange, onSuccess }: P
   const [declaredWeightKg, setDeclaredWeightKg] = useState("");
   const [bundleCount, setBundleCount] = useState("");
   const [notes, setNotes] = useState("");
-  // length -> entered expected pieces (string)
   const [pieces, setPieces] = useState<Record<number, string>>({});
   const [saving, setSaving] = useState(false);
 
@@ -54,11 +58,11 @@ export function RegisterBilletReceiptDialog({ open, onOpenChange, onSuccess }: P
       const json = await res.json();
       if (json.success) setContracts(json.data || []);
     } catch {
-      toast.error("خطأ في تحميل عقود الموردين");
+      toast.error(t("receipts.errorLoadContracts"));
     } finally {
       setLoadingRef(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (open) fetchContracts();
@@ -84,16 +88,16 @@ export function RegisterBilletReceiptDialog({ open, onOpenChange, onSuccess }: P
     e.preventDefault();
 
     if (!contractNumber) {
-      toast.error("يرجى اختيار عقد المورّد");
+      toast.error(t("receipts.toastSelectContract"));
       return;
     }
     if (!driverName.trim() || !plateNumber.trim()) {
-      toast.error("اسم السائق ورقم اللوحة مطلوبان");
+      toast.error(t("receipts.toastDriverPlateRequired"));
       return;
     }
     const weight = Number(declaredWeightKg);
     if (!Number.isFinite(weight) || weight <= 0) {
-      toast.error("وزن الطلبية المعلن يجب أن يكون أكبر من صفر");
+      toast.error(t("receipts.toastDeclaredWeightPositive"));
       return;
     }
 
@@ -103,13 +107,15 @@ export function RegisterBilletReceiptDialog({ open, onOpenChange, onSuccess }: P
       if (!raw) continue;
       const n = Number(raw);
       if (!Number.isInteger(n) || n <= 0) {
-        toast.error(`عدد القطع للطول ${line.billetLengthM}م غير صالح`);
+        toast.error(
+          t("receipts.toastPiecesInvalidForLength", { length: line.billetLengthM }),
+        );
         return;
       }
       pieceLines.push({ billetLengthM: line.billetLengthM, expectedPieces: n });
     }
     if (pieceLines.length === 0) {
-      toast.error("أدخل عدد القطع المعلن لطول واحد على الأقل");
+      toast.error(t("receipts.toastEnterAtLeastOneLength"));
       return;
     }
 
@@ -131,12 +137,12 @@ export function RegisterBilletReceiptDialog({ open, onOpenChange, onSuccess }: P
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success(`تم تسجيل الاستلام ${json.data.receiptNumber}`);
+      toast.success(t("receipts.toastRegistered", { number: json.data.receiptNumber }));
       reset();
       onOpenChange(false);
       onSuccess();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "خطأ في التسجيل");
+      toast.error(e instanceof Error ? e.message : t("receipts.toastRegisterError"));
     } finally {
       setSaving(false);
     }
@@ -144,14 +150,16 @@ export function RegisterBilletReceiptDialog({ open, onOpenChange, onSuccess }: P
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] min-w-0 overflow-x-hidden overflow-y-auto">
+      <DialogContent
+        dir={dir}
+        className="max-w-lg max-h-[90vh] min-w-0 overflow-x-hidden overflow-y-auto"
+      >
         <DialogHeader>
-          <DialogTitle>تسجيل استلام بيلت</DialogTitle>
+          <DialogTitle>{t("receipts.registerTitle")}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="min-w-0 space-y-4">
-          {/* Contract */}
           <div className="space-y-2">
-            <Label>عقد المورّد *</Label>
+            <Label>{t("receipts.supplierContractRequired")}</Label>
             {loadingRef ? (
               <div className="h-9 animate-pulse rounded-md bg-muted" />
             ) : (
@@ -163,17 +171,20 @@ export function RegisterBilletReceiptDialog({ open, onOpenChange, onSuccess }: P
                 }}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="اختر العقد" />
+                  <SelectValue placeholder={t("receipts.selectContract")} />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent dir={dir}>
                   {contracts.length === 0 ? (
                     <SelectItem value="" disabled>
-                      لا توجد عقود فعّالة
+                      {t("receipts.noActiveContracts")}
                     </SelectItem>
                   ) : (
                     contracts.map((c) => (
                       <SelectItem key={c.contractNumber} value={c.contractNumber}>
-                        {c.contractNumber} — {c.supplierName}
+                        {t("receipts.contractOption", {
+                          number: c.contractNumber,
+                          supplier: c.supplierName,
+                        })}
                       </SelectItem>
                     ))
                   )}
@@ -182,40 +193,39 @@ export function RegisterBilletReceiptDialog({ open, onOpenChange, onSuccess }: P
             )}
           </div>
 
-          {/* Driver + Plate */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label htmlFor="plateNumber">رقم اللوحة *</Label>
+              <Label htmlFor="plateNumber">{t("receipts.plateRequired")}</Label>
               <Input
                 id="plateNumber"
                 value={plateNumber}
                 onChange={(e) => setPlateNumber(e.target.value)}
-                placeholder="مثال: دمشق 123456"
+                placeholder={t("receipts.platePlaceholder")}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="driverName">اسم السائق *</Label>
+              <Label htmlFor="driverName">{t("receipts.driverRequired")}</Label>
               <Input
                 id="driverName"
                 value={driverName}
                 onChange={(e) => setDriverName(e.target.value)}
-                placeholder="الاسم الكامل"
+                placeholder={t("receipts.driverPlaceholder")}
               />
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label htmlFor="driverNationalId">رقم السائق (اختياري)</Label>
+              <Label htmlFor="driverNationalId">{t("receipts.driverIdOptional")}</Label>
               <Input
                 id="driverNationalId"
                 value={driverNationalId}
                 onChange={(e) => setDriverNationalId(e.target.value)}
-                placeholder="رقم الهوية / الهاتف"
+                placeholder={t("receipts.driverIdPlaceholder")}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="declaredWeight">وزن الطلبية المعلن (كغ) *</Label>
+              <Label htmlFor="declaredWeight">{t("receipts.declaredWeightRequired")}</Label>
               <Input
                 id="declaredWeight"
                 type="number"
@@ -224,21 +234,24 @@ export function RegisterBilletReceiptDialog({ open, onOpenChange, onSuccess }: P
                 inputMode="decimal"
                 value={declaredWeightKg}
                 onChange={(e) => setDeclaredWeightKg(e.target.value)}
-                placeholder="من ارسالية المورّد"
+                placeholder={t("receipts.declaredWeightPlaceholder")}
               />
             </div>
           </div>
 
-          {/* Declared pieces per contract length */}
           <div className="space-y-2">
-            <Label>عدد القطع المعلن لكل طول *</Label>
+            <Label>{t("receipts.declaredPiecesPerLength")}</Label>
             {!selectedContract ? (
-              <p className="text-sm text-muted-foreground">اختر العقد أولاً لعرض الأطوال</p>
+              <p className="text-sm text-muted-foreground">
+                {t("receipts.selectContractFirst")}
+              </p>
             ) : (
               <div className="space-y-2">
                 {selectedContract.pieceLines.map((line) => (
                   <div key={line.billetLengthM} className="flex items-center gap-3">
-                    <span className="w-16 text-sm font-medium">{line.billetLengthM}م</span>
+                    <span className="w-16 text-sm font-medium">
+                      {t("lengthMeters", { n: line.billetLengthM })}
+                    </span>
                     <Input
                       type="number"
                       min={0}
@@ -250,19 +263,19 @@ export function RegisterBilletReceiptDialog({ open, onOpenChange, onSuccess }: P
                           [line.billetLengthM]: e.target.value,
                         }))
                       }
-                      placeholder="عدد القطع"
+                      placeholder={t("contracts.pieceCountPlaceholder")}
                     />
                   </div>
                 ))}
                 <p className="text-xs text-muted-foreground">
-                  اترك الطول غير الموجود على هذه الشاحنة فارغاً.
+                  {t("receipts.leaveEmptyTruckLengthHint")}
                 </p>
               </div>
             )}
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="bundleCount">عدد الربطات (اختياري)</Label>
+            <Label htmlFor="bundleCount">{t("receipts.bundleCountOptional")}</Label>
             <Input
               id="bundleCount"
               type="number"
@@ -273,7 +286,7 @@ export function RegisterBilletReceiptDialog({ open, onOpenChange, onSuccess }: P
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="notes">ملاحظات (اختياري)</Label>
+            <Label htmlFor="notes">{t("notesOptional")}</Label>
             <Textarea
               id="notes"
               value={notes}
@@ -284,10 +297,10 @@ export function RegisterBilletReceiptDialog({ open, onOpenChange, onSuccess }: P
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              إلغاء
+              {t("cancel")}
             </Button>
             <Button type="submit" disabled={saving || loadingRef}>
-              {saving ? "جاري التسجيل..." : "تسجيل"}
+              {saving ? t("receipts.registering") : t("receipts.register")}
             </Button>
           </DialogFooter>
         </form>

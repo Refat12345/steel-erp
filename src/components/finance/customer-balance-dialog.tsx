@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -19,6 +20,8 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
+import { formatAmount } from "@/lib/number-format";
+import { getTextDirection, type Locale } from "@/i18n/config";
 
 interface OrderBalance {
   orderNumber: string;
@@ -40,40 +43,16 @@ interface BalanceData {
   orderBalances: OrderBalance[];
 }
 
-const kindLabels: Record<string, string> = {
-  REBAR: "مبروم",
-  SHORTBAR_1_4M: "قصائر 1–4 م",
-  SHORTBAR_4_12M: "قصائر 4–12 م",
-  SCRAP: "خردة",
-  BILLET_WIRE: "أسلاك تربيط",
-  REBAR_UNDER_70CM: "مبروم أقل من 70 سم",
-  BILLET_SCRAP_10M: "بيلت خردة 10m",
-  SCRAP_50CM_1M: "سكراب من 50 سم إلى 1 م",
-};
-
-const statusLabels: Record<string, string> = {
-  draft: "مسودة",
-  approved: "معتمد",
-  in_progress: "قيد التنفيذ",
-  completed: "مكتمل",
-  cancelled: "ملغى",
-};
-
-function formatAmount(value: string): string {
-  const n = Number(value);
-  if (Number.isNaN(n)) return value;
-  return n.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
 interface Props {
   customerId: number | null;
   onClose: () => void;
 }
 
 export function CustomerBalanceDialog({ customerId, onClose }: Props) {
+  const t = useTranslations("finance");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
   const [data, setData] = useState<BalanceData | null>(null);
   const currentData = data?.customerId === customerId ? data : null;
 
@@ -86,23 +65,35 @@ export function CustomerBalanceDialog({ customerId, onClose }: Props) {
       .then((json) => {
         if (cancelled) return;
         if (json.success) setData(json.data);
-        else toast.error("خطأ في جلب الرصيد");
+        else toast.error(t("errorLoadBalance"));
       })
       .catch(() => {
-        if (!cancelled) toast.error("خطأ في الاتصال");
+        if (!cancelled) toast.error(t("errorConnectionShort"));
       });
 
     return () => {
       cancelled = true;
     };
-  }, [customerId]);
+  }, [customerId, t]);
+
+  function kindLabel(kind: string): string {
+    const key = `materialKind.${kind}` as const;
+    return tEnums.has(key) ? tEnums(key) : kind;
+  }
+
+  function statusLabel(status: string): string {
+    const key = `salesOrderStatus.${status}` as const;
+    return tEnums.has(key) ? tEnums(key) : status;
+  }
 
   return (
     <Dialog open={customerId != null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent dir={dir} className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>
-            رصيد العميل {currentData ? `— ${currentData.customerName}` : ""}
+            {currentData
+              ? t("balanceTitleNamed", { name: currentData.customerName })
+              : t("balanceTitle")}
           </DialogTitle>
         </DialogHeader>
 
@@ -114,23 +105,27 @@ export function CustomerBalanceDialog({ customerId, onClose }: Props) {
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <Card>
                 <CardContent className="pt-4 pb-3 text-center">
-                  <p className="text-xs text-muted-foreground mb-1">إجمالي المدفوع</p>
-                  <p className="font-mono text-lg font-bold">${formatAmount(currentData.totalPaid)}</p>
+                  <p className="text-xs text-muted-foreground mb-1">{t("totalPaid")}</p>
+                  <p className="font-mono text-lg font-bold financial-value">
+                    ${formatAmount(currentData.totalPaid)}
+                  </p>
                 </CardContent>
               </Card>
               <Card>
                 <CardContent className="pt-4 pb-3 text-center">
-                  <p className="text-xs text-muted-foreground mb-1">إجمالي الموزّع</p>
-                  <p className="font-mono text-lg font-bold">${formatAmount(currentData.totalAllocated)}</p>
+                  <p className="text-xs text-muted-foreground mb-1">{t("totalAllocated")}</p>
+                  <p className="font-mono text-lg font-bold financial-value">
+                    ${formatAmount(currentData.totalAllocated)}
+                  </p>
                 </CardContent>
               </Card>
               <Card>
                 <CardContent className="pt-4 pb-3 text-center">
-                  <p className="text-xs text-muted-foreground mb-1">رصيد غير مخصّص</p>
-                  <p className="font-mono text-lg font-bold text-primary">
+                  <p className="text-xs text-muted-foreground mb-1">{t("unallocatedCredit")}</p>
+                  <p className="font-mono text-lg font-bold text-primary financial-value">
                     ${formatAmount(currentData.unallocatedCredit)}
                   </p>
                 </CardContent>
@@ -139,21 +134,21 @@ export function CustomerBalanceDialog({ customerId, onClose }: Props) {
 
             <div>
               <h4 className="text-sm font-semibold mb-2">
-                أوامر البيع ({currentData.orderBalances.length})
+                {t("salesOrdersTitle", { count: currentData.orderBalances.length })}
               </h4>
               {currentData.orderBalances.length === 0 ? (
-                <p className="text-sm text-muted-foreground">لا توجد أوامر بيع</p>
+                <p className="text-sm text-muted-foreground">{t("noSalesOrders")}</p>
               ) : (
                 <div className="rounded-lg border overflow-x-auto">
                   <Table className="min-w-[500px]">
                     <TableHeader>
                       <TableRow>
-                        <TableHead>رقم الأمر</TableHead>
-                        <TableHead>النوع</TableHead>
-                        <TableHead>الحالة</TableHead>
-                        <TableHead className="text-left">مدفوعات مخصّصة</TableHead>
-                        <TableHead className="text-left">قيمة التحميل</TableHead>
-                        <TableHead className="text-left">الرصيد</TableHead>
+                        <TableHead>{t("colOrderNumber")}</TableHead>
+                        <TableHead>{t("colKind")}</TableHead>
+                        <TableHead>{t("colStatus")}</TableHead>
+                        <TableHead className="text-start">{t("colAllocatedPayments")}</TableHead>
+                        <TableHead className="text-start">{t("colLoadedValue")}</TableHead>
+                        <TableHead className="text-start">{t("colBalance")}</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -163,20 +158,20 @@ export function CustomerBalanceDialog({ customerId, onClose }: Props) {
                             {ob.orderNumber}
                           </TableCell>
                           <TableCell className="text-sm">
-                            {kindLabels[ob.kind] ?? ob.kind}
+                            {kindLabel(ob.kind)}
                           </TableCell>
                           <TableCell>
                             <Badge variant="secondary" className="text-xs">
-                              {statusLabels[ob.status] ?? ob.status}
+                              {statusLabel(ob.status)}
                             </Badge>
                           </TableCell>
-                          <TableCell className="font-mono text-sm">
+                          <TableCell className="font-mono text-sm financial-value">
                             ${formatAmount(ob.totalAllocated)}
                           </TableCell>
-                          <TableCell className="font-mono text-sm">
+                          <TableCell className="font-mono text-sm financial-value">
                             ${formatAmount(ob.loadedValue)}
                           </TableCell>
-                          <TableCell className="font-mono text-sm">
+                          <TableCell className="font-mono text-sm financial-value">
                             ${formatAmount(ob.balance)}
                           </TableCell>
                         </TableRow>

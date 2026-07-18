@@ -7,7 +7,11 @@ import { toast } from "sonner";
 import { sessionHasPermission } from "@/lib/client-permissions";
 import { compressImage } from "@/lib/compress-image";
 import { fetchUploadedFile } from "@/lib/uploaded-file-url";
+import { useLocale, useTranslations } from "next-intl";
+import { getTextDirection, type Locale } from "@/i18n/config";
 import { formatDate } from "@/lib/date-format";
+import { formatDecimal, formatInteger } from "@/lib/number-format";
+import { formatDurationLocalized } from "@/lib/format-duration";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +43,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  ArrowLeft,
   ArrowRight,
   AlertTriangle,
   Loader2,
@@ -106,36 +111,14 @@ interface ReceiptDetail {
   closer: { fullName: string } | null;
 }
 
-const statusMap: Record<
-  string,
-  { label: string; variant: "default" | "secondary" | "destructive" | "outline" }
-> = {
-  Registered: { label: "مسجّلة", variant: "outline" },
-  Loaded: { label: "وُزنت محمّلة", variant: "secondary" },
-  Unloading: { label: "قيد التفريغ", variant: "secondary" },
-  AwaitingExit: { label: "بانتظار الخروج", variant: "secondary" },
-  Completed: { label: "مكتملة", variant: "default" },
-  Cancelled: { label: "ملغاة", variant: "destructive" },
+const statusMap: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  Registered: "outline",
+  Loaded: "secondary",
+  Unloading: "secondary",
+  AwaitingExit: "secondary",
+  Completed: "default",
+  Cancelled: "destructive",
 };
-
-function formatKg(value: string | number | null, digits = 1): string {
-  if (value == null) return "—";
-  const n = typeof value === "string" ? Number(value) : value;
-  if (!Number.isFinite(n)) return "—";
-  return n.toLocaleString("en-US", { maximumFractionDigits: digits });
-}
-
-function formatDuration(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) return "—";
-  const totalSec = Math.floor(ms / 1000);
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
-  if (m >= 60) {
-    const h = Math.floor(m / 60);
-    return `${h} س ${m % 60} د`;
-  }
-  return `${m} د ${s} ث`;
-}
 
 interface CountRow {
   counted: string;
@@ -155,6 +138,13 @@ interface UnloadLinePayload {
 }
 
 export function BilletReceiptOperationView({ receiptId }: { receiptId: number }) {
+  const t = useTranslations("billet");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+  const BackIcon = dir === "rtl" ? ArrowRight : ArrowLeft;
+  const formatKg = (value: string | number | null) =>
+    value == null || !Number.isFinite(Number(value)) ? t("emDash") : formatDecimal(value, 1);
   const { data: session } = useSession();
   const router = useRouter();
 
@@ -218,11 +208,11 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
         toast.error(json.error);
       }
     } catch {
-      toast.error("خطأ في جلب سجل الاستلام");
+      toast.error(t("receipts.errorLoadDetail"));
     } finally {
       setLoading(false);
     }
-  }, [receiptId]);
+  }, [receiptId, t]);
 
   const canEditRegistration =
     canRegister &&
@@ -247,11 +237,11 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
         toast.error(json.error);
       }
     } catch {
-      toast.error("خطأ في تحميل عقود الموردين");
+      toast.error(t("receipts.errorLoadContracts"));
     } finally {
       setContractsLoading(false);
     }
-  }, []);
+  }, [t]);
 
   const openEditDialog = async () => {
     if (!receipt) return;
@@ -274,17 +264,17 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
   const submitRegistrationEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!receipt || !selectedEditContract) {
-      toast.error("يرجى اختيار عقد المورّد");
+      toast.error(t("receipts.toastSelectContract"));
       return;
     }
     if (!editDriverName.trim() || !editPlateNumber.trim()) {
-      toast.error("اسم السائق ورقم اللوحة مطلوبان");
+      toast.error(t("receipts.toastDriverPlateRequired"));
       return;
     }
 
     const weight = Number(editDeclaredWeightKg);
     if (!Number.isFinite(weight) || weight <= 0) {
-      toast.error("وزن الطلبية المعلن يجب أن يكون أكبر من صفر");
+      toast.error(t("receipts.toastDeclaredWeightPositive"));
       return;
     }
 
@@ -294,13 +284,13 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
       if (!raw) continue;
       const pieces = Number(raw);
       if (!Number.isInteger(pieces) || pieces <= 0) {
-        toast.error(`عدد القطع للطول ${line.billetLengthM}م غير صالح`);
+        toast.error(t("receipts.toastPiecesInvalidForLength", { length: line.billetLengthM }));
         return;
       }
       pieceLines.push({ billetLengthM: line.billetLengthM, expectedPieces: pieces });
     }
     if (pieceLines.length === 0) {
-      toast.error("أدخل عدد القطع المعلن لطول واحد على الأقل");
+      toast.error(t("receipts.toastEnterAtLeastOneLength"));
       return;
     }
 
@@ -325,11 +315,11 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
         toast.error(json.error);
         return;
       }
-      toast.success("تم تعديل بيانات الشاحنة");
+      toast.success(t("receipts.toastTruckUpdated"));
       setEditOpen(false);
       fetchReceipt();
     } catch {
-      toast.error("خطأ في حفظ التعديل");
+      toast.error(t("receipts.toastEditSaveError"));
     } finally {
       setBusy(false);
     }
@@ -349,7 +339,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
   const submitLoadedWeight = async () => {
     const w = Number(loadedWeight);
     if (!Number.isFinite(w) || w <= 0) {
-      toast.error("أدخل وزناً صحيحاً");
+      toast.error(t("receipts.toastInvalidWeight"));
       return;
     }
     setBusy(true);
@@ -364,11 +354,11 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
         toast.error(json.error);
         return;
       }
-      toast.success("تم تسجيل وزن المحمّل");
+      toast.success(t("receipts.toastLoadedRecorded"));
       setLoadedWeight("");
       fetchReceipt();
     } catch {
-      toast.error("خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setBusy(false);
     }
@@ -391,10 +381,10 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
         toast.error(json.error);
         return;
       }
-      toast.success("تم بدء التفريغ — يعمل عدّاد الزمن الآن");
+      toast.success(t("receipts.toastUnloadStarted"));
       fetchReceipt();
     } catch {
-      toast.error("خطأ في رفع الصورة");
+      toast.error(t("receipts.toastPhotoUploadError"));
     } finally {
       setBusy(false);
       if (photoInputRef.current) photoInputRef.current.value = "";
@@ -417,17 +407,21 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
     for (const l of receipt.pieceLines) {
       const row = countRows[l.billetLengthM];
       if (!row || row.counted === "") {
-        toast.error(`أدخل العدد المعدود للطول ${l.billetLengthM}م`);
+        toast.error(t("receipts.toastEnterCountedForLength", { length: l.billetLengthM }));
         return;
       }
       const counted = Number(row.counted);
       const rejected = Number(row.rejected || "0");
       if (!Number.isInteger(counted) || counted < 0) {
-        toast.error(`عدد القطع للطول ${l.billetLengthM}م غير صالح`);
+        toast.error(
+          t("receipts.toastPiecesInvalidForLength", {
+            length: l.billetLengthM,
+          }),
+        );
         return;
       }
       if (!Number.isInteger(rejected) || rejected < 0 || rejected > counted) {
-        toast.error(`المرتجع للطول ${l.billetLengthM}م غير صالح`);
+        toast.error(t("receipts.toastRejectedInvalidForLength", { length: l.billetLengthM }));
         return;
       }
       totalAcceptedPieces += counted - rejected;
@@ -435,13 +429,13 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
     }
 
     if (totalAcceptedPieces <= 0) {
-      toast.error("لا يمكن تثبيت العدّ لأن المقبول صفر. إذا كل القطع مرفوضة، ألغِ الاستلام مع ذكر السبب.");
+      toast.error(t("receipts.toastZeroAccepted"));
       return;
     }
 
     const mismatch = hasMismatch();
     if (mismatch && !mismatchReason.trim()) {
-      toast.error("يوجد فرق بالعدد — سبب الفرق إجباري للإكمال");
+      toast.error(t("receipts.toastMismatchReasonRequired"));
       return;
     }
 
@@ -467,14 +461,14 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
         toast.error(json.error);
         return;
       }
-      toast.success("تم تسجيل نتيجة التفريغ");
+      toast.success(t("receipts.toastUnloadResultRecorded"));
       setConfirmUnloadOpen(false);
       setPendingUnloadLines([]);
       setPendingUnloadMismatch(false);
       setMismatchReason("");
       fetchReceipt();
     } catch {
-      toast.error("خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setBusy(false);
     }
@@ -492,10 +486,10 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
         toast.error(json.error);
         return;
       }
-      toast.success("تم الرجوع لتعديل العدّ");
+      toast.success(t("receipts.toastReopenCount"));
       fetchReceipt();
     } catch {
-      toast.error("خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setBusy(false);
     }
@@ -504,7 +498,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
   const submitComplete = async () => {
     const w = Number(emptyWeight);
     if (!Number.isFinite(w) || w <= 0) {
-      toast.error("أدخل وزن الفارغ");
+      toast.error(t("receipts.toastEnterEmptyWeight"));
       return;
     }
     setBusy(true);
@@ -519,11 +513,11 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
         toast.error(json.error);
         return;
       }
-      toast.success("تم إغلاق الاستلام وخصم رصيد العقد");
+      toast.success(t("receipts.toastClosed"));
       setEmptyWeight("");
       fetchReceipt();
     } catch {
-      toast.error("خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setBusy(false);
     }
@@ -546,10 +540,10 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
         toast.error(json.error);
         return;
       }
-      toast.success("تم رفع المرفق");
+      toast.success(t("receipts.toastAttachmentUploaded"));
       fetchReceipt();
     } catch {
-      toast.error("خطأ في رفع المرفق");
+      toast.error(t("receipts.toastAttachmentUploadError"));
     } finally {
       setBusy(false);
       if (attachInputRef.current) attachInputRef.current.value = "";
@@ -558,7 +552,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
 
   const submitCancel = async () => {
     if (!cancelReason.trim()) {
-      toast.error("يجب إدخال سبب الإلغاء");
+      toast.error(t("receipts.toastCancelReasonRequired"));
       return;
     }
     setBusy(true);
@@ -573,12 +567,12 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
         toast.error(json.error);
         return;
       }
-      toast.success("تم إلغاء الاستلام");
+      toast.success(t("receipts.toastCancelled"));
       setCancelOpen(false);
       setCancelReason("");
       fetchReceipt();
     } catch {
-      toast.error("خطأ في الاتصال");
+      toast.error(t("errorConnection"));
     } finally {
       setBusy(false);
     }
@@ -589,17 +583,17 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
     try {
       const res = await fetchUploadedFile(filePath);
       if (!res.ok) {
-        toast.error("تعذر تحميل الملف");
+        toast.error(t("receipts.toastFileLoadError"));
         return;
       }
       const blob = await res.blob();
       const objUrl = URL.createObjectURL(blob);
       const win = window.open(objUrl, "_blank");
       if (win) win.opener = null;
-      else toast.error("اسمح بالنوافذ المنبثقة لمعاينة الملف");
+      else toast.error(t("receipts.toastPopupBlocked"));
       window.setTimeout(() => URL.revokeObjectURL(objUrl), 120_000);
     } catch {
-      toast.error("تعذر الاتصال بالخادم");
+      toast.error(t("receipts.toastServerError"));
     } finally {
       setOpeningAttachmentId(null);
     }
@@ -619,9 +613,9 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
     return (
       <div className="flex flex-col items-center justify-center h-64 gap-4">
         <AlertTriangle className="h-12 w-12 text-muted-foreground" />
-        <p className="text-muted-foreground">سجل الاستلام غير موجود</p>
+        <p className="text-muted-foreground">{t("receipts.notFound")}</p>
         <Button variant="outline" onClick={() => router.push("/billet-receipts")}>
-          العودة للقائمة
+          {t("receipts.backToList")}
         </Button>
       </div>
     );
@@ -662,20 +656,16 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
             size="icon-sm"
             onClick={() => router.push("/billet-receipts")}
           >
-            <ArrowRight className="h-4 w-4" />
+            <BackIcon className="h-4 w-4" />
           </Button>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-bold tracking-tight font-mono">
                 {receipt.receiptNumber}
               </h1>
-              <Badge variant={st.variant}>{st.label}</Badge>
-              {receipt.isPriorWithdrawal && (
-                <Badge variant="secondary">سحب سابق</Badge>
-              )}
-              {receipt.isAdjustment && (
-                <Badge variant="outline">تسوية رصيد</Badge>
-              )}
+              <Badge variant={st}>{tEnums(`billetReceiptStatus.${receipt.status}`)}</Badge>
+              {receipt.isPriorWithdrawal && <Badge variant="secondary">{t("contracts.typePriorWithdrawal")}</Badge>}
+              {receipt.isAdjustment && <Badge variant="outline">{t("receipts.balanceAdjustmentBadge")}</Badge>}
             </div>
             <p className="text-xs text-muted-foreground mt-0.5 truncate">
               {receipt.plateNumber} — {receipt.driverName}
@@ -690,7 +680,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
               onClick={openEditDialog}
               disabled={busy}
             >
-              تعديل الشاحنة
+              {t("receipts.editTruck")}
             </Button>
           )}
           {canCancel && !isTerminal && (
@@ -700,7 +690,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
               onClick={() => setCancelOpen(true)}
             >
               <XCircle className="h-4 w-4" />
-              إلغاء
+              {t("cancel")}
             </Button>
           )}
         </div>
@@ -711,13 +701,13 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
             <Truck className="h-4 w-4" />
-            بيانات الاستلام
+            {t("receipts.infoTitle")}
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid gap-3 sm:grid-cols-2 text-sm">
             <div>
-              <span className="text-muted-foreground">المورّد:</span>{" "}
+              <span className="text-muted-foreground">{t("receipts.labelSupplier")}</span>{" "}
               <button
                 className="font-medium text-primary hover:underline"
                 onClick={() =>
@@ -730,22 +720,22 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
             <div>
               <span className="text-muted-foreground">
                 {receipt.isPriorWithdrawal || receipt.isAdjustment
-                  ? "النوع:"
-                  : "رقم اللوحة:"}
+                  ? t("receipts.labelType")
+                  : t("receipts.labelPlate")}
               </span>{" "}
               <span className="font-medium">
                 {receipt.isPriorWithdrawal
-                  ? "سحب سابق قبل النظام"
+                  ? t("receipts.typePriorBeforeSystem")
                   : receipt.isAdjustment
-                    ? "تسوية رصيد العقد"
+                    ? t("receipts.typeBalanceAdjustment")
                     : receipt.plateNumber}
               </span>
             </div>
             <div>
               <span className="text-muted-foreground">
                 {receipt.isPriorWithdrawal || receipt.isAdjustment
-                  ? "المرجع:"
-                  : "السائق:"}
+                  ? t("receipts.labelRef")
+                  : t("receipts.labelDriver")}
               </span>{" "}
               {receipt.driverName}
               {!receipt.isPriorWithdrawal &&
@@ -755,18 +745,20 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                 : ""}
             </div>
             <div>
-              <span className="text-muted-foreground">وزن الطلبية المعلن:</span>{" "}
-              <span className="tabular-nums">{formatKg(receipt.declaredWeightKg, 3)} كغ</span>
+              <span className="text-muted-foreground">{t("receipts.labelDeclaredWeight")}</span>{" "}
+              <span className="tabular-nums">{t("kgValue", { value: formatKg(receipt.declaredWeightKg) })}</span>
             </div>
             {receipt.bundleCount != null && (
               <div>
-                <span className="text-muted-foreground">عدد الربطات:</span>{" "}
+                <span className="text-muted-foreground">{t("receipts.labelBundleCount")}</span>{" "}
                 {receipt.bundleCount}
               </div>
             )}
             <div>
               <span className="text-muted-foreground">
-                {receipt.isPriorWithdrawal ? "تاريخ السحب:" : "أُنشئ:"}
+                {receipt.isPriorWithdrawal
+                  ? t("receipts.labelWithdrawalDate")
+                  : t("receipts.labelCreated")}
               </span>{" "}
               <span dir="ltr">
                 {formatDate(receipt.priorWithdrawalDate || receipt.createdAt)}
@@ -784,14 +776,14 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <Scale className="h-4 w-4" />
-              وزن المحمّل (القبان الخارجي)
+              {t("receipts.loadedWeightTitle")}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {canWeigh ? (
               <div className="flex items-end gap-3">
                 <div className="flex-1 space-y-1.5">
-                  <Label htmlFor="loaded">الوزن عند الدخول (كغ)</Label>
+                  <Label htmlFor="loaded">{t("receipts.entryWeightLabel")}</Label>
                   <Input
                     id="loaded"
                     type="number"
@@ -800,17 +792,17 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                     inputMode="decimal"
                     value={loadedWeight}
                     onChange={(e) => setLoadedWeight(e.target.value)}
-                    placeholder="وزن الشاحنة محمّلة"
+                    placeholder={t("receipts.entryWeightPlaceholder")}
                   />
                 </div>
                 <Button onClick={submitLoadedWeight} disabled={busy}>
                   {busy && <Loader2 className="animate-spin" />}
-                  تسجيل
+                  {t("receipts.register")}
                 </Button>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">
-                بانتظار إدخال وزن المحمّل من قبل عامل القبان.
+                {t("receipts.waitingLoadedWeight")}
               </p>
             )}
           </CardContent>
@@ -823,18 +815,18 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <Camera className="h-4 w-4" />
-              بدء التفريغ — صورة الشاحنة
+              {t("receipts.startUnloadTitle")}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="rounded-lg border p-3 text-center">
-              <p className="text-xs text-muted-foreground mb-0.5">وزن المحمّل المسجّل</p>
+              <p className="text-xs text-muted-foreground mb-0.5">{t("receipts.loadedWeightRecorded")}</p>
               <p className="text-xl font-bold tabular-nums">
-                {formatKg(receipt.loadedWeightKg)} كغ
+                {t("kgValue", { value: formatKg(receipt.loadedWeightKg) })}
               </p>
             </div>
             <p className="text-sm text-muted-foreground">
-              التقاط صورة للشاحنة قبل التفريغ يبدأ عدّاد زمن التفريغ.
+              {t("receipts.startUnloadHint")}
             </p>
             {canUnload ? (
               <>
@@ -844,7 +836,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                   className="gap-1.5"
                 >
                   {busy ? <Loader2 className="animate-spin" /> : <Camera className="h-4 w-4" />}
-                  التقاط / رفع صورة وبدء العدّاد
+                  {t("receipts.captureStartTimer")}
                 </Button>
                 <input
                   ref={photoInputRef}
@@ -858,7 +850,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
               </>
             ) : (
               <p className="text-sm text-muted-foreground">
-                بانتظار عامل التحميل الداخلي لبدء التفريغ.
+                {t("receipts.waitingUnloadStart")}
               </p>
             )}
           </CardContent>
@@ -872,11 +864,13 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
             <CardTitle className="text-base flex items-center justify-between gap-2">
               <span className="flex items-center gap-2">
                 <Package className="h-4 w-4" />
-                عدّ القطع المنزّلة
+                {t("receipts.countPiecesTitle")}
               </span>
               <span className="flex items-center gap-1 text-sm font-normal text-muted-foreground">
                 <Timer className="h-4 w-4" />
-                {unloadingDurationMs != null ? formatDuration(unloadingDurationMs) : "—"}
+                {unloadingDurationMs != null
+                  ? formatDurationLocalized(unloadingDurationMs, locale)
+                  : t("emDash")}
               </span>
             </CardTitle>
           </CardHeader>
@@ -894,14 +888,14 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                         className="rounded-md border p-2.5 space-y-2"
                       >
                         <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium">{l.billetLengthM}م</span>
+                          <span className="text-sm font-medium">{t("lengthMeters", { n: formatInteger(l.billetLengthM) })}</span>
                           <span className="text-xs text-muted-foreground">
-                            المعلن: {l.expectedPieces}
+                            {t("receipts.declaredLabel")} {l.expectedPieces}
                           </span>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <div className="space-y-1">
-                            <Label className="text-xs">المعدود</Label>
+                            <Label className="text-xs">{t("receipts.counted")}</Label>
                             <Input
                               type="number"
                               min={0}
@@ -919,7 +913,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                             />
                           </div>
                           <div className="space-y-1">
-                            <Label className="text-xs">المرتجع</Label>
+                            <Label className="text-xs">{t("receipts.rejected")}</Label>
                             <Input
                               type="number"
                               min={0}
@@ -939,7 +933,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                         {mismatch && (
                           <p className="flex items-center gap-1 text-xs text-destructive">
                             <AlertTriangle className="h-3.5 w-3.5" />
-                            فرق عن المعلن
+                            {t("receipts.mismatchFromDeclared")}
                           </p>
                         )}
                       </div>
@@ -950,26 +944,26 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                 {hasMismatch() && (
                   <div className="space-y-1.5 rounded-md border border-destructive/40 bg-destructive/5 p-3">
                     <Label htmlFor="mismatchReason" className="text-destructive">
-                      سبب الفرق بالعدد (إجباري)
+                      {t("receipts.mismatchReasonRequired")}
                     </Label>
                     <Textarea
                       id="mismatchReason"
                       value={mismatchReason}
                       onChange={(e) => setMismatchReason(e.target.value)}
                       rows={2}
-                      placeholder="وضّح سبب اختلاف العدد المعدود عن المعلن..."
+                      placeholder={t("receipts.mismatchReasonPlaceholder")}
                     />
                   </div>
                 )}
 
                 <Button onClick={submitUnloadResult} disabled={busy} className="w-full">
                   {busy && <Loader2 className="animate-spin" />}
-                  تأكيد العدّ وإيقاف العدّاد
+                  {t("receipts.confirmCountStopTimer")}
                 </Button>
               </>
             ) : (
               <p className="text-sm text-muted-foreground">
-                بانتظار عامل التحميل الداخلي لإدخال العدّ.
+                {t("receipts.waitingCountEntry")}
               </p>
             )}
           </CardContent>
@@ -982,39 +976,37 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <Scale className="h-4 w-4" />
-              وزن الفارغ وإغلاق (القبان الخارجي)
+              {t("receipts.emptyWeightCloseTitle")}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {/* Weight summary — always visible */}
             <div className="grid grid-cols-3 gap-2 text-sm">
               <div className="rounded-lg border p-2.5 text-center">
-                <p className="text-xs text-muted-foreground mb-0.5">المحمّل</p>
+                <p className="text-xs text-muted-foreground mb-0.5">{t("receipts.loaded")}</p>
                 <p className="font-bold tabular-nums">
-                  {formatKg(receipt.loadedWeightKg)} كغ
+                  {t("kgValue", { value: formatKg(receipt.loadedWeightKg) })}
                 </p>
               </div>
               <div className="rounded-lg border p-2.5 text-center">
-                <p className="text-xs text-muted-foreground mb-0.5">الفارغ</p>
+                <p className="text-xs text-muted-foreground mb-0.5">{t("receipts.empty")}</p>
                 <p className="font-bold tabular-nums">
-                  {emptyNum != null ? `${formatKg(emptyNum)} كغ` : "—"}
+                  {emptyNum != null ? t("kgValue", { value: formatKg(emptyNum) }) : t("emDash")}
                 </p>
               </div>
               <div
                 className={`rounded-lg border p-2.5 text-center ${netPreview != null ? "bg-muted/30" : ""}`}
               >
-                <p className="text-xs text-muted-foreground mb-0.5">الصافي الفعلي</p>
+                <p className="text-xs text-muted-foreground mb-0.5">{t("receipts.actualNet")}</p>
                 <p className="font-bold tabular-nums">
-                  {netPreview != null ? `${formatKg(netPreview)} كغ` : "—"}
+                  {netPreview != null ? t("kgValue", { value: formatKg(netPreview) }) : t("emDash")}
                 </p>
               </div>
             </div>
 
             {canUnload && receipt.emptyWeightKg == null && (
               <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                <p className="mb-2">
-                  إذا اكتشفت خطأ في العد قبل إدخال وزن الفارغ، يمكنك الرجوع وتعديله.
-                </p>
+                <p className="mb-2">{t("receipts.reopenCountHint")}</p>
                 <Button
                   type="button"
                   variant="outline"
@@ -1023,7 +1015,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                   disabled={busy}
                 >
                   {busy && <Loader2 className="animate-spin" />}
-                  رجوع لتعديل العدّ
+                  {t("receipts.reopenCount")}
                 </Button>
               </div>
             )}
@@ -1031,7 +1023,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
               <>
                 <div className="flex items-end gap-3">
                   <div className="flex-1 space-y-1.5">
-                    <Label htmlFor="empty">وزن الفارغ عند الخروج (كغ)</Label>
+                    <Label htmlFor="empty">{t("receipts.emptyWeightLabel")}</Label>
                     <Input
                       id="empty"
                       type="number"
@@ -1040,29 +1032,30 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                       inputMode="decimal"
                       value={emptyWeight}
                       onChange={(e) => setEmptyWeight(e.target.value)}
-                      placeholder="وزن الشاحنة فارغة"
+                      placeholder={t("receipts.emptyWeightPlaceholder")}
                     />
                   </div>
                   <Button onClick={submitComplete} disabled={busy}>
                     {busy && <Loader2 className="animate-spin" />}
-                    إغلاق
+                    {t("receipts.close")}
                   </Button>
                 </div>
                 {netPreviewDiff != null && (
                   <div className="rounded-md border p-3 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">الفرق عن المعلن:</span>
+                      <span className="text-muted-foreground">{t("receipts.diffFromDeclared")}</span>
                       <span className="tabular-nums font-semibold">
-                        {`${netPreviewDiff > 0 ? "+" : ""}${formatKg(netPreviewDiff)} كغ`}
+                        {t("kgValueSigned", {
+                          sign: netPreviewDiff > 0 ? "+" : "",
+                          value: formatKg(netPreviewDiff),
+                        })}
                       </span>
                     </div>
                   </div>
                 )}
               </>
             ) : (
-              <p className="text-sm text-muted-foreground">
-                بانتظار عامل القبان لإدخال وزن الفارغ والإغلاق.
-              </p>
+              <p className="text-sm text-muted-foreground">{t("receipts.waitingEmptyClose")}</p>
             )}
           </CardContent>
         </Card>
@@ -1079,10 +1072,10 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                 <CheckCircle2 className="h-4 w-4" />
               )}
               {receipt.isPriorWithdrawal
-                ? "سحب سابق مسجّل"
+                ? t("receipts.completedPriorTitle")
                 : receipt.isAdjustment
-                  ? "تسوية رصيد مسجّلة"
-                  : "اكتمل الاستلام"}
+                  ? t("receipts.completedAdjustTitle")
+                  : t("receipts.completedTitle")}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -1090,13 +1083,13 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
               {!receipt.isPriorWithdrawal && !receipt.isAdjustment && (
                 <>
                   <div className="rounded-lg border p-3">
-                    <p className="text-xs text-muted-foreground">المحمّل</p>
+                    <p className="text-xs text-muted-foreground">{t("receipts.loaded")}</p>
                     <p className="font-bold tabular-nums">
                       {formatKg(receipt.loadedWeightKg)}
                     </p>
                   </div>
                   <div className="rounded-lg border p-3">
-                    <p className="text-xs text-muted-foreground">الفارغ</p>
+                    <p className="text-xs text-muted-foreground">{t("receipts.empty")}</p>
                     <p className="font-bold tabular-nums">
                       {formatKg(receipt.emptyWeightKg)}
                     </p>
@@ -1104,13 +1097,15 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                 </>
               )}
               <div className="rounded-lg border p-3 bg-muted/30">
-                <p className="text-xs text-muted-foreground">الصافي</p>
+                <p className="text-xs text-muted-foreground">{t("receipts.net")}</p>
                 <p className="font-bold tabular-nums">{formatKg(receipt.netWeightKg)}</p>
               </div>
               {receipt.isPriorWithdrawal || receipt.isAdjustment ? (
                 <div className="rounded-lg border p-3">
                   <p className="text-xs text-muted-foreground">
-                    {receipt.isPriorWithdrawal ? "تاريخ السحب" : "تاريخ التسجيل"}
+                    {receipt.isPriorWithdrawal
+                      ? t("receipts.labelWithdrawalDate")
+                      : t("receipts.registrationDate")}
                   </p>
                   <p className="font-bold" dir="ltr">
                     {formatDate(receipt.priorWithdrawalDate || receipt.createdAt)}
@@ -1119,19 +1114,19 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
               ) : (
                 <>
                   <div className="rounded-lg border p-3">
-                    <p className="text-xs text-muted-foreground">الفرق عن المعلن</p>
+                    <p className="text-xs text-muted-foreground">{t("receipts.diffFromDeclared")}</p>
                     <p className="font-bold tabular-nums">
                       {completedDiff != null
                         ? `${completedDiff > 0 ? "+" : ""}${formatKg(completedDiff)}`
-                        : "—"}
+                        : t("emDash")}
                     </p>
                   </div>
                   <div className="rounded-lg border p-3">
-                    <p className="text-xs text-muted-foreground">مدة التفريغ</p>
+                    <p className="text-xs text-muted-foreground">{t("receipts.unloadingDuration")}</p>
                     <p className="font-bold">
                       {unloadingDurationMs != null
-                        ? formatDuration(unloadingDurationMs)
-                        : "—"}
+                        ? formatDurationLocalized(unloadingDurationMs, locale)
+                        : t("emDash")}
                     </p>
                   </div>
                 </>
@@ -1140,7 +1135,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
             {receipt.countMismatchReason && (
               <p className="mt-3 flex items-start gap-1 text-xs text-amber-600">
                 <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                سبب فرق العدّ: {receipt.countMismatchReason}
+                {t("receipts.countMismatchReason")}: {receipt.countMismatchReason}
               </p>
             )}
           </CardContent>
@@ -1153,7 +1148,9 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
           <CardContent className="py-4">
             <p className="flex items-center gap-2 text-sm text-destructive">
               <XCircle className="h-4 w-4" />
-              ملغاة — السبب: {receipt.cancelReason || "غير مذكور"}
+              {t("receipts.cancelledWithReason", {
+                reason: receipt.cancelReason || t("receipts.reasonNotSpecified"),
+              })}
             </p>
           </CardContent>
         </Card>
@@ -1164,7 +1161,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
             <Package className="h-4 w-4" />
-            القطع لكل طول
+            {t("receipts.piecesPerLengthTitle")}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -1172,11 +1169,11 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
             <Table className="w-full min-w-[480px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="text-start">الطول</TableHead>
-                  <TableHead className="text-center">المعلن</TableHead>
-                  <TableHead className="text-center">المعدود</TableHead>
-                  <TableHead className="text-center">المرتجع</TableHead>
-                  <TableHead className="text-center">المقبول</TableHead>
+                  <TableHead className="text-start">{t("receipts.colLength")}</TableHead>
+                  <TableHead className="text-center">{t("receipts.colDeclared")}</TableHead>
+                  <TableHead className="text-center">{t("receipts.counted")}</TableHead>
+                  <TableHead className="text-center">{t("receipts.rejected")}</TableHead>
+                  <TableHead className="text-center">{t("receipts.colAccepted")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1188,19 +1185,19 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                   return (
                     <TableRow key={l.billetLengthM}>
                       <TableCell className="text-start font-medium">
-                        {l.billetLengthM}م
+                        {t("lengthMeters", { n: formatInteger(l.billetLengthM) })}
                       </TableCell>
                       <TableCell className="text-center tabular-nums">
                         {l.expectedPieces}
                       </TableCell>
                       <TableCell className="text-center tabular-nums">
-                        {l.countedPieces ?? "—"}
+                        {l.countedPieces ?? t("emDash")}
                       </TableCell>
                       <TableCell className="text-center tabular-nums">
                         {l.rejectedPieces}
                       </TableCell>
                       <TableCell className="text-center tabular-nums font-semibold">
-                        {accepted ?? "—"}
+                        {accepted ?? t("emDash")}
                       </TableCell>
                     </TableRow>
                   );
@@ -1217,7 +1214,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
           <div className="flex items-center justify-between">
             <CardTitle className="text-base flex items-center gap-2">
               <Paperclip className="h-4 w-4" />
-              المرفقات ({receipt.attachments.length})
+              {t("receipts.attachmentsCount", { count: formatInteger(receipt.attachments.length) })} ({formatInteger(receipt.attachments.length)})
             </CardTitle>
             {canAddAttachment && (
               <>
@@ -1233,7 +1230,9 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                   ) : (
                     <Upload className="h-3.5 w-3.5" />
                   )}
-                  {receipt.status === "Completed" ? "إضافة مرفق متأخر" : "إضافة مرفق"}
+                  {receipt.status === "Completed"
+                    ? t("receipts.addLateAttachment")
+                    : t("receipts.addAttachment")}
                 </Button>
                 <input
                   ref={attachInputRef}
@@ -1252,7 +1251,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
             <div className="mb-3 flex items-center gap-3 rounded-lg border p-2.5">
               <Camera className="h-4 w-4 text-muted-foreground shrink-0" />
               <div className="flex-1 min-w-0">
-                <p className="text-sm">صورة التفريغ</p>
+                <p className="text-sm">{t("receipts.unloadPhoto")}</p>
                 {receipt.unloadingPhotoAt && (
                   <p className="text-xs text-muted-foreground" dir="ltr">
                     {formatDate(receipt.unloadingPhotoAt)}
@@ -1264,7 +1263,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                 size="icon-sm"
                 onClick={() => openAttachment(receipt.unloadingPhotoPath!, -1)}
                 disabled={openingAttachmentId === -1}
-                title="معاينة الصورة"
+                title={t("receipts.previewPhoto")}
               >
                 {openingAttachmentId === -1 ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1277,8 +1276,8 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
           {receipt.attachments.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">
               {receipt.status === "Completed" && canAddAttachment
-                ? "لا توجد مرفقات — يمكنك إرفاق أوراق متأخرة (إرسالية، كرت قبّان، …) بعد الإغلاق"
-                : "لا توجد مرفقات"}
+                ? t("receipts.noAttachmentsLateHint")
+                : t("receipts.noAttachments")}
             </p>
           ) : (
             <div className="space-y-2">
@@ -1291,7 +1290,10 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                   <div className="flex-1 min-w-0">
                     <p className="text-sm truncate">{att.fileName}</p>
                     <p className="text-xs text-muted-foreground">
-                      {(att.fileSize / 1024).toFixed(0)} كيلوبايت — {formatDate(att.uploadedAt)}
+                      {t("fileSizeKbLabel", {
+                        size: formatInteger(att.fileSize / 1024),
+                        date: formatDate(att.uploadedAt),
+                      })}
                     </p>
                   </div>
                   <Button
@@ -1299,7 +1301,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                     size="icon-sm"
                     onClick={() => openAttachment(att.filePath, att.id)}
                     disabled={openingAttachmentId === att.id}
-                    title="معاينة الملف"
+                    title={t("receipts.previewFile")}
                   >
                     {openingAttachmentId === att.id ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1316,16 +1318,14 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
 
       {/* Edit registration dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] min-w-0 overflow-x-hidden overflow-y-auto">
+        <DialogContent dir={dir} className="max-w-lg max-h-[90vh] min-w-0 overflow-x-hidden overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>تعديل بيانات شاحنة البيلت</DialogTitle>
-            <DialogDescription>
-              مسموح التعديل طالما لم يتم التقاط صورة التفريغ الداخلي.
-            </DialogDescription>
+            <DialogTitle>{t("receipts.editDialogTitle")}</DialogTitle>
+            <DialogDescription>{t("receipts.editDialogDesc")}</DialogDescription>
           </DialogHeader>
           <form onSubmit={submitRegistrationEdit} className="min-w-0 space-y-4">
             <div className="space-y-2">
-              <Label>عقد المورّد *</Label>
+              <Label>{t("receipts.supplierContractRequired")}</Label>
               {contractsLoading ? (
                 <div className="h-9 animate-pulse rounded-md bg-muted" />
               ) : (
@@ -1337,9 +1337,9 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                   }}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="اختر العقد" />
+                    <SelectValue placeholder={t("receipts.selectContract")} />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent dir={dir}>
                     {contracts.map((contract) => (
                       <SelectItem
                         key={contract.contractNumber}
@@ -1355,7 +1355,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-2">
-                <Label htmlFor="editPlateNumber">رقم اللوحة *</Label>
+                <Label htmlFor="editPlateNumber">{t("receipts.plateRequired")}</Label>
                 <Input
                   id="editPlateNumber"
                   value={editPlateNumber}
@@ -1363,7 +1363,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="editDriverName">اسم السائق *</Label>
+                <Label htmlFor="editDriverName">{t("receipts.driverRequired")}</Label>
                 <Input
                   id="editDriverName"
                   value={editDriverName}
@@ -1374,7 +1374,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-2">
-                <Label htmlFor="editDriverNationalId">رقم السائق (اختياري)</Label>
+                <Label htmlFor="editDriverNationalId">{t("receipts.driverIdOptional")}</Label>
                 <Input
                   id="editDriverNationalId"
                   value={editDriverNationalId}
@@ -1382,7 +1382,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="editDeclaredWeight">وزن الطلبية المعلن (كغ) *</Label>
+                <Label htmlFor="editDeclaredWeight">{t("receipts.declaredWeightRequired")}</Label>
                 <Input
                   id="editDeclaredWeight"
                   type="number"
@@ -1396,15 +1396,15 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
             </div>
 
             <div className="space-y-2">
-              <Label>عدد القطع المعلن لكل طول *</Label>
+              <Label>{t("receipts.declaredPiecesPerLength")}</Label>
               {!selectedEditContract ? (
-                <p className="text-sm text-muted-foreground">اختر العقد أولاً لعرض الأطوال</p>
+                <p className="text-sm text-muted-foreground">{t("receipts.selectContractFirst")}</p>
               ) : (
                 <div className="space-y-2">
                   {selectedEditContract.pieceLines.map((line) => (
                     <div key={line.billetLengthM} className="flex items-center gap-3">
                       <span className="w-16 text-sm font-medium">
-                        {line.billetLengthM}م
+                        {t("lengthMeters", { n: formatInteger(line.billetLengthM) })}
                       </span>
                       <Input
                         type="number"
@@ -1417,19 +1417,19 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                             [line.billetLengthM]: e.target.value,
                           }))
                         }
-                        placeholder="عدد القطع"
+                        placeholder={t("contracts.pieceCountPlaceholder")}
                       />
                     </div>
                   ))}
                   <p className="text-xs text-muted-foreground">
-                    اترك الطول غير الموجود على هذه الشاحنة فارغاً.
+                    {t("receipts.leaveEmptyTruckLengthHint")}
                   </p>
                 </div>
               )}
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="editBundleCount">عدد الربطات (اختياري)</Label>
+              <Label htmlFor="editBundleCount">{t("receipts.bundleCountOptional")}</Label>
               <Input
                 id="editBundleCount"
                 type="number"
@@ -1440,7 +1440,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="editNotes">ملاحظات (اختياري)</Label>
+              <Label htmlFor="editNotes">{t("notesOptional")}</Label>
               <Textarea
                 id="editNotes"
                 value={editNotes}
@@ -1456,11 +1456,11 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
                 onClick={() => setEditOpen(false)}
                 disabled={busy}
               >
-                إلغاء
+                {t("cancel")}
               </Button>
               <Button type="submit" disabled={busy || contractsLoading}>
                 {busy && <Loader2 className="animate-spin" />}
-                حفظ التعديل
+                {t("receipts.saveEdit")}
               </Button>
             </DialogFooter>
           </form>
@@ -1475,30 +1475,27 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
           setConfirmUnloadOpen(open);
         }}
       >
-        <DialogContent className="sm:max-w-md">
+        <DialogContent dir={dir} className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>تأكيد العدّ قبل التثبيت</DialogTitle>
-            <DialogDescription>
-              بعد التأكيد سينتقل الاستلام إلى مرحلة انتظار وزن الفارغ. يمكن الرجوع
-              لتعديل العد طالما لم يتم إدخال وزن الفارغ.
-            </DialogDescription>
+            <DialogTitle>{t("receipts.confirmCountTitle")}</DialogTitle>
+            <DialogDescription>{t("receipts.confirmCountDesc")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="rounded-lg border overflow-x-auto">
               <Table className="w-full min-w-[360px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-start">الطول</TableHead>
-                    <TableHead className="text-center">المعدود</TableHead>
-                    <TableHead className="text-center">المرتجع</TableHead>
-                    <TableHead className="text-center">المقبول</TableHead>
+                    <TableHead className="text-start">{t("receipts.colLength")}</TableHead>
+                    <TableHead className="text-center">{t("receipts.counted")}</TableHead>
+                    <TableHead className="text-center">{t("receipts.rejected")}</TableHead>
+                    <TableHead className="text-center">{t("receipts.colAccepted")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {pendingUnloadLines.map((line) => (
                     <TableRow key={line.billetLengthM}>
                       <TableCell className="text-start font-medium">
-                        {line.billetLengthM}م
+                        {t("lengthMeters", { n: formatInteger(line.billetLengthM) })}
                       </TableCell>
                       <TableCell className="text-center tabular-nums">
                         {line.countedPieces}
@@ -1516,7 +1513,7 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
             </div>
             {pendingUnloadMismatch && (
               <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
-                يوجد فرق عن العدد المعلن، وسيتم حفظ السبب:{" "}
+                {t("receipts.mismatchWillSave")}{" "}
                 <span className="font-medium">{mismatchReason.trim()}</span>
               </div>
             )}
@@ -1527,11 +1524,11 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
               onClick={() => setConfirmUnloadOpen(false)}
               disabled={busy}
             >
-              مراجعة
+              {t("receipts.review")}
             </Button>
             <Button onClick={confirmUnloadResult} disabled={busy}>
               {busy && <Loader2 className="animate-spin" />}
-              تثبيت العدّ
+              {t("receipts.lockCount")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1539,24 +1536,24 @@ export function BilletReceiptOperationView({ receiptId }: { receiptId: number })
 
       {/* Cancel dialog */}
       <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent dir={dir} className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>إلغاء الاستلام</DialogTitle>
-            <DialogDescription>يجب إدخال سبب الإلغاء</DialogDescription>
+            <DialogTitle>{t("receipts.cancelDialogTitle")}</DialogTitle>
+            <DialogDescription>{t("receipts.cancelDialogDesc")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <Label htmlFor="cancelReason">السبب *</Label>
+            <Label htmlFor="cancelReason">{t("receipts.reasonRequired")}</Label>
             <Input
               id="cancelReason"
               value={cancelReason}
               onChange={(e) => setCancelReason(e.target.value)}
-              placeholder="أدخل سبب الإلغاء..."
+              placeholder={t("receipts.cancelReasonPlaceholder")}
             />
           </div>
           <DialogFooter>
             <Button variant="destructive" onClick={submitCancel} disabled={busy}>
               {busy && <Loader2 className="animate-spin" />}
-              تأكيد الإلغاء
+              {t("receipts.confirmCancel")}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Check, ChevronsUpDown } from "lucide-react";
 import {
@@ -37,6 +38,7 @@ import {
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { paymentCreateSchema, type PaymentCreateInput } from "@/lib/validators/payment";
+import { getTextDirection, type Locale } from "@/i18n/config";
 
 interface Customer {
   id: number;
@@ -50,7 +52,13 @@ interface Props {
   onSuccess: () => void;
 }
 
+const PAYMENT_METHODS = ["CASH", "BANK_TRANSFER", "CHECK"] as const;
+
 export function RecordPaymentDialog({ open, onOpenChange, onSuccess }: Props) {
+  const t = useTranslations("finance");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
@@ -81,8 +89,8 @@ export function RecordPaymentDialog({ open, onOpenChange, onSuccess }: Props) {
       .then((json) => {
         if (json.success) setCustomers(json.data);
       })
-      .catch(() => toast.error("خطأ في جلب قائمة العملاء"));
-  }, [open]);
+      .catch(() => toast.error(t("errorLoadCustomers")));
+  }, [open, t]);
 
   const selectedCustomerId = watch("customerId");
 
@@ -96,16 +104,16 @@ export function RecordPaymentDialog({ open, onOpenChange, onSuccess }: Props) {
       });
       const json = await res.json();
       if (json.success) {
-        toast.success("تم تسجيل الدفعة بنجاح");
+        toast.success(t("successRecorded"));
         reset();
         setCustomerOpen(false);
         onOpenChange(false);
         onSuccess();
       } else {
-        toast.error(json.error || "خطأ في تسجيل الدفعة");
+        toast.error(json.error || t("errorRecord"));
       }
     } catch {
-      toast.error("خطأ في الاتصال بالخادم");
+      toast.error(t("errorConnection"));
     } finally {
       setSubmitting(false);
     }
@@ -113,14 +121,14 @@ export function RecordPaymentDialog({ open, onOpenChange, onSuccess }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent dir={dir} className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>تسجيل دفعة مالية</DialogTitle>
+          <DialogTitle>{t("recordPaymentTitle")}</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-1.5">
-            <Label>العميل</Label>
+            <Label>{t("customer")}</Label>
             <Popover open={customerOpen} onOpenChange={setCustomerOpen}>
               <PopoverTrigger
                 className={cn(
@@ -132,17 +140,17 @@ export function RecordPaymentDialog({ open, onOpenChange, onSuccess }: Props) {
                   {selectedCustomerId
                     ? (() => {
                         const c = customers.find((x) => x.id === selectedCustomerId);
-                        return c ? `${c.fullName} (${c.code})` : "اختر العميل...";
+                        return c ? `${c.fullName} (${c.code})` : t("selectCustomer");
                       })()
-                    : "اختر العميل..."}
+                    : t("selectCustomer")}
                 </span>
                 <ChevronsUpDown className="ms-2 h-4 w-4 shrink-0 opacity-50" />
               </PopoverTrigger>
-              <PopoverContent className="w-72 p-0" align="start">
+              <PopoverContent dir={dir} className="w-72 p-0" align="start">
                 <Command>
-                  <CommandInput placeholder="ابحث باسم العميل أو الكود..." />
+                  <CommandInput placeholder={t("searchCustomer")} />
                   <CommandList>
-                    <CommandEmpty>لا توجد نتائج</CommandEmpty>
+                    <CommandEmpty>{t("noResults")}</CommandEmpty>
                     <CommandGroup>
                       {customers.map((c) => (
                         <CommandItem
@@ -175,12 +183,13 @@ export function RecordPaymentDialog({ open, onOpenChange, onSuccess }: Props) {
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <Label htmlFor="amount">المبلغ ($)</Label>
+              <Label htmlFor="amount">{t("amount")}</Label>
               <Input
                 id="amount"
                 type="number"
                 step="0.01"
                 min="0.01"
+                className="financial-value"
                 {...register("amount", { valueAsNumber: true })}
                 aria-invalid={!!errors.amount}
               />
@@ -190,7 +199,7 @@ export function RecordPaymentDialog({ open, onOpenChange, onSuccess }: Props) {
             </div>
 
             <div className="space-y-1.5">
-              <Label>طريقة الدفع</Label>
+              <Label>{t("paymentMethod")}</Label>
               <Select
                 value={watch("method")}
                 onValueChange={(v) =>
@@ -200,10 +209,12 @@ export function RecordPaymentDialog({ open, onOpenChange, onSuccess }: Props) {
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="CASH">نقدي</SelectItem>
-                  <SelectItem value="BANK_TRANSFER">تحويل بنكي</SelectItem>
-                  <SelectItem value="CHECK">شيك</SelectItem>
+                <SelectContent dir={dir}>
+                  {PAYMENT_METHODS.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {tEnums(`paymentMethod.${m}`)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               {errors.method && (
@@ -214,7 +225,7 @@ export function RecordPaymentDialog({ open, onOpenChange, onSuccess }: Props) {
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <Label htmlFor="paymentDate">تاريخ الدفع</Label>
+              <Label htmlFor="paymentDate">{t("paymentDate")}</Label>
               <Input
                 id="paymentDate"
                 type="date"
@@ -227,22 +238,22 @@ export function RecordPaymentDialog({ open, onOpenChange, onSuccess }: Props) {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="referenceNumber">رقم المرجع</Label>
+              <Label htmlFor="referenceNumber">{t("referenceNumber")}</Label>
               <Input
                 id="referenceNumber"
                 {...register("referenceNumber")}
-                placeholder="اختياري"
+                placeholder={t("optional")}
               />
             </div>
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="notes">ملاحظات</Label>
+            <Label htmlFor="notes">{t("notes")}</Label>
             <Textarea
               id="notes"
               {...register("notes")}
               rows={2}
-              placeholder="ملاحظات إضافية (اختياري)"
+              placeholder={t("notesPlaceholder")}
             />
           </div>
 
@@ -252,10 +263,10 @@ export function RecordPaymentDialog({ open, onOpenChange, onSuccess }: Props) {
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              إلغاء
+              {t("cancel")}
             </Button>
             <Button type="submit" disabled={submitting}>
-              {submitting ? "جارٍ التسجيل..." : "تسجيل الدفعة"}
+              {submitting ? t("submitting") : t("submitPayment")}
             </Button>
           </div>
         </form>

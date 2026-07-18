@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import { UnderDevelopment } from "@/components/under-development";
 import { SUSPEND_FINANCE_UI } from "@/config/suspended-pages";
 import { requirePagePermission } from "@/lib/page-auth";
@@ -10,10 +11,11 @@ export default async function FinanceLayout({
   await requirePagePermission("payment.view");
 
   if (SUSPEND_FINANCE_UI) {
+    const t = await getTranslations("finance");
     return (
       <UnderDevelopment
-        title="المالية"
-        description="هذا القسم موقوف مؤقتاً وهو قيد التطوير."
+        title={t("title")}
+        description={t("suspendedDescription")}
       />
     );
   }

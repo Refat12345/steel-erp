@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -8,8 +9,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/date-format";
+import { formatAmount } from "@/lib/number-format";
 import {
   Table,
   TableBody,
@@ -19,6 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { getTextDirection, type Locale } from "@/i18n/config";
 
 interface Allocation {
   id: number;
@@ -44,38 +46,16 @@ interface PaymentDetailData {
   allocations: Allocation[];
 }
 
-const methodLabels: Record<string, string> = {
-  CASH: "نقدي",
-  BANK_TRANSFER: "تحويل بنكي",
-  CHECK: "شيك",
-};
-
-const kindLabels: Record<string, string> = {
-  REBAR: "مبروم",
-  SHORTBAR_1_4M: "قصائر 1–4 م",
-  SHORTBAR_4_12M: "قصائر 4–12 م",
-  SCRAP: "خردة",
-  BILLET_WIRE: "أسلاك تربيط",
-  REBAR_UNDER_70CM: "مبروم أقل من 70 سم",
-  BILLET_SCRAP_10M: "بيلت خردة 10m",
-  SCRAP_50CM_1M: "سكراب من 50 سم إلى 1 م",
-};
-
-function formatAmount(value: string): string {
-  const n = Number(value);
-  if (Number.isNaN(n)) return value;
-  return n.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
 interface Props {
   paymentId: number | null;
   onClose: () => void;
 }
 
 export function PaymentDetailDialog({ paymentId, onClose }: Props) {
+  const t = useTranslations("finance");
+  const tEnums = useTranslations("enums");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
   const [data, setData] = useState<PaymentDetailData | null>(null);
   const currentData = data?.id === paymentId ? data : null;
 
@@ -88,22 +68,32 @@ export function PaymentDetailDialog({ paymentId, onClose }: Props) {
       .then((json) => {
         if (cancelled) return;
         if (json.success) setData(json.data);
-        else toast.error("خطأ في جلب تفاصيل الدفعة");
+        else toast.error(t("errorLoadDetail"));
       })
       .catch(() => {
-        if (!cancelled) toast.error("خطأ في الاتصال");
+        if (!cancelled) toast.error(t("errorConnectionShort"));
       });
 
     return () => {
       cancelled = true;
     };
-  }, [paymentId]);
+  }, [paymentId, t]);
+
+  function methodLabel(method: string): string {
+    const key = `paymentMethod.${method}` as const;
+    return tEnums.has(key) ? tEnums(key) : method;
+  }
+
+  function kindLabel(kind: string): string {
+    const key = `materialKind.${kind}` as const;
+    return tEnums.has(key) ? tEnums(key) : kind;
+  }
 
   return (
     <Dialog open={paymentId != null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent dir={dir} className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>تفاصيل الدفعة #{paymentId}</DialogTitle>
+          <DialogTitle>{t("detailTitle", { id: paymentId ?? "" })}</DialogTitle>
         </DialogHeader>
 
         {!currentData ? (
@@ -116,59 +106,61 @@ export function PaymentDetailDialog({ paymentId, onClose }: Props) {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
-                <span className="text-muted-foreground">العميل</span>
+                <span className="text-muted-foreground">{t("customer")}</span>
                 <p className="font-medium">
                   {currentData.customer.fullName}{" "}
                   <span className="text-xs text-muted-foreground">({currentData.customer.code})</span>
                 </p>
               </div>
               <div>
-                <span className="text-muted-foreground">المبلغ</span>
-                <p className="font-mono font-semibold">${formatAmount(currentData.amount)}</p>
+                <span className="text-muted-foreground">{t("amountLabel")}</span>
+                <p className="font-mono font-semibold financial-value">
+                  ${formatAmount(currentData.amount)}
+                </p>
               </div>
               <div>
-                <span className="text-muted-foreground">طريقة الدفع</span>
-                <p>{methodLabels[currentData.method] ?? currentData.method}</p>
+                <span className="text-muted-foreground">{t("paymentMethod")}</span>
+                <p>{methodLabel(currentData.method)}</p>
               </div>
               <div>
-                <span className="text-muted-foreground">تاريخ الدفع</span>
-                <p>{formatDate(currentData.paymentDate)}</p>
+                <span className="text-muted-foreground">{t("paymentDate")}</span>
+                <p className="tabular-nums">{formatDate(currentData.paymentDate)}</p>
               </div>
               {currentData.referenceNumber && (
                 <div>
-                  <span className="text-muted-foreground">رقم المرجع</span>
+                  <span className="text-muted-foreground">{t("referenceNumber")}</span>
                   <p>{currentData.referenceNumber}</p>
                 </div>
               )}
               <div>
-                <span className="text-muted-foreground">بواسطة</span>
+                <span className="text-muted-foreground">{t("by")}</span>
                 <p>{currentData.creator.fullName}</p>
               </div>
             </div>
 
             {currentData.notes && (
               <div className="text-sm">
-                <span className="text-muted-foreground">ملاحظات</span>
+                <span className="text-muted-foreground">{t("notes")}</span>
                 <p className="mt-0.5">{currentData.notes}</p>
               </div>
             )}
 
             <div>
               <h4 className="text-sm font-semibold mb-2">
-                التوزيعات على أوامر البيع ({currentData.allocations.length})
+                {t("allocationsTitle", { count: currentData.allocations.length })}
               </h4>
               {currentData.allocations.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  لا توجد توزيعات — المبلغ كامل كرصيد غير مخصّص للعميل
+                  {t("noAllocations")}
                 </p>
               ) : (
                 <div className="rounded-lg border overflow-x-auto">
                   <Table className="min-w-[500px]">
                     <TableHeader>
                       <TableRow>
-                        <TableHead>رقم الأمر</TableHead>
-                        <TableHead>النوع</TableHead>
-                        <TableHead className="text-left">المبلغ المخصّص</TableHead>
+                        <TableHead>{t("colOrderNumber")}</TableHead>
+                        <TableHead>{t("colKind")}</TableHead>
+                        <TableHead className="text-start">{t("colAllocatedAmount")}</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -178,9 +170,9 @@ export function PaymentDetailDialog({ paymentId, onClose }: Props) {
                             {a.salesOrder.orderNumber}
                           </TableCell>
                           <TableCell className="text-sm">
-                            {kindLabels[a.salesOrder.kind] ?? a.salesOrder.kind}
+                            {kindLabel(a.salesOrder.kind)}
                           </TableCell>
-                          <TableCell className="font-mono text-sm">
+                          <TableCell className="font-mono text-sm financial-value">
                             ${formatAmount(a.allocatedAmount)}
                           </TableCell>
                         </TableRow>
