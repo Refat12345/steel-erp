@@ -4,6 +4,11 @@ import { authOptions } from "@/lib/auth";
 import { ServiceError } from "@/lib/services/errors";
 import { logger } from "@/lib/logger";
 import { resolveUserAuth } from "@/lib/permissions";
+import { getRequestLocale } from "@/lib/i18n/request-locale";
+import {
+  resolveApiErrorMessage,
+  translateError,
+} from "@/lib/i18n/server-messages";
 
 export interface ApiSession {
   userId: number;
@@ -39,27 +44,39 @@ export async function getApiSession(): Promise<ApiSession | null> {
   };
 }
 
-export function unauthorized() {
+export async function unauthorized() {
+  const locale = await getRequestLocale();
   return NextResponse.json(
-    { success: false, error: "غير مصرح بالدخول" },
-    { status: 401 }
+    { success: false, error: translateError(locale, "unauthorized") },
+    { status: 401 },
   );
 }
 
-export function forbidden() {
+export async function forbidden() {
+  const locale = await getRequestLocale();
   return NextResponse.json(
-    { success: false, error: "لا تملك صلاحية لهذه العملية" },
-    { status: 403 }
+    { success: false, error: translateError(locale, "forbidden") },
+    { status: 403 },
   );
 }
 
-export function badRequest(error: string) {
+/**
+ * 400 response. `errorKeyOrMessage` is translated via validation/errors
+ * catalogs when it matches a key; otherwise returned as-is.
+ */
+export async function badRequest(
+  errorKeyOrMessage: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+) {
+  const locale = await getRequestLocale();
+  const error = resolveApiErrorMessage(locale, errorKeyOrMessage, params);
   return NextResponse.json({ success: false, error }, { status: 400 });
 }
 
-export function tooManyRequests(retryAfterMs: number) {
+export async function tooManyRequests(retryAfterMs: number) {
+  const locale = await getRequestLocale();
   return NextResponse.json(
-    { success: false, error: "عدد الطلبات تجاوز الحد المسموح، حاول بعد قليل" },
+    { success: false, error: translateError(locale, "tooManyRequests") },
     {
       status: 429,
       headers: { "Retry-After": String(Math.max(1, Math.ceil(retryAfterMs / 1000))) },
@@ -67,10 +84,22 @@ export function tooManyRequests(retryAfterMs: number) {
   );
 }
 
-export function notFound(entity = "العنصر") {
+export async function notFound(entityKeyOrLabel?: string) {
+  const locale = await getRequestLocale();
+  if (!entityKeyOrLabel) {
+    return NextResponse.json(
+      { success: false, error: translateError(locale, "notFoundDefault") },
+      { status: 404 },
+    );
+  }
+  // Allow callers to pass a pre-localized entity label or a bare word.
+  const entity = resolveApiErrorMessage(locale, entityKeyOrLabel);
   return NextResponse.json(
-    { success: false, error: `${entity} غير موجود` },
-    { status: 404 }
+    {
+      success: false,
+      error: translateError(locale, "notFound", { entity }),
+    },
+    { status: 404 },
   );
 }
 
@@ -112,14 +141,16 @@ const SERVICE_ERROR_STATUS: Record<string, number> = {
   BAD_REQUEST: 400,
 };
 
-export function handleServiceError(e: unknown): NextResponse {
+export async function handleServiceError(e: unknown): Promise<NextResponse> {
+  const locale = await getRequestLocale();
   if (e instanceof ServiceError) {
     const status = SERVICE_ERROR_STATUS[e.code] ?? 400;
-    return NextResponse.json({ success: false, error: e.message }, { status });
+    const error = translateError(locale, e.messageKey, e.params);
+    return NextResponse.json({ success: false, error }, { status });
   }
   logger.error({ err: e }, "unhandled error in route handler");
   return NextResponse.json(
-    { success: false, error: "خطأ داخلي في الخادم" },
+    { success: false, error: translateError(locale, "internalServer") },
     { status: 500 },
   );
 }

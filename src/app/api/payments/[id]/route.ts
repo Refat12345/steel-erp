@@ -21,7 +21,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
   const { id } = await params;
   const paymentId = parseInt(id, 10);
-  if (isNaN(paymentId)) return badRequest("معرّف غير صالح");
+  if (isNaN(paymentId)) return badRequest("invalidId");
 
   try {
     const payment = await getPaymentById(paymentId);

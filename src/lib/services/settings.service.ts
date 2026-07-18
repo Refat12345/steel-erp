@@ -131,7 +131,7 @@ export async function setAnalyticsStartDate(
     try {
       parseOperationalDateInput(value);
     } catch {
-      throw new ServiceError("تاريخ غير صالح — الصيغة المطلوبة YYYY-MM-DD");
+      throw new ServiceError("invalidDateYyyyMmDd");
     }
   }
 

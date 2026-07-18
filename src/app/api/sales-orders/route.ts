@@ -38,11 +38,11 @@ export async function POST(req: NextRequest) {
   if (!hasPermission(session, "salesorder.create")) return forbidden();
 
   let body: unknown;
-  try { body = await req.json(); } catch { return badRequest("بيانات غير صالحة"); }
+  try { body = await req.json(); } catch { return badRequest("invalidData"); }
 
   const parsed = salesOrderCreateSchema.safeParse(body);
   if (!parsed.success) {
-    return badRequest(parsed.error.issues[0]?.message || "بيانات غير صالحة");
+    return badRequest(parsed.error.issues[0]?.message || "invalidData");
   }
 
   try {

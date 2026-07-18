@@ -21,7 +21,7 @@ export async function POST(
 
   const { id } = await params;
   const truckId = parseInt(id, 10);
-  if (isNaN(truckId)) return badRequest("معرّف غير صالح");
+  if (isNaN(truckId)) return badRequest("invalidId");
 
   return withIdempotency(req, session.userId, "", async () => {
     try {

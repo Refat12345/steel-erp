@@ -7,7 +7,7 @@ import type {
   UpdateReceiptRegistrationInput,
   UnloadResultInput,
 } from "@/lib/validators/billet-receipt";
-import { ServiceError } from "./errors";
+import { ServiceError, toServiceError } from "./errors";
 import { logAudit } from "./audit.service";
 import { withRetry } from "./tx-retry";
 import { logger } from "@/lib/logger";
@@ -33,9 +33,7 @@ const VALID_TRANSITIONS: Record<BilletReceiptStatus, BilletReceiptStatus[]> = {
 
 function assertTransition(current: BilletReceiptStatus, next: BilletReceiptStatus) {
   if (!VALID_TRANSITIONS[current]?.includes(next)) {
-    throw new ServiceError(
-      `لا يمكن الانتقال من الحالة "${current}" إلى "${next}"`,
-    );
+    throw new ServiceError("invalidStatusTransition", "BAD_REQUEST", { current: current, next: next });
   }
 }
 
@@ -50,7 +48,7 @@ async function lockReceipt(tx: TxClient, receiptId: number) {
     SELECT id FROM billet_receipts WHERE id = ${receiptId} FOR UPDATE
   `;
   if (locked.length === 0) {
-    throw new ServiceError("سجل الاستلام غير موجود", "NOT_FOUND");
+    throw new ServiceError("billetReceiptNotFound", "NOT_FOUND");
   }
 }
 
@@ -109,7 +107,7 @@ export async function registerReceipt(data: RegisterReceiptInput, userId: number
   const normalizedPlate = data.plateNumber.trim();
   const lengths = data.pieceLines.map((l) => l.billetLengthM);
   if (new Set(lengths).size !== lengths.length) {
-    throw new ServiceError("لا يمكن تكرار نفس الطول في الطلبية");
+    throw new ServiceError("duplicateLengthInOrder");
   }
 
   let receipt;
@@ -121,18 +119,18 @@ export async function registerReceipt(data: RegisterReceiptInput, userId: number
             where: { contractNumber: data.supplierContractNumber },
             include: { pieceLines: true },
           });
-          if (!contract) throw new ServiceError("عقد المورّد غير موجود", "NOT_FOUND");
+          if (!contract) throw new ServiceError("supplierContractNotFound", "NOT_FOUND");
           if (contract.status !== "Active") {
-            throw new ServiceError("لا يمكن التسجيل على عقد غير فعّال");
+            throw new ServiceError("cannotRegisterOnInactiveContract");
           }
 
           // Every declared length must exist in the contract's piece lines.
           const contractLengths = new Set(contract.pieceLines.map((l) => l.billetLengthM));
           for (const l of data.pieceLines) {
             if (!contractLengths.has(l.billetLengthM)) {
-              throw new ServiceError(
-                `الطول ${l.billetLengthM}م غير موجود في عقد المورّد`,
-              );
+              throw new ServiceError("lengthNotInSupplierContract", "BAD_REQUEST", {
+                length: l.billetLengthM,
+              });
             }
           }
 
@@ -144,10 +142,9 @@ export async function registerReceipt(data: RegisterReceiptInput, userId: number
             select: { id: true },
           });
           if (existingOpen) {
-            throw new ServiceError(
-              `يوجد سجل استلام مفتوح لنفس رقم اللوحة (سجل #${existingOpen.id})`,
-              "CONFLICT",
-            );
+            throw new ServiceError("openReceiptForPlateById", "CONFLICT", {
+              receiptId: existingOpen.id,
+            });
           }
 
           const receiptNumber = await generateReceiptNumber(tx);
@@ -200,10 +197,9 @@ export async function registerReceipt(data: RegisterReceiptInput, userId: number
       const target = e.meta?.target;
       const targetStr = Array.isArray(target) ? target.join(",") : String(target ?? "");
       if (targetStr.includes("plate_number")) {
-        throw new ServiceError(
-          `يوجد سجل استلام مفتوح لنفس رقم اللوحة (${normalizedPlate})`,
-          "CONFLICT",
-        );
+        throw new ServiceError("openReceiptForPlate", "CONFLICT", {
+          plate: normalizedPlate,
+        });
       }
     }
     throw e;
@@ -224,7 +220,7 @@ export async function updateReceiptRegistration(
   const normalizedPlate = data.plateNumber.trim();
   const lengths = data.pieceLines.map((l) => l.billetLengthM);
   if (new Set(lengths).size !== lengths.length) {
-    throw new ServiceError("لا يمكن تكرار نفس الطول في الطلبية");
+    throw new ServiceError("duplicateLengthInOrder");
   }
 
   return withRetry(() =>
@@ -235,30 +231,30 @@ export async function updateReceiptRegistration(
           where: { id: receiptId },
           include: { pieceLines: true },
         });
-        if (!receipt) throw new ServiceError("سجل الاستلام غير موجود", "NOT_FOUND");
+        if (!receipt) throw new ServiceError("billetReceiptNotFound", "NOT_FOUND");
 
         if (!["Registered", "Loaded"].includes(receipt.status)) {
-          throw new ServiceError("لا يمكن تعديل الشاحنة بعد بدء التفريغ الداخلي");
+          throw new ServiceError("cannotEditTruckAfterInternalUnload");
         }
         if (receipt.unloadingPhotoPath != null || receipt.unloadingPhotoAt != null) {
-          throw new ServiceError("لا يمكن تعديل الشاحنة بعد التقاط صورة التفريغ");
+          throw new ServiceError("cannotEditTruckAfterUnloadPhoto");
         }
 
         const contract = await tx.supplierContract.findUnique({
           where: { contractNumber: data.supplierContractNumber },
           include: { pieceLines: true },
         });
-        if (!contract) throw new ServiceError("عقد المورّد غير موجود", "NOT_FOUND");
+        if (!contract) throw new ServiceError("supplierContractNotFound", "NOT_FOUND");
         if (contract.status !== "Active") {
-          throw new ServiceError("لا يمكن ربط الاستلام بعقد غير فعّال");
+          throw new ServiceError("cannotLinkReceiptToInactiveContract");
         }
 
         const contractLengths = new Set(contract.pieceLines.map((l) => l.billetLengthM));
         for (const line of data.pieceLines) {
           if (!contractLengths.has(line.billetLengthM)) {
-            throw new ServiceError(
-              `الطول ${line.billetLengthM}م غير موجود في عقد المورّد`,
-            );
+            throw new ServiceError("lengthNotInSupplierContract", "BAD_REQUEST", {
+              length: line.billetLengthM,
+            });
           }
         }
 
@@ -271,10 +267,9 @@ export async function updateReceiptRegistration(
           select: { id: true },
         });
         if (existingOpen) {
-          throw new ServiceError(
-            `يوجد سجل استلام مفتوح لنفس رقم اللوحة (سجل #${existingOpen.id})`,
-            "CONFLICT",
-          );
+          throw new ServiceError("openReceiptForPlateById", "CONFLICT", {
+            receiptId: existingOpen.id,
+          });
         }
 
         await tx.billetReceiptPieceLine.deleteMany({
@@ -351,22 +346,21 @@ export async function enterLoadedWeight(
   userId: number,
 ) {
   const rangeError = validateWeightRange(weightKg);
-  if (rangeError) throw new ServiceError(rangeError);
+  if (rangeError) throw toServiceError(rangeError);
   const grossError = validateGrossWeight(weightKg);
-  if (grossError) throw new ServiceError(grossError);
+  if (grossError) throw toServiceError(grossError);
 
   return withRetry(() =>
     prisma.$transaction(
       async (tx) => {
         await lockReceipt(tx, receiptId);
         const receipt = await tx.billetReceipt.findUnique({ where: { id: receiptId } });
-        if (!receipt) throw new ServiceError("سجل الاستلام غير موجود", "NOT_FOUND");
+        if (!receipt) throw new ServiceError("billetReceiptNotFound", "NOT_FOUND");
 
         if (receipt.loadedWeightKg != null) {
-          throw new ServiceError(
-            `تم إدخال وزن المحمّل مسبقاً (${Number(receipt.loadedWeightKg)} كغ)`,
-            "CONFLICT",
-          );
+          throw new ServiceError("grossAlreadyEnteredSimple", "CONFLICT", {
+            kg: Number(receipt.loadedWeightKg),
+          });
         }
         assertTransition(receipt.status, "Loaded");
 
@@ -413,7 +407,7 @@ export async function startUnloading(
       async (tx) => {
         await lockReceipt(tx, receiptId);
         const receipt = await tx.billetReceipt.findUnique({ where: { id: receiptId } });
-        if (!receipt) throw new ServiceError("سجل الاستلام غير موجود", "NOT_FOUND");
+        if (!receipt) throw new ServiceError("billetReceiptNotFound", "NOT_FOUND");
 
         assertTransition(receipt.status, "Unloading");
 
@@ -463,7 +457,7 @@ export async function enterUnloadResult(
           where: { id: receiptId },
           include: { pieceLines: true },
         });
-        if (!receipt) throw new ServiceError("سجل الاستلام غير موجود", "NOT_FOUND");
+        if (!receipt) throw new ServiceError("billetReceiptNotFound", "NOT_FOUND");
 
         assertTransition(receipt.status, "AwaitingExit");
 
@@ -473,7 +467,7 @@ export async function enterUnloadResult(
           registeredLengths.size !== providedLengths.size ||
           [...registeredLengths].some((l) => !providedLengths.has(l))
         ) {
-          throw new ServiceError("يجب إدخال العدّ لكل طول مسجّل في الطلبية");
+          throw new ServiceError("countRequiredForEveryOrderLength");
         }
 
         let hasMismatch = false;
@@ -482,27 +476,24 @@ export async function enterUnloadResult(
             (p) => p.billetLengthM === line.billetLengthM,
           );
           if (!registered) {
-            throw new ServiceError(`الطول ${line.billetLengthM}م غير مسجّل`);
+            throw new ServiceError("lengthNotRegistered", "BAD_REQUEST", { length: line.billetLengthM });
           }
           if (line.rejectedPieces > line.countedPieces) {
-            throw new ServiceError("المرتجع لا يمكن أن يتجاوز المعدود");
+            throw new ServiceError("returnCannotExceedCounted");
           }
           if (line.countedPieces !== registered.expectedPieces) hasMismatch = true;
         }
 
         const reason = data.mismatchReason?.trim() || null;
         if (hasMismatch && !reason) {
-          throw new ServiceError(
-            "يوجد فرق بين العدد المعدود والمعلن — سبب الفرق إجباري للإكمال",
-            "BAD_REQUEST",
-          );
+          throw new ServiceError("countVarianceReasonRequired", "BAD_REQUEST");
         }
 
         const contract = await tx.supplierContract.findUnique({
           where: { contractNumber: receipt.supplierContractNumber },
           include: { pieceLines: true },
         });
-        if (!contract) throw new ServiceError("عقد المورّد غير موجود", "NOT_FOUND");
+        if (!contract) throw new ServiceError("supplierContractNotFound", "NOT_FOUND");
 
         let totalAcceptedPieces = 0;
         for (const line of data.lines) {
@@ -512,13 +503,11 @@ export async function enterUnloadResult(
             (c) => c.billetLengthM === line.billetLengthM,
           );
           if (!contractLine) {
-            throw new ServiceError(`الطول ${line.billetLengthM}م غير موجود في عقد المورّد`);
+            throw new ServiceError("lengthNotInSupplierContract", "BAD_REQUEST", { length: line.billetLengthM });
           }
         }
         if (totalAcceptedPieces <= 0) {
-          throw new ServiceError(
-            "لا يمكن تثبيت العدّ لأن عدد القطع المقبولة صفر. إذا كل القطع مرفوضة، ألغِ الاستلام مع ذكر السبب.",
-          );
+          throw new ServiceError("cannotConfirmCountZeroAccepted");
         }
 
         for (const line of data.lines) {
@@ -581,13 +570,13 @@ export async function reopenUnloadResult(receiptId: number, userId: number) {
       async (tx) => {
         await lockReceipt(tx, receiptId);
         const receipt = await tx.billetReceipt.findUnique({ where: { id: receiptId } });
-        if (!receipt) throw new ServiceError("سجل الاستلام غير موجود", "NOT_FOUND");
+        if (!receipt) throw new ServiceError("billetReceiptNotFound", "NOT_FOUND");
 
         if (receipt.status !== "AwaitingExit") {
-          throw new ServiceError("يمكن الرجوع لتعديل العد فقط قبل إدخال وزن الفارغ");
+          throw new ServiceError("canRevertCountOnlyBeforeTare");
         }
         if (receipt.emptyWeightKg != null) {
-          throw new ServiceError("لا يمكن الرجوع بعد إدخال وزن الفارغ");
+          throw new ServiceError("cannotRevertAfterTare");
         }
 
         const updated = await tx.billetReceipt.update({
@@ -629,7 +618,7 @@ export async function completeReceipt(
   userId: number,
 ) {
   const tareError = validateTareWeight(emptyWeightKg);
-  if (tareError) throw new ServiceError(tareError);
+  if (tareError) throw toServiceError(tareError);
 
   return withRetry(() =>
     prisma.$transaction(
@@ -639,21 +628,22 @@ export async function completeReceipt(
           where: { id: receiptId },
           include: { pieceLines: true },
         });
-        if (!receipt) throw new ServiceError("سجل الاستلام غير موجود", "NOT_FOUND");
+        if (!receipt) throw new ServiceError("billetReceiptNotFound", "NOT_FOUND");
 
         assertTransition(receipt.status, "Completed");
 
         if (receipt.loadedWeightKg == null) {
-          throw new ServiceError("يجب إدخال وزن المحمّل أولاً");
+          throw new ServiceError("grossWeightRequiredFirst");
         }
         const loadedKg = Number(receipt.loadedWeightKg);
         if (emptyWeightKg >= loadedKg) {
-          throw new ServiceError(
-            `وزن الفارغ (${emptyWeightKg} كغ) يجب أن يكون أقل من وزن المحمّل (${loadedKg} كغ)`,
-          );
+          throw new ServiceError("tareMustBeLessThanGross", "BAD_REQUEST", {
+            tareKg: emptyWeightKg,
+            grossKg: loadedKg,
+          });
         }
         const grossError = validateGrossWeight(loadedKg, emptyWeightKg);
-        if (grossError) throw new ServiceError(grossError);
+        if (grossError) throw toServiceError(grossError);
 
         // Lock the contract row so concurrent completions deduct serially.
         await tx.$queryRaw`
@@ -664,7 +654,7 @@ export async function completeReceipt(
           where: { contractNumber: receipt.supplierContractNumber },
           include: { pieceLines: true },
         });
-        if (!contract) throw new ServiceError("عقد المورّد غير موجود", "NOT_FOUND");
+        if (!contract) throw new ServiceError("supplierContractNotFound", "NOT_FOUND");
 
         const netKg = new Decimal(loadedKg).minus(emptyWeightKg);
         const now = new Date();
@@ -698,14 +688,12 @@ export async function completeReceipt(
               });
             }
           } else {
-            throw new ServiceError(`الطول ${line.billetLengthM}م غير موجود في عقد المورّد`);
+            throw new ServiceError("lengthNotInSupplierContract", "BAD_REQUEST", { length: line.billetLengthM });
           }
         }
 
         if (totalAcceptedPieces <= 0) {
-          throw new ServiceError(
-            "لا يمكن إغلاق الاستلام لأن عدد القطع المقبولة صفر. إذا كل القطع مرفوضة، ألغِ الاستلام مع ذكر السبب.",
-          );
+          throw new ServiceError("cannotCloseReceiptZeroAccepted");
         }
 
         // ── Declared-weight diff warning (non-blocking) ───────────────
@@ -775,9 +763,9 @@ export async function addAttachment(
     prisma.$transaction(
       async (tx) => {
         const receipt = await tx.billetReceipt.findUnique({ where: { id: receiptId } });
-        if (!receipt) throw new ServiceError("سجل الاستلام غير موجود", "NOT_FOUND");
+        if (!receipt) throw new ServiceError("billetReceiptNotFound", "NOT_FOUND");
         if (receipt.status === "Cancelled") {
-          throw new ServiceError("لا يمكن إضافة مرفقات لسجل ملغى");
+          throw new ServiceError("cannotAddAttachmentsToCancelledReceipt");
         }
 
         const att = await tx.billetReceiptAttachment.create({
@@ -813,14 +801,14 @@ export async function addAttachment(
 // ─── Cancel ────────────────────────────────────────────────────────
 
 export async function cancelReceipt(receiptId: number, reason: string, userId: number) {
-  if (!reason.trim()) throw new ServiceError("يجب إدخال سبب الإلغاء");
+  if (!reason.trim()) throw new ServiceError("cancelReasonRequired");
 
   return withRetry(() =>
     prisma.$transaction(
       async (tx) => {
         await lockReceipt(tx, receiptId);
         const receipt = await tx.billetReceipt.findUnique({ where: { id: receiptId } });
-        if (!receipt) throw new ServiceError("سجل الاستلام غير موجود", "NOT_FOUND");
+        if (!receipt) throw new ServiceError("billetReceiptNotFound", "NOT_FOUND");
 
         assertTransition(receipt.status, "Cancelled");
 
@@ -884,7 +872,7 @@ export async function getReceipt(receiptId: number): Promise<BilletReceiptDetail
     where: { id: receiptId },
     include: DETAIL_INCLUDE,
   });
-  if (!receipt) throw new ServiceError("سجل الاستلام غير موجود", "NOT_FOUND");
+  if (!receipt) throw new ServiceError("billetReceiptNotFound", "NOT_FOUND");
   return receipt;
 }
 

@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { getRequestLocale } from "@/lib/i18n/request-locale";
+import { translateError } from "@/lib/i18n/server-messages";
 
 /**
  * How long a stored response stays available for replay. Stripe uses 24h and
@@ -175,8 +177,12 @@ async function tryReplay(
   }
 
   if (existing.requestHash !== requestHash) {
+    const locale = await getRequestLocale();
     return NextResponse.json(
-      { success: false, error: "مفتاح التكرار مستخدم مع بيانات مختلفة" },
+      {
+        success: false,
+        error: translateError(locale, "idempotencyKeyMismatch"),
+      },
       { status: 409 },
     );
   }

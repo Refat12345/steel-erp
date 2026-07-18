@@ -20,7 +20,7 @@ export async function GET(
 
   const { id } = await params;
   const userId = parseInt(id, 10);
-  if (isNaN(userId)) return badRequest("معرّف غير صالح");
+  if (isNaN(userId)) return badRequest("invalidId");
 
   try {
     const user = await getUserById(userId);
@@ -40,12 +40,12 @@ export async function PATCH(
 
   const { id } = await params;
   const userId = parseInt(id, 10);
-  if (isNaN(userId)) return badRequest("معرّف غير صالح");
+  if (isNaN(userId)) return badRequest("invalidId");
 
   const body = await req.json();
   const parsed = updateUserSchema.safeParse(body);
   if (!parsed.success) {
-    return badRequest(parsed.error.issues[0]?.message || "بيانات غير صالحة");
+    return badRequest(parsed.error.issues[0]?.message || "invalidData");
   }
 
   try {

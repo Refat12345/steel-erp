@@ -32,7 +32,7 @@ export const auditLogListFiltersSchema = z.object({
       if (parsed === null) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "تاريخ البداية غير صالح",
+          message: "startDateInvalid",
         });
         return z.NEVER;
       }
@@ -45,7 +45,7 @@ export const auditLogListFiltersSchema = z.object({
       if (parsed === null) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "تاريخ النهاية غير صالح",
+          message: "endDateInvalid",
         });
         return z.NEVER;
       }
@@ -55,7 +55,7 @@ export const auditLogListFiltersSchema = z.object({
   if (data.from && data.to && data.from > data.to) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "تاريخ البداية يجب أن يكون قبل تاريخ النهاية",
+      message: "startDateBeforeEndDate",
       path: ["from"],
     });
   }

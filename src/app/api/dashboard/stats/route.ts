@@ -6,6 +6,8 @@ import {
   isAnalyticsRestrictedRole,
 } from "@/lib/rbac-policy";
 import { logger } from "@/lib/logger";
+import { getRequestLocale } from "@/lib/i18n/request-locale";
+import { translateError } from "@/lib/i18n/server-messages";
 
 export async function GET() {
   const session = await getApiSession();
@@ -36,8 +38,9 @@ export async function GET() {
     return NextResponse.json({ success: true, data });
   } catch (err) {
     logger.error({ err }, "dashboard stats error");
+    const locale = await getRequestLocale();
     return NextResponse.json(
-      { success: false, error: "خطأ في جلب الإحصاءات" },
+      { success: false, error: translateError(locale, "statsFetchFailed") },
       { status: 500 },
     );
   }

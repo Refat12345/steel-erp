@@ -116,7 +116,7 @@ describe("user-permission.service", () => {
           99,
           "admin",
         ),
-      ).rejects.toMatchObject({ message: expect.stringContaining("ثابتة") });
+      ).rejects.toMatchObject({ message: "superAdminPermissionsImmutable" });
     });
 
     it("rejects self-edit", async () => {
@@ -136,7 +136,7 @@ describe("user-permission.service", () => {
           5,
           "admin",
         ),
-      ).rejects.toMatchObject({ message: expect.stringContaining("صلاحياتك") });
+      ).rejects.toMatchObject({ message: "cannotEditOwnPermissions" });
     });
   });
 });

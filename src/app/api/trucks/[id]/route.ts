@@ -68,15 +68,15 @@ export async function PATCH(
 
   const { id } = await params;
   const truckId = parseInt(id, 10);
-  if (isNaN(truckId)) return badRequest("معرّف غير صالح");
+  if (isNaN(truckId)) return badRequest("invalidId");
 
   const parsed = await readJsonBody(req);
-  if (!parsed.ok) return badRequest("بيانات غير صالحة");
+  if (!parsed.ok) return badRequest("invalidData");
 
   return withIdempotency(req, session.userId, parsed.text, async () => {
     const validated = truckUpdateSchema.safeParse(parsed.json);
     if (!validated.success) {
-      return badRequest(validated.error.issues[0]?.message || "بيانات غير صالحة");
+      return badRequest(validated.error.issues[0]?.message || "invalidData");
     }
 
     try {
@@ -102,7 +102,7 @@ export async function PATCH(
           "operationalGrade",
         ] as const;
         if (NON_NOTES_FIELDS.some((field) => patch[field] !== undefined)) {
-          return badRequest("في هذه الحالة يمكن تعديل الملاحظات فقط");
+          return badRequest("notesOnlyEditableInStatus");
         }
         const truck = await updateTruckNotes(
           truckId,

@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const parsed = createUserSchema.safeParse(body);
   if (!parsed.success) {
-    return badRequest(parsed.error.issues[0]?.message || "بيانات غير صالحة");
+    return badRequest(parsed.error.issues[0]?.message || "invalidData");
   }
 
   try {

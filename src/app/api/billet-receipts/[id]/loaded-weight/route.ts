@@ -21,18 +21,18 @@ export async function POST(
 
   const { id } = await params;
   const receiptId = parseInt(id, 10);
-  if (isNaN(receiptId)) return badRequest("معرّف غير صالح");
+  if (isNaN(receiptId)) return badRequest("invalidId");
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return badRequest("بيانات غير صالحة");
+    return badRequest("invalidData");
   }
 
   const parsed = loadedWeightSchema.safeParse(body);
   if (!parsed.success) {
-    return badRequest(parsed.error.issues[0]?.message || "بيانات غير صالحة");
+    return badRequest(parsed.error.issues[0]?.message || "invalidData");
   }
 
   try {

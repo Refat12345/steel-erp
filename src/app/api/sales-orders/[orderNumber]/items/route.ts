@@ -23,11 +23,11 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const { orderNumber } = await params;
 
   let body: unknown;
-  try { body = await req.json(); } catch { return badRequest("بيانات غير صالحة"); }
+  try { body = await req.json(); } catch { return badRequest("invalidData"); }
 
   const parsed = orderItemsSetSchema.safeParse(body);
   if (!parsed.success) {
-    return badRequest(parsed.error.issues[0]?.message || "بيانات غير صالحة");
+    return badRequest(parsed.error.issues[0]?.message || "invalidData");
   }
 
   try {

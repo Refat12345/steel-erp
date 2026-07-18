@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
       try {
         window = getOperationalDayWindow(operationalDate);
       } catch {
-        return badRequest("تاريخ يوم التشغيل غير صالح");
+        return badRequest("invalidOperationalDate");
       }
     }
 

@@ -50,7 +50,7 @@ export async function POST(
 
   const { id } = await params;
   const receiptId = parseInt(id, 10);
-  if (isNaN(receiptId)) return badRequest("معرّف غير صالح");
+  if (isNaN(receiptId)) return badRequest("invalidId");
 
   const contentLength = req.headers.get("content-length");
   if (contentLength) {
@@ -70,11 +70,11 @@ export async function POST(
   try {
     formData = await req.formData();
   } catch {
-    return badRequest("بيانات غير صالحة");
+    return badRequest("invalidData");
   }
 
   const file = formData.get("file") as File | null;
-  if (!file) return badRequest("لم يتم اختيار صورة");
+  if (!file) return badRequest("imageNotSelected");
   if (file.size > MAX_FILE_SIZE) {
     return new Response(
       JSON.stringify({
@@ -90,7 +90,7 @@ export async function POST(
   const buffer = Buffer.from(await file.arrayBuffer());
   const detectedType = detectImageType(buffer);
   if (!detectedType) {
-    return badRequest("نوع الملف غير مسموح — يُقبل JPEG أو PNG فقط");
+    return badRequest("fileTypeJpegPngOnly");
   }
 
   const fileName = `${randomUUID()}.${detectedType.extension}`;

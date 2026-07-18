@@ -8,26 +8,26 @@ import { z } from "zod";
  */
 export const productionInSchema = z.object({
   locationId: z
-    .number({ message: "الموقع مطلوب" })
+    .number({ message: "locationRequired" })
     .int()
-    .positive("الموقع مطلوب"),
+    .positive("locationRequired"),
   // The counting unit being entered. Rebar sites accept BOTH (bundles by one
   // role, tons by another); short-bar accepts TON only. The service validates
   // the unit against the location's segment.
-  unit: z.enum(["BUNDLE", "TON"], { message: "وحدة الإدخال مطلوبة" }),
+  unit: z.enum(["BUNDLE", "TON"], { message: "entryUnitRequired" }),
   // Required for bundle movements and for rebar tonnage; omitted/null for
   // short-bar (tons). The service enforces the exact rule.
   sizeId: z.number().int().positive().nullable().optional(),
   quantity: z
-    .number({ message: "الكمية مطلوبة" })
-    .positive("الكمية يجب أن تكون أكبر من صفر"),
+    .number({ message: "quantityRequired" })
+    .positive("quantityMustBePositive"),
   // Work shift the entry belongs to (production only). Normally omitted — the
   // server derives it from its own clock. Sent explicitly only during the
   // grace window right after a shift boundary, when the clerk may assign the
   // entry to the shift that just ended. The service rejects a non-natural
   // shift outside the grace window.
   shift: z.enum(["MORNING", "EVENING"]).nullable().optional(),
-  reason: z.string().trim().max(500, "الملاحظة طويلة جداً").optional().or(z.literal("")),
+  reason: z.string().trim().max(500, "noteTooLong").optional().or(z.literal("")),
 });
 
 export type ProductionInInput = z.infer<typeof productionInSchema>;
@@ -41,29 +41,29 @@ export type ProductionInInput = z.infer<typeof productionInSchema>;
 export const transferSchema = z
   .object({
     fromLocationId: z
-      .number({ message: "الموقع المصدر مطلوب" })
+      .number({ message: "sourceLocationRequired" })
       .int()
-      .positive("الموقع المصدر مطلوب"),
+      .positive("sourceLocationRequired"),
     toLocationId: z
-      .number({ message: "الموقع الوجهة مطلوب" })
+      .number({ message: "destinationLocationRequired" })
       .int()
-      .positive("الموقع الوجهة مطلوب"),
+      .positive("destinationLocationRequired"),
     sizeId: z.number().int().positive().nullable().optional(),
     // Primary-unit amount: bundles for rebar, tons for short-bar.
     quantity: z
-      .number({ message: "الكمية مطلوبة" })
-      .positive("الكمية يجب أن تكون أكبر من صفر"),
+      .number({ message: "quantityRequired" })
+      .positive("quantityMustBePositive"),
     // Actual weight moved (tons) — required for rebar (dual-unit) sites, where
     // the load's real weight is known at transfer time. Ignored for short-bar.
     quantityTons: z
       .number()
-      .positive("الوزن يجب أن يكون أكبر من صفر")
+      .positive("weightMustBePositive")
       .nullable()
       .optional(),
-    reason: z.string().trim().max(500, "الملاحظة طويلة جداً").optional().or(z.literal("")),
+    reason: z.string().trim().max(500, "noteTooLong").optional().or(z.literal("")),
   })
   .refine((d) => d.fromLocationId !== d.toLocationId, {
-    message: "لا يمكن الترحيل إلى نفس الموقع",
+    message: "cannotTransferToSameLocation",
     path: ["toLocationId"],
   });
 
@@ -77,22 +77,22 @@ export type TransferInput = z.infer<typeof transferSchema>;
  */
 export const adjustmentSchema = z.object({
   locationId: z
-    .number({ message: "الموقع مطلوب" })
+    .number({ message: "locationRequired" })
     .int()
-    .positive("الموقع مطلوب"),
+    .positive("locationRequired"),
   // Which balance is being corrected. Rebar sites can adjust bundles OR tons
   // independently; short-bar adjusts TON only. Enforced by the service.
-  unit: z.enum(["BUNDLE", "TON"], { message: "وحدة التصحيح مطلوبة" }),
+  unit: z.enum(["BUNDLE", "TON"], { message: "correctionUnitRequired" }),
   // Required for bundle movements and rebar tonnage, null for short-bar — enforced by the service.
   sizeId: z.number().int().positive().nullable().optional(),
   actualQuantity: z
-    .number({ message: "الكمية الفعلية مطلوبة" })
-    .min(0, "الكمية الفعلية لا يمكن أن تكون سالبة"),
+    .number({ message: "actualQuantityRequired" })
+    .min(0, "actualQuantityCannotBeNegative"),
   reason: z
-    .string({ message: "سبب التصحيح مطلوب" })
+    .string({ message: "correctionReasonRequired" })
     .trim()
-    .min(5, "اذكر سبب التصحيح (5 أحرف على الأقل)")
-    .max(500, "السبب طويل جداً"),
+    .min(5, "correctionReasonMinLength")
+    .max(500, "reasonTooLong"),
 });
 
 export type AdjustmentInput = z.infer<typeof adjustmentSchema>;

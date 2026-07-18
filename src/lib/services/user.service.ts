@@ -66,7 +66,7 @@ export async function getUserById(id: number) {
     select: USER_SELECT,
   });
   if (!user || user.username === "system") {
-    throw new ServiceError("المستخدم غير موجود", "NOT_FOUND");
+    throw new ServiceError("userNotFound", "NOT_FOUND");
   }
   return user;
 }
@@ -80,10 +80,10 @@ export interface CreateUserInput {
 
 export async function createUser(data: CreateUserInput, adminId: number) {
   const role = await prisma.role.findUnique({ where: { code: data.roleCode } });
-  if (!role) throw new ServiceError("الدور غير موجود", "NOT_FOUND");
+  if (!role) throw new ServiceError("roleNotFound", "NOT_FOUND");
 
   const existing = await prisma.user.findUnique({ where: { username: data.username } });
-  if (existing) throw new ServiceError("اسم المستخدم مستخدم مسبقاً");
+  if (existing) throw new ServiceError("usernameAlreadyTaken");
 
   // Async bcrypt: offloads the CPU-bound hash to libuv's thread pool so the
   // Node.js event loop keeps serving other requests during admin onboarding.
@@ -130,12 +130,12 @@ export interface UpdateUserInput {
 export async function updateUser(id: number, data: UpdateUserInput, adminId: number) {
   const existing = await prisma.user.findUnique({ where: { id } });
   if (!existing || existing.username === "system") {
-    throw new ServiceError("المستخدم غير موجود", "NOT_FOUND");
+    throw new ServiceError("userNotFound", "NOT_FOUND");
   }
 
   if (data.roleCode) {
     const role = await prisma.role.findUnique({ where: { code: data.roleCode } });
-    if (!role) throw new ServiceError("الدور غير موجود", "NOT_FOUND");
+    if (!role) throw new ServiceError("roleNotFound", "NOT_FOUND");
   }
 
   if (data.isActive === false && existing.roleCode === "admin") {
@@ -143,7 +143,7 @@ export async function updateUser(id: number, data: UpdateUserInput, adminId: num
       where: { roleCode: "admin", isActive: true, id: { not: id } },
     });
     if (activeAdmins === 0) {
-      throw new ServiceError("لا يمكن تعطيل آخر مدير نشط في النظام");
+      throw new ServiceError("cannotDisableLastActiveAdmin");
     }
   }
 
@@ -196,7 +196,7 @@ export async function updateUser(id: number, data: UpdateUserInput, adminId: num
 export async function resetPassword(id: number, newPassword: string, adminId: number) {
   const existing = await prisma.user.findUnique({ where: { id } });
   if (!existing || existing.username === "system") {
-    throw new ServiceError("المستخدم غير موجود", "NOT_FOUND");
+    throw new ServiceError("userNotFound", "NOT_FOUND");
   }
 
   const passwordHash = await hash(newPassword, 10);

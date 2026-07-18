@@ -28,7 +28,7 @@ describe("validateWeightRange — hard rails", () => {
 
 describe("validateTareWeight", () => {
   it("rejects below deployment minimum", () => {
-    expect(validateTareWeight(500)).toMatch(/وزن الفارغ/);
+    expect(validateTareWeight(500)?.messageKey).toBe("tareWeightBelowMin");
   });
   it("accepts typical road-truck tare", () => {
     expect(validateTareWeight(10_000)).toBeNull();
@@ -40,13 +40,19 @@ describe("validateTareWeight", () => {
 
 describe("validateGrossWeight — relationship to tare", () => {
   it("rejects gross <= tare", () => {
-    expect(validateGrossWeight(10_000, 10_000)).toMatch(/يجب أن يكون أكبر/);
-    expect(validateGrossWeight(9_999, 10_000)).toMatch(/يجب أن يكون أكبر/);
+    expect(validateGrossWeight(10_000, 10_000)?.messageKey).toBe(
+      "grossMustExceedTare",
+    );
+    expect(validateGrossWeight(9_999, 10_000)?.messageKey).toBe(
+      "grossMustExceedTare",
+    );
   });
 
   it("rejects net below deployment minimum even when gross > tare", () => {
     // Net = 100 kg, below NET_MIN_KG = 500.
-    expect(validateGrossWeight(10_100, 10_000)).toMatch(/صافي الوزن/);
+    expect(validateGrossWeight(10_100, 10_000)?.messageKey).toBe(
+      "netWeightBelowMin",
+    );
   });
 
   it("accepts a plausible gross on top of tare", () => {

@@ -124,12 +124,12 @@ export async function createContract(
   // Reject duplicate lengths defensively (validator already checks this).
   const lengths = data.pieceLines.map((l) => l.billetLengthM);
   if (new Set(lengths).size !== lengths.length) {
-    throw new ServiceError("لا يمكن تكرار نفس الطول في العقد");
+    throw new ServiceError("duplicateLengthInContract");
   }
 
   const contractDate = data.contractDate ? new Date(data.contractDate) : new Date();
   if (data.contractDate && isNaN(contractDate.getTime())) {
-    throw new ServiceError("تاريخ العقد غير صالح");
+    throw new ServiceError("invalidContractDate");
   }
 
   const contract = await withRetry(() =>
@@ -255,7 +255,7 @@ export async function getContractWithBalance(
       creator: { select: { username: true, fullName: true } },
     },
   });
-  if (!contract) throw new ServiceError("العقد غير موجود", "NOT_FOUND");
+  if (!contract) throw new ServiceError("contractNotFound", "NOT_FOUND");
 
   const { receivedWeight, acceptedByLength } = await getCompletedUsage(
     prisma,
@@ -325,7 +325,7 @@ export async function updateContract(
 ) {
   const lengths = data.pieceLines?.map((l) => l.billetLengthM);
   if (lengths && new Set(lengths).size !== lengths.length) {
-    throw new ServiceError("لا يمكن تكرار نفس الطول في العقد");
+    throw new ServiceError("duplicateLengthInContract");
   }
 
   const updated = await withRetry(() =>
@@ -335,11 +335,11 @@ export async function updateContract(
           where: { contractNumber },
           include: { pieceLines: { orderBy: { billetLengthM: "asc" } } },
         });
-        if (!existing) throw new ServiceError("العقد غير موجود", "NOT_FOUND");
+        if (!existing) throw new ServiceError("contractNotFound", "NOT_FOUND");
 
         const isStatusChange = data.status != null && data.status !== existing.status;
         if (isStatusChange && !data.statusReason) {
-          throw new ServiceError("سبب تغيير الحالة مطلوب");
+          throw new ServiceError("statusChangeReasonRequired");
         }
 
         const { acceptedByLength } = await getCompletedUsage(
@@ -353,18 +353,20 @@ export async function updateContract(
           );
           for (const [lengthM, acceptedPieces] of acceptedByLength.entries()) {
             if (!requestedLengths.has(lengthM) && acceptedPieces > 0) {
-              throw new ServiceError(
-                `لا يمكن حذف طول ${lengthM}م لأنه عليه ${acceptedPieces} قطعة مستلمة`,
-              );
+              throw new ServiceError("cannotDeleteLengthWithReceivedPieces", "BAD_REQUEST", {
+                length: lengthM,
+                acceptedPieces,
+              });
             }
           }
 
           for (const line of data.pieceLines) {
             const acceptedPieces = acceptedByLength.get(line.billetLengthM) ?? 0;
             if (line.contractedPieces < acceptedPieces) {
-              throw new ServiceError(
-                `عدد قطع طول ${line.billetLengthM}م لا يمكن أن يكون أقل من المستلَم (${acceptedPieces})`,
-              );
+              throw new ServiceError("lengthPiecesBelowReceived", "BAD_REQUEST", {
+                length: line.billetLengthM,
+                acceptedPieces,
+              });
             }
           }
         }
@@ -445,14 +447,14 @@ export async function recordPriorWithdrawal(
 ) {
   const lengths = data.pieceLines.map((line) => line.billetLengthM);
   if (new Set(lengths).size !== lengths.length) {
-    throw new ServiceError("لا يمكن تكرار نفس الطول");
+    throw new ServiceError("duplicateLength");
   }
 
   const withdrawalDate = data.withdrawalDate
     ? new Date(data.withdrawalDate)
     : null;
   if (data.withdrawalDate && withdrawalDate && isNaN(withdrawalDate.getTime())) {
-    throw new ServiceError("تاريخ السحب السابق غير صالح");
+    throw new ServiceError("invalidPriorWithdrawalDate");
   }
 
   const receipt = await withRetry(() =>
@@ -467,9 +469,9 @@ export async function recordPriorWithdrawal(
           where: { contractNumber },
           include: { pieceLines: true },
         });
-        if (!contract) throw new ServiceError("العقد غير موجود", "NOT_FOUND");
+        if (!contract) throw new ServiceError("contractNotFound", "NOT_FOUND");
         if (contract.status !== "Active") {
-          throw new ServiceError("لا يمكن تسجيل سحب سابق على عقد غير فعّال");
+          throw new ServiceError("cannotRecordPriorWithdrawalOnInactiveContract");
         }
 
         const contractLines = new Map(
@@ -477,9 +479,9 @@ export async function recordPriorWithdrawal(
         );
         for (const line of data.pieceLines) {
           if (!contractLines.has(line.billetLengthM)) {
-            throw new ServiceError(
-              `الطول ${line.billetLengthM}م غير موجود في عقد المورّد`,
-            );
+            throw new ServiceError("lengthNotInSupplierContract", "BAD_REQUEST", {
+              length: line.billetLengthM,
+            });
           }
         }
 
@@ -560,10 +562,10 @@ export async function recordContractAdjustment(
 ) {
   const lengths = data.pieceLines.map((line) => line.billetLengthM);
   if (new Set(lengths).size !== lengths.length) {
-    throw new ServiceError("لا يمكن تكرار نفس الطول");
+    throw new ServiceError("duplicateLength");
   }
   if (data.netWeightKg === 0 && data.pieceLines.length === 0) {
-    throw new ServiceError("أدخل وزناً أو عدد قطع للتسوية");
+    throw new ServiceError("adjustmentWeightOrPiecesRequired");
   }
 
   const receipt = await withRetry(() =>
@@ -578,9 +580,9 @@ export async function recordContractAdjustment(
           where: { contractNumber },
           include: { pieceLines: true },
         });
-        if (!contract) throw new ServiceError("العقد غير موجود", "NOT_FOUND");
+        if (!contract) throw new ServiceError("contractNotFound", "NOT_FOUND");
         if (contract.status !== "Active") {
-          throw new ServiceError("لا يمكن تسجيل تسوية على عقد غير فعّال");
+          throw new ServiceError("cannotRecordAdjustmentOnInactiveContract");
         }
 
         const contractLines = new Map(
@@ -588,9 +590,9 @@ export async function recordContractAdjustment(
         );
         for (const line of data.pieceLines) {
           if (!contractLines.has(line.billetLengthM)) {
-            throw new ServiceError(
-              `الطول ${line.billetLengthM}م غير موجود في عقد المورّد`,
-            );
+            throw new ServiceError("lengthNotInSupplierContract", "BAD_REQUEST", {
+              length: line.billetLengthM,
+            });
           }
         }
 
@@ -668,7 +670,7 @@ export async function addContractAttachment(
           where: { contractNumber },
           select: { contractNumber: true },
         });
-        if (!contract) throw new ServiceError("العقد غير موجود", "NOT_FOUND");
+        if (!contract) throw new ServiceError("contractNotFound", "NOT_FOUND");
 
         const att = await tx.supplierContractAttachment.create({
           data: {
@@ -826,7 +828,7 @@ export async function getBilletBalanceReport(params: {
 }): Promise<BilletBalanceReport> {
   const supplierName = params.supplierName.trim();
   if (!supplierName) {
-    throw new ServiceError("Supplier is required");
+    throw new ServiceError("supplierRequired");
   }
 
   const where: Prisma.SupplierContractWhereInput = {
@@ -843,7 +845,7 @@ export async function getBilletBalanceReport(params: {
   });
 
   if (contracts.length === 0) {
-    throw new ServiceError("No contracts found for this supplier", "NOT_FOUND");
+    throw new ServiceError("noContractsForSupplier", "NOT_FOUND");
   }
 
   const contractRows: BilletBalanceContractRow[] = [];

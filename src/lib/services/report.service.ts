@@ -235,7 +235,7 @@ export async function getDailyTrucksReport(
   try {
     window = getOperationalDayWindow(params.operationalDate);
   } catch {
-    throw new ServiceError("تاريخ يوم التشغيل غير صالح", "BAD_REQUEST");
+    throw new ServiceError("invalidOperationalDate", "BAD_REQUEST");
   }
   const clampMeta = await clampReportWindow(window);
   window = clampMeta.window;
@@ -247,7 +247,7 @@ export async function getDailyTrucksReport(
       select: { id: true, fullName: true },
     });
     if (!customer) {
-      throw new ServiceError("الزبون غير موجود", "NOT_FOUND");
+      throw new ServiceError("customerNotFound", "NOT_FOUND");
     }
     customerFilter = {
       customerId: customer.id,
@@ -619,7 +619,7 @@ export async function getDailyLoadingSummary(
   try {
     window = getReportPeriodWindow(params.operationalDate, period);
   } catch {
-    throw new ServiceError("تاريخ يوم التشغيل غير صالح", "BAD_REQUEST");
+    throw new ServiceError("invalidOperationalDate", "BAD_REQUEST");
   }
   // Weekly/monthly windows can straddle the analytics start — the clamp
   // shifts periodStartDate too, so the header reflects the real range.
@@ -637,7 +637,7 @@ export async function getDailyLoadingSummary(
       select: { id: true, fullName: true },
     });
     if (!customer) {
-      throw new ServiceError("الزبون غير موجود", "NOT_FOUND");
+      throw new ServiceError("customerNotFound", "NOT_FOUND");
     }
     customerFilter = { customerId: customer.id, customerName: customer.fullName };
   }
@@ -958,12 +958,12 @@ export async function getCustomerWithdrawalsReport(
   } catch (err) {
     const code = err instanceof Error ? err.message : "";
     if (code === "INVALID_RANGE_ORDER") {
-      throw new ServiceError("From date must be on or before To date", "BAD_REQUEST");
+      throw new ServiceError("fromDateAfterToDate", "BAD_REQUEST");
     }
     if (code === "RANGE_TOO_LARGE") {
-      throw new ServiceError("Date range cannot exceed one year", "BAD_REQUEST");
+      throw new ServiceError("dateRangeExceedsOneYear", "BAD_REQUEST");
     }
-    throw new ServiceError("Invalid date", "BAD_REQUEST");
+    throw new ServiceError("invalidDate", "BAD_REQUEST");
   }
   const clampMeta = await clampReportWindow(window);
   window = clampMeta.window;
@@ -979,7 +979,7 @@ export async function getCustomerWithdrawalsReport(
       select: { id: true, fullName: true },
     });
     if (!customer) {
-      throw new ServiceError("Customer not found", "NOT_FOUND");
+      throw new ServiceError("customerNotFound", "NOT_FOUND");
     }
     customerFilterMeta = {
       customerId: customer.id,
@@ -994,7 +994,7 @@ export async function getCustomerWithdrawalsReport(
       select: { id: true, displayName: true },
     });
     if (!size) {
-      throw new ServiceError("Size not found", "NOT_FOUND");
+      throw new ServiceError("sizeNotFound", "NOT_FOUND");
     }
     sizeFilterMeta = { sizeId: size.id, sizeDisplayName: size.displayName };
   }
@@ -1283,7 +1283,7 @@ export async function getDailyBilletReport(
   try {
     window = getOperationalDayWindow(params.operationalDate);
   } catch {
-    throw new ServiceError("Invalid operational date", "BAD_REQUEST");
+    throw new ServiceError("invalidOperationalDate", "BAD_REQUEST");
   }
   const clampMeta = await clampReportWindow(window);
   window = clampMeta.window;
@@ -1297,16 +1297,13 @@ export async function getDailyBilletReport(
       select: { contractNumber: true, supplierName: true },
     });
     if (!contract) {
-      throw new ServiceError("Contract not found", "NOT_FOUND");
+      throw new ServiceError("contractNotFound", "NOT_FOUND");
     }
     if (
       supplierName &&
       contract.supplierName.toLowerCase() !== supplierName.toLowerCase()
     ) {
-      throw new ServiceError(
-        "Contract does not belong to the selected supplier",
-        "BAD_REQUEST",
-      );
+      throw new ServiceError("contractNotBelongToSupplier", "BAD_REQUEST");
     }
   }
 

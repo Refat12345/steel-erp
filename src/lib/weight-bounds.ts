@@ -10,7 +10,12 @@
  *      hard rails unless aligned with them (gross defaults to MAX_WEIGHT_KG).
  *
  * All values are in kilograms.
+ *
+ * Validation failures return messageKey + params (translated at the API
+ * boundary) — never localized prose.
  */
+
+import type { MessageKeyError } from "@/lib/services/errors";
 
 /**
  * Absolute minimum for any individual weight reading.
@@ -51,25 +56,37 @@ function fmt(kg: number): string {
 }
 
 /** Hard-rail check applied to every weight value before deployment bounds. */
-export function validateWeightRange(kg: number): string | null {
-  if (!Number.isFinite(kg)) return "قيمة الوزن غير صالحة";
+export function validateWeightRange(kg: number): MessageKeyError | null {
+  if (!Number.isFinite(kg)) return { messageKey: "weightValueInvalid" };
   if (kg < MIN_WEIGHT_KG) {
-    return `الوزن (${fmt(kg)} كغ) أقل من الحد الأدنى المسموح (${fmt(MIN_WEIGHT_KG)} كغ)`;
+    return {
+      messageKey: "weightBelowMin",
+      params: { kg: fmt(kg), minKg: fmt(MIN_WEIGHT_KG) },
+    };
   }
   if (kg > MAX_WEIGHT_KG) {
-    return `الوزن (${fmt(kg)} كغ) أكبر من الحد الأقصى المسموح (${fmt(MAX_WEIGHT_KG)} كغ)`;
+    return {
+      messageKey: "weightAboveMax",
+      params: { kg: fmt(kg), maxKg: fmt(MAX_WEIGHT_KG) },
+    };
   }
   return null;
 }
 
-export function validateTareWeight(kg: number): string | null {
+export function validateTareWeight(kg: number): MessageKeyError | null {
   const hardError = validateWeightRange(kg);
   if (hardError) return hardError;
   if (kg < WEIGHT_BOUNDS.TARE_MIN_KG) {
-    return `وزن الفارغ (${fmt(kg)} كغ) أقل من الحد الأدنى المسموح (${fmt(WEIGHT_BOUNDS.TARE_MIN_KG)} كغ)`;
+    return {
+      messageKey: "tareWeightBelowMin",
+      params: { kg: fmt(kg), minKg: fmt(WEIGHT_BOUNDS.TARE_MIN_KG) },
+    };
   }
   if (kg > WEIGHT_BOUNDS.TARE_MAX_KG) {
-    return `وزن الفارغ (${fmt(kg)} كغ) أكبر من الحد الأقصى المسموح (${fmt(WEIGHT_BOUNDS.TARE_MAX_KG)} كغ)`;
+    return {
+      messageKey: "tareWeightAboveMax",
+      params: { kg: fmt(kg), maxKg: fmt(WEIGHT_BOUNDS.TARE_MAX_KG) },
+    };
   }
   return null;
 }
@@ -77,22 +94,34 @@ export function validateTareWeight(kg: number): string | null {
 export function validateGrossWeight(
   kg: number,
   tareKg?: number | null,
-): string | null {
+): MessageKeyError | null {
   const hardError = validateWeightRange(kg);
   if (hardError) return hardError;
   if (kg < WEIGHT_BOUNDS.GROSS_MIN_KG) {
-    return `وزن المحمّل (${fmt(kg)} كغ) أقل من الحد الأدنى المسموح (${fmt(WEIGHT_BOUNDS.GROSS_MIN_KG)} كغ)`;
+    return {
+      messageKey: "grossWeightBelowMin",
+      params: { kg: fmt(kg), minKg: fmt(WEIGHT_BOUNDS.GROSS_MIN_KG) },
+    };
   }
   if (kg > WEIGHT_BOUNDS.GROSS_MAX_KG) {
-    return `وزن المحمّل (${fmt(kg)} كغ) أكبر من الحد الأقصى المسموح (${fmt(WEIGHT_BOUNDS.GROSS_MAX_KG)} كغ)`;
+    return {
+      messageKey: "grossWeightAboveMax",
+      params: { kg: fmt(kg), maxKg: fmt(WEIGHT_BOUNDS.GROSS_MAX_KG) },
+    };
   }
   if (tareKg != null) {
     if (kg <= tareKg) {
-      return `وزن المحمّل (${fmt(kg)} كغ) يجب أن يكون أكبر من وزن الفارغ (${fmt(tareKg)} كغ)`;
+      return {
+        messageKey: "grossMustExceedTare",
+        params: { kg: fmt(kg), tareKg: fmt(tareKg) },
+      };
     }
     const net = kg - tareKg;
     if (net < WEIGHT_BOUNDS.NET_MIN_KG) {
-      return `صافي الوزن (${fmt(net)} كغ) أقل من الحد الأدنى المسموح (${fmt(WEIGHT_BOUNDS.NET_MIN_KG)} كغ)`;
+      return {
+        messageKey: "netWeightBelowMin",
+        params: { netKg: fmt(net), minKg: fmt(WEIGHT_BOUNDS.NET_MIN_KG) },
+      };
     }
   }
   return null;

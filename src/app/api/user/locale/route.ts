@@ -22,12 +22,12 @@ export async function PUT(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return badRequest("طلب غير صالح");
+    return badRequest("invalidRequest");
   }
 
   const parsed = bodySchema.safeParse(body);
   if (!parsed.success) {
-    return badRequest("لغة غير مدعومة");
+    return badRequest("unsupportedLocale");
   }
 
   try {

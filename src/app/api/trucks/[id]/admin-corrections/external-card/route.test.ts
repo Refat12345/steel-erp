@@ -118,7 +118,7 @@ describe("PATCH /api/trucks/:id/admin-corrections/external-card", () => {
     }), { params: params("abc") });
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toMatch(/معرّف/);
+    expect(json.error).toBe("invalidId");
     expect(mockCorrect).not.toHaveBeenCalled();
   });
 
@@ -130,7 +130,7 @@ describe("PATCH /api/trucks/:id/admin-corrections/external-card", () => {
     }), { params: params("1") });
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toMatch(/رقم كرت القبان/);
+    expect(json.error).toBe("externalCardNumberRequired");
     expect(mockCorrect).not.toHaveBeenCalled();
   });
 

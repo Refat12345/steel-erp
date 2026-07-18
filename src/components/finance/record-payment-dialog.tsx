@@ -39,6 +39,7 @@ import {
 import { cn } from "@/lib/utils";
 import { paymentCreateSchema, type PaymentCreateInput } from "@/lib/validators/payment";
 import { getTextDirection, type Locale } from "@/i18n/config";
+import { translateValidationMessage } from "@/lib/i18n/validation-message";
 
 interface Customer {
   id: number;
@@ -57,6 +58,7 @@ const PAYMENT_METHODS = ["CASH", "BANK_TRANSFER", "CHECK"] as const;
 export function RecordPaymentDialog({ open, onOpenChange, onSuccess }: Props) {
   const t = useTranslations("finance");
   const tEnums = useTranslations("enums");
+  const tValidation = useTranslations("validation");
   const locale = useLocale() as Locale;
   const dir = getTextDirection(locale);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -177,7 +179,9 @@ export function RecordPaymentDialog({ open, onOpenChange, onSuccess }: Props) {
               </PopoverContent>
             </Popover>
             {errors.customerId && (
-              <p className="text-sm text-destructive">{errors.customerId.message}</p>
+              <p className="text-sm text-destructive">
+                {translateValidationMessage(tValidation, errors.customerId.message)}
+              </p>
             )}
           </div>
 
@@ -194,7 +198,9 @@ export function RecordPaymentDialog({ open, onOpenChange, onSuccess }: Props) {
                 aria-invalid={!!errors.amount}
               />
               {errors.amount && (
-                <p className="text-sm text-destructive">{errors.amount.message}</p>
+                <p className="text-sm text-destructive">
+                  {translateValidationMessage(tValidation, errors.amount.message)}
+                </p>
               )}
             </div>
 
@@ -218,7 +224,9 @@ export function RecordPaymentDialog({ open, onOpenChange, onSuccess }: Props) {
                 </SelectContent>
               </Select>
               {errors.method && (
-                <p className="text-sm text-destructive">{errors.method.message}</p>
+                <p className="text-sm text-destructive">
+                  {translateValidationMessage(tValidation, errors.method.message)}
+                </p>
               )}
             </div>
           </div>
@@ -233,7 +241,9 @@ export function RecordPaymentDialog({ open, onOpenChange, onSuccess }: Props) {
                 aria-invalid={!!errors.paymentDate}
               />
               {errors.paymentDate && (
-                <p className="text-sm text-destructive">{errors.paymentDate.message}</p>
+                <p className="text-sm text-destructive">
+                  {translateValidationMessage(tValidation, errors.paymentDate.message)}
+                </p>
               )}
             </div>
 

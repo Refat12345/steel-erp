@@ -5,7 +5,7 @@ const productFilterValues = ["FIRST", "SECOND", "SHORTBAR", "SCRAP", "BILLET_WIR
 const baseReportQuerySchema = z.object({
   date: z
     .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "صيغة التاريخ غير صالحة (YYYY-MM-DD)"),
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "dateFormatInvalid"),
   customerId: z
     .preprocess(
       (v) => (v === "" || v === null || v === undefined ? undefined : v),
@@ -53,7 +53,7 @@ export type LoadingSummaryQuery = z.infer<typeof loadingSummaryQuerySchema>;
 
 const dateInputSchema = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format (YYYY-MM-DD)");
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "dateFormatInvalid");
 
 export const customerWithdrawalsQuerySchema = z.object({
   from: dateInputSchema,
@@ -73,7 +73,7 @@ export type CustomerWithdrawalsQuery = z.infer<
 >;
 
 export const billetBalanceQuerySchema = z.object({
-  supplierName: z.string().trim().min(1, "Supplier is required"),
+  supplierName: z.string().trim().min(1, "supplierRequired"),
   contractNumber: z
     .preprocess(
       (v) => (v === "" || v === null || v === undefined ? undefined : v),

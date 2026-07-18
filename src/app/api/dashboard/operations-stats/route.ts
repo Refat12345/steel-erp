@@ -11,6 +11,8 @@ import {
   type OpsStats,
 } from "@/lib/services/operations-stats.service";
 import { logger } from "@/lib/logger";
+import { getRequestLocale } from "@/lib/i18n/request-locale";
+import { translateError } from "@/lib/i18n/server-messages";
 
 const OPS_PERMISSION = "dashboard.ops.view";
 
@@ -68,8 +70,9 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     logger.error({ err }, "operations dashboard stats error");
+    const locale = await getRequestLocale();
     return NextResponse.json(
-      { success: false, error: "خطأ في جلب الإحصاءات" },
+      { success: false, error: translateError(locale, "statsFetchFailed") },
       { status: 500 },
     );
   }

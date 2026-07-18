@@ -32,37 +32,37 @@ export function deriveUnitAndGrade(segment: StockLocationSegment): {
 const locationCodeSchema = z
   .string()
   .trim()
-  .min(1, "كود الموقع مطلوب")
-  .max(20, "كود الموقع طويل جداً")
-  .regex(/^[A-Za-z0-9-]+$/, "الكود يقبل أحرفاً إنجليزية وأرقاماً وشرطة فقط");
+  .min(1, "locationCodeRequired")
+  .max(20, "locationCodeTooLong")
+  .regex(/^[A-Za-z0-9-]+$/, "locationCodeFormat");
 
 const gridSchema = {
   gridRow: z
-    .number({ message: "الصف مطلوب" })
-    .int("الصف يجب أن يكون عدداً صحيحاً")
-    .min(1, "الصف يجب أن يكون 1 أو أكثر")
-    .max(50, "قيمة الصف كبيرة جداً"),
+    .number({ message: "gridRowRequired" })
+    .int("gridRowMustBeInteger")
+    .min(1, "gridRowMinOne")
+    .max(50, "gridRowTooLarge"),
   gridCol: z
-    .number({ message: "العمود مطلوب" })
-    .int("العمود يجب أن يكون عدداً صحيحاً")
-    .min(1, "العمود يجب أن يكون 1 أو أكثر")
-    .max(50, "قيمة العمود كبيرة جداً"),
+    .number({ message: "gridColRequired" })
+    .int("gridColMustBeInteger")
+    .min(1, "gridColMinOne")
+    .max(50, "gridColTooLarge"),
   gridSpan: z
     .number()
-    .int("الامتداد يجب أن يكون عدداً صحيحاً")
-    .min(1, "الامتداد يجب أن يكون 1 أو أكثر")
-    .max(20, "قيمة الامتداد كبيرة جداً")
+    .int("gridSpanMustBeInteger")
+    .min(1, "gridSpanMinOne")
+    .max(20, "gridSpanTooLarge")
     .optional(),
 };
 
 export const stockLocationCreateSchema = z.object({
-  yardId: z.number({ message: "الساحة مطلوبة" }).int().positive("الساحة مطلوبة"),
+  yardId: z.number({ message: "yardRequired" }).int().positive("yardRequired"),
   code: locationCodeSchema,
   nameAr: z
     .string()
     .trim()
-    .min(1, "اسم الموقع مطلوب")
-    .max(100, "اسم الموقع طويل جداً"),
+    .min(1, "locationNameRequired")
+    .max(100, "locationNameTooLong"),
   segment: z.enum(segmentValues),
   expectedSizeId: z
     .number()
@@ -82,8 +82,8 @@ export const stockLocationUpdateSchema = z.object({
   nameAr: z
     .string()
     .trim()
-    .min(1, "اسم الموقع مطلوب")
-    .max(100, "اسم الموقع طويل جداً")
+    .min(1, "locationNameRequired")
+    .max(100, "locationNameTooLong")
     .optional(),
   segment: z.enum(segmentValues).optional(),
   expectedSizeId: z.number().int().positive().nullable().optional(),

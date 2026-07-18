@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getApiSession, hasPermission } from "@/lib/api-utils";
+import { getApiSession, hasPermission, unauthorized } from "@/lib/api-utils";
 import { cleanupExpiredIdempotencyKeys } from "@/lib/idempotency";
 import { logger } from "@/lib/logger";
+import { getRequestLocale } from "@/lib/i18n/request-locale";
+import { translateError } from "@/lib/i18n/server-messages";
 
 /**
  * Delete expired rows from `idempotency_keys`.
@@ -37,12 +39,7 @@ async function handle(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  if (!authorised) {
-    return NextResponse.json(
-      { success: false, error: "غير مصرح بالدخول" },
-      { status: 401 },
-    );
-  }
+  if (!authorised) return unauthorized();
 
   try {
     const deleted = await cleanupExpiredIdempotencyKeys();
@@ -50,8 +47,12 @@ async function handle(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ success: true, deleted });
   } catch (err) {
     logger.error({ err }, "idempotency cleanup failed");
+    const locale = await getRequestLocale();
     return NextResponse.json(
-      { success: false, error: "فشل تنظيف مفاتيح التكرار" },
+      {
+        success: false,
+        error: translateError(locale, "idempotencyCleanupFailed"),
+      },
       { status: 500 },
     );
   }

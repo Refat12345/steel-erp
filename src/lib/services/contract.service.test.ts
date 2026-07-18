@@ -116,7 +116,7 @@ describe("createContract", () => {
         { path: "uploads/f.pdf", name: "f.pdf", size: 0 },
         1,
       ),
-    ).rejects.toThrow("العميل غير موجود أو غير نشط");
+    ).rejects.toThrow("customerNotFoundOrInactive");
   });
 
   it("throws when customer not found", async () => {
@@ -147,7 +147,7 @@ describe("createContract", () => {
         { path: "uploads/f.pdf", name: "f.pdf", size: 0 },
         1,
       ),
-    ).rejects.toThrow("العميل لديه عقد لهذه السنة بالفعل");
+    ).rejects.toThrow("customerAlreadyHasContractForYear");
   });
 });
 
@@ -204,7 +204,7 @@ describe("updateContract", () => {
 
     await expect(
       updateContract(`${yy}-01`, { status: "suspended" }, 1),
-    ).rejects.toThrow("سبب تغيير الحالة مطلوب");
+    ).rejects.toThrow("statusChangeReasonRequired");
   });
 
   it("throws NOT_FOUND when contract does not exist", async () => {

@@ -25,12 +25,12 @@ export async function POST(
   try {
     body = await req.json();
   } catch {
-    return badRequest("بيانات غير صالحة");
+    return badRequest("invalidData");
   }
 
   const parsed = contractAdjustmentSchema.safeParse(body);
   if (!parsed.success) {
-    return badRequest(parsed.error.issues[0]?.message || "بيانات غير صالحة");
+    return badRequest(parsed.error.issues[0]?.message || "invalidData");
   }
 
   const { contractNumber } = await params;

@@ -29,15 +29,15 @@ export async function PATCH(
   const { id, sessionId } = await params;
   const truckId = parseInt(id, 10);
   const sid = parseInt(sessionId, 10);
-  if (isNaN(truckId) || isNaN(sid)) return badRequest("معرّف غير صالح");
+  if (isNaN(truckId) || isNaN(sid)) return badRequest("invalidId");
 
   const parsed = await readJsonBody(req);
-  if (!parsed.ok) return badRequest("بيانات غير صالحة");
+  if (!parsed.ok) return badRequest("invalidData");
 
   return withIdempotency(req, session.userId, parsed.text, async () => {
     const validated = completedSessionEditSchema.safeParse(parsed.json);
     if (!validated.success) {
-      return badRequest(validated.error.issues[0]?.message || "بيانات غير صالحة");
+      return badRequest(validated.error.issues[0]?.message || "invalidData");
     }
 
     try {
@@ -68,15 +68,15 @@ export async function DELETE(
   const { id, sessionId } = await params;
   const truckId = parseInt(id, 10);
   const sid = parseInt(sessionId, 10);
-  if (isNaN(truckId) || isNaN(sid)) return badRequest("معرّف غير صالح");
+  if (isNaN(truckId) || isNaN(sid)) return badRequest("invalidId");
 
   const parsed = await readJsonBody(req);
-  if (!parsed.ok) return badRequest("بيانات غير صالحة");
+  if (!parsed.ok) return badRequest("invalidData");
 
   return withIdempotency(req, session.userId, parsed.text, async () => {
     const validated = completedSessionDeleteSchema.safeParse(parsed.json);
     if (!validated.success) {
-      return badRequest(validated.error.issues[0]?.message || "بيانات غير صالحة");
+      return badRequest(validated.error.issues[0]?.message || "invalidData");
     }
 
     try {

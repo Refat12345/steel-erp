@@ -70,7 +70,9 @@ describe("createSalesOrder", () => {
       orderNumber: "26-01-001",
     });
 
-    await expect(createSalesOrder(rebarFirst, 1)).rejects.toThrow(/26-01-001/);
+    await expect(createSalesOrder(rebarFirst, 1)).rejects.toThrow(
+      "salesOrderAlreadyExistsOnContract",
+    );
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 

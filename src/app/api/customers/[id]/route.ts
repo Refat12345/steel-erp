@@ -22,7 +22,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
   const { id } = await params;
   const customerId = parseInt(id, 10);
-  if (isNaN(customerId)) return badRequest("معرّف غير صالح");
+  if (isNaN(customerId)) return badRequest("invalidId");
 
   try {
     const customer = await getCustomerById(customerId);
@@ -39,14 +39,14 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
   const customerId = parseInt(id, 10);
-  if (isNaN(customerId)) return badRequest("معرّف غير صالح");
+  if (isNaN(customerId)) return badRequest("invalidId");
 
   let body: unknown;
-  try { body = await req.json(); } catch { return badRequest("بيانات غير صالحة"); }
+  try { body = await req.json(); } catch { return badRequest("invalidData"); }
 
   const parsed = customerUpdateSchema.safeParse(body);
   if (!parsed.success) {
-    return badRequest(parsed.error.issues[0]?.message || "بيانات غير صالحة");
+    return badRequest(parsed.error.issues[0]?.message || "invalidData");
   }
 
   try {

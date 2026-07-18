@@ -144,7 +144,7 @@ export async function getPaymentById(id: number): Promise<PaymentDetail> {
       },
     },
   });
-  if (!payment) throw new ServiceError("الدفعة غير موجودة", "NOT_FOUND");
+  if (!payment) throw new ServiceError("paymentNotFound", "NOT_FOUND");
   return payment;
 }
 
@@ -157,7 +157,7 @@ export async function createPayment(
   const customer = await prisma.customer.findUnique({
     where: { id: data.customerId },
   });
-  if (!customer) throw new ServiceError("العميل غير موجود", "NOT_FOUND");
+  if (!customer) throw new ServiceError("customerNotFound", "NOT_FOUND");
 
   const result = await prisma.$transaction(async (tx) => {
     const payment = await tx.payment.create({
@@ -279,7 +279,7 @@ export async function getCustomerBalance(customerId: number): Promise<CustomerBa
     where: { id: customerId },
     select: { id: true, code: true, fullName: true },
   });
-  if (!customer) throw new ServiceError("العميل غير موجود", "NOT_FOUND");
+  if (!customer) throw new ServiceError("customerNotFound", "NOT_FOUND");
 
   const [payments, contracts] = await Promise.all([
     prisma.payment.findMany({

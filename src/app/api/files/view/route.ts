@@ -1,8 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readFile, stat } from "fs/promises";
 import path from "path";
-import { getApiSession, hasPermission } from "@/lib/api-utils";
+import {
+  getApiSession,
+  hasPermission,
+  unauthorized,
+  forbidden,
+  badRequest,
+  handleServiceError,
+} from "@/lib/api-utils";
 import { logger } from "@/lib/logger";
+import { getRequestLocale } from "@/lib/i18n/request-locale";
+import { translateError } from "@/lib/i18n/server-messages";
 
 const MIME_MAP: Record<string, string> = {
   ".pdf": "application/pdf",
@@ -69,12 +78,7 @@ function resolveSafeUploadPath(relFromDb: string): { fullPath: string } | null {
 export async function GET(req: NextRequest) {
   try {
     const session = await getApiSession();
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "غير مصرح بالدخول" },
-        { status: 401 },
-      );
-    }
+    if (!session) return unauthorized();
     if (
       !hasPermission(session, "contract.view") &&
       !hasPermission(session, "truck.view_approved") &&
@@ -82,46 +86,31 @@ export async function GET(req: NextRequest) {
       !hasPermission(session, "billet.contract.view") &&
       !hasPermission(session, "billet.receipt.view")
     ) {
-      return NextResponse.json(
-        { success: false, error: "لا تملك صلاحية لهذه العملية" },
-        { status: 403 },
-      );
+      return forbidden();
     }
 
     const p = req.nextUrl.searchParams.get("p");
-    if (!p?.trim()) {
-      return NextResponse.json(
-        { success: false, error: "مسار غير صالح" },
-        { status: 400 }
-      );
-    }
+    if (!p?.trim()) return badRequest("invalidPath");
 
     let relativeUtf8: string;
     try {
       relativeUtf8 = Buffer.from(p, "base64url").toString("utf8");
     } catch {
-      return NextResponse.json(
-        { success: false, error: "مسار غير صالح" },
-        { status: 400 }
-      );
+      return badRequest("invalidPath");
     }
 
     const resolved = resolveSafeUploadPath(relativeUtf8);
-    if (!resolved) {
-      return NextResponse.json(
-        { success: false, error: "مسار غير صالح" },
-        { status: 400 }
-      );
-    }
+    if (!resolved) return badRequest("invalidPath");
 
     const { fullPath } = resolved;
 
     try {
       await stat(fullPath);
     } catch {
+      const locale = await getRequestLocale();
       return NextResponse.json(
-        { success: false, error: "الملف غير موجود" },
-        { status: 404 }
+        { success: false, error: translateError(locale, "fileNotFound") },
+        { status: 404 },
       );
     }
 
@@ -131,9 +120,10 @@ export async function GET(req: NextRequest) {
     try {
       buffer = await readFile(fullPath);
     } catch {
+      const locale = await getRequestLocale();
       return NextResponse.json(
-        { success: false, error: "تعذر قراءة الملف" },
-        { status: 500 }
+        { success: false, error: translateError(locale, "fileReadFailed") },
+        { status: 500 },
       );
     }
 
@@ -150,9 +140,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (e) {
     logger.error({ err: e }, "file view failed");
-    return NextResponse.json(
-      { success: false, error: "خطأ داخلي في الخادم" },
-      { status: 500 }
-    );
+    return handleServiceError(e);
   }
 }
