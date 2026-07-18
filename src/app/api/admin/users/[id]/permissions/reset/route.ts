@@ -8,6 +8,7 @@ import {
   handleServiceError,
 } from "@/lib/api-utils";
 import { resetUserPermissionOverrides } from "@/lib/services/user-permission.service";
+import { getRequestLocale } from "@/lib/i18n/request-locale";
 
 export async function POST(
   _req: NextRequest,
@@ -22,10 +23,12 @@ export async function POST(
   if (isNaN(userId)) return badRequest("invalidId");
 
   try {
+    const locale = await getRequestLocale();
     const matrix = await resetUserPermissionOverrides(
       userId,
       session.userId,
       session.role,
+      locale,
     );
     return NextResponse.json({
       success: true,

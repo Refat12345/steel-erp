@@ -7,6 +7,8 @@ import {
   handleServiceError,
 } from "@/lib/api-utils";
 import { listActiveSizes } from "@/lib/services/size-lookup.service";
+import { getRequestLocale } from "@/lib/i18n/request-locale";
+import { localizedSize } from "@/lib/localized-name";
 
 export async function GET() {
   const session = await getApiSession();
@@ -20,8 +22,19 @@ export async function GET() {
     return forbidden();
 
   try {
+    const locale = await getRequestLocale();
     const rows = await listActiveSizes();
-    return ok(rows);
+    // Localize the display name while keeping the stable `code` untouched.
+    return ok(
+      rows.map((s) => ({
+        id: s.id,
+        code: s.code,
+        displayName: localizedSize(s, locale),
+        displayNameEn: s.displayNameEn,
+        isBundleType: s.isBundleType,
+        isSpecialRatio: s.isSpecialRatio,
+      })),
+    );
   } catch (e) {
     return handleServiceError(e);
   }

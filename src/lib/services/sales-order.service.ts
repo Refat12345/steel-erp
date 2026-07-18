@@ -123,8 +123,10 @@ export async function createSalesOrder(
   }
   const existing = await prisma.salesOrder.findFirst({ where: duplicateWhere });
   if (existing) {
-    const kindLabel = KIND_LABELS[data.kind] || data.kind;
-    const gradeLabel = data.grade ? ` (${GRADE_LABELS[data.grade]})` : "";
+    // Pass enum-reference codes; the API/middleware boundary resolves them to
+    // the request locale (see resolveEnumRefs in i18n/server-messages).
+    const kindLabel = `@enums.materialKind.${data.kind}`;
+    const gradeLabel = data.grade ? ` (@enums.grade.${data.grade})` : "";
     throw new ServiceError("salesOrderAlreadyExistsOnContract", "BAD_REQUEST", {
         kindLabel,
         gradeLabel,
@@ -343,19 +345,3 @@ function validateStatusTransition(current: string, next: string) {
     });
   }
 }
-
-const KIND_LABELS: Record<string, string> = {
-  REBAR: "مبروم",
-  SHORTBAR_1_4M: "قصائر 1–4 م",
-  SHORTBAR_4_12M: "قصائر 4–12 م",
-  SCRAP: "خردة",
-  BILLET_WIRE: "أسلاك تربيط",
-  REBAR_UNDER_70CM: "مبروم أقل من 70 سم",
-  BILLET_SCRAP_10M: "بيلت خردة 10m",
-  SCRAP_50CM_1M: "سكراب من 50 سم إلى 1 م",
-};
-
-const GRADE_LABELS: Record<string, string> = {
-  FIRST: "نخب أول",
-  SECOND: "نخب ثاني",
-};

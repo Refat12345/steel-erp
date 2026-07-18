@@ -1,5 +1,7 @@
 import type { OverrideType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { DEFAULT_LOCALE, type Locale } from "@/i18n/config";
+import { localizedPermission, localizedRole } from "@/lib/localized-name";
 import { invalidateUserAuth } from "@/lib/permissions";
 import {
   collectPermissionOverrideWarnings,
@@ -56,7 +58,7 @@ async function loadTargetUser(userId: number) {
       fullName: true,
       roleCode: true,
       isActive: true,
-      role: { select: { displayName: true } },
+      role: { select: { displayName: true, displayNameEn: true } },
     },
   });
   if (!user || user.username === "system") {
@@ -140,12 +142,15 @@ function buildMatrixItem(params: {
 export async function getUserPermissionMatrix(
   userId: number,
   actorRoleCode: string,
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<UserPermissionMatrix> {
   const user = await loadTargetUser(userId);
   const catalog = await prisma.permission.findMany({
     orderBy: [{ module: "asc" }, { displayName: "asc" }],
-    select: { code: true, displayName: true, module: true },
+    select: { code: true, displayName: true, displayNameEn: true, module: true },
   });
+
+  const roleDisplayName = localizedRole(user.role, locale);
 
   const readOnly = user.roleCode === "admin";
 
@@ -153,7 +158,7 @@ export async function getUserPermissionMatrix(
     const permissions = catalog.map((p) =>
       buildMatrixItem({
         code: p.code,
-        displayName: p.displayName,
+        displayName: localizedPermission(p, locale),
         module: p.module,
         inRoleDefault: true,
         override: null,
@@ -167,7 +172,7 @@ export async function getUserPermissionMatrix(
         username: user.username,
         fullName: user.fullName,
         roleCode: user.roleCode,
-        roleDisplayName: user.role.displayName,
+        roleDisplayName,
         isActive: user.isActive,
       },
       readOnly: true,
@@ -197,7 +202,7 @@ export async function getUserPermissionMatrix(
     const override = overrideMap.get(p.code) ?? null;
     return buildMatrixItem({
       code: p.code,
-      displayName: p.displayName,
+      displayName: localizedPermission(p, locale),
       module: p.module,
       inRoleDefault,
       override,
@@ -216,7 +221,7 @@ export async function getUserPermissionMatrix(
       username: user.username,
       fullName: user.fullName,
       roleCode: user.roleCode,
-      roleDisplayName: user.role.displayName,
+      roleDisplayName,
       isActive: user.isActive,
     },
     readOnly: false,
@@ -312,6 +317,7 @@ export async function setUserPermissionOverrides(
   toggles: PermissionToggleInput[],
   actorId: number,
   actorRoleCode: string,
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<UserPermissionMatrix> {
   const user = await loadTargetUser(userId);
   assertCanMutateTarget({
@@ -388,13 +394,14 @@ export async function setUserPermissionOverrides(
     );
   }
 
-  return getUserPermissionMatrix(userId, actorRoleCode);
+  return getUserPermissionMatrix(userId, actorRoleCode, locale);
 }
 
 export async function resetUserPermissionOverrides(
   userId: number,
   actorId: number,
   actorRoleCode: string,
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<UserPermissionMatrix> {
   const user = await loadTargetUser(userId);
   assertCanMutateTarget({
@@ -440,7 +447,7 @@ export async function resetUserPermissionOverrides(
     );
   }
 
-  return getUserPermissionMatrix(userId, actorRoleCode);
+  return getUserPermissionMatrix(userId, actorRoleCode, locale);
 }
 
 export async function copyUserPermissionOverrides(
@@ -448,6 +455,7 @@ export async function copyUserPermissionOverrides(
   sourceUserId: number,
   actorId: number,
   actorRoleCode: string,
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<UserPermissionMatrix> {
   if (targetUserId === sourceUserId) {
     throw new ServiceError("cannotCopyPermissionsFromSelf");
@@ -534,5 +542,5 @@ export async function copyUserPermissionOverrides(
     "user permission overrides copied",
   );
 
-  return getUserPermissionMatrix(targetUserId, actorRoleCode);
+  return getUserPermissionMatrix(targetUserId, actorRoleCode, locale);
 }

@@ -81,9 +81,10 @@ export async function createContract(
     },
   });
   if (existingContract) {
+    // Enum-reference code; resolved to the request locale at the API boundary.
     throw new ServiceError("customerAlreadyHasContractForYear", "BAD_REQUEST", {
           contractNumber: existingContract.contractNumber,
-          statusLabel: existingContract.status,
+          statusLabel: `@enums.contractStatus.${existingContract.status}`,
         });
   }
 

@@ -81,7 +81,7 @@ async function main() {
   for (const role of RBAC_ROLES) {
     await prisma.role.upsert({
       where: { code: role.code },
-      update: { displayName: role.displayName },
+      update: { displayName: role.displayName, displayNameEn: role.displayNameEn },
       create: role,
     });
   }
@@ -91,7 +91,11 @@ async function main() {
   for (const perm of RBAC_PERMISSIONS) {
     await prisma.permission.upsert({
       where: { code: perm.code },
-      update: { displayName: perm.displayName, module: perm.module },
+      update: {
+        displayName: perm.displayName,
+        displayNameEn: perm.displayNameEn,
+        module: perm.module,
+      },
       create: perm,
     });
   }
@@ -120,23 +124,23 @@ async function main() {
 
   // ─── Size Lookup ──────────────────────────────────────────────
   const sizes = [
-    { code: "8mm", displayName: "8 مم", isSpecialRatio: true, subjectToTolerance: false, isBundleType: true, isActive: true, sortOrder: 1 },
-    { code: "10mm", displayName: "10 مم", isSpecialRatio: true, subjectToTolerance: false, isBundleType: true, isActive: true, sortOrder: 2 },
-    { code: "12mm", displayName: "12 مم", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 3 },
-    { code: "14mm", displayName: "14 مم", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 4 },
-    { code: "16mm", displayName: "16 مم", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 5 },
-    { code: "18mm", displayName: "18 مم", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 6 },
-    { code: "20mm", displayName: "20 مم", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 7 },
-    { code: "22mm", displayName: "22 مم", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 8 },
-    { code: "25mm", displayName: "25 مم", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 9 },
-    { code: "shortbar_1_4m", displayName: "قصائر 1–4 م", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 10 },
-    { code: "shortbar_4_12m", displayName: "قصائر 4–12 م", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 11 },
-    { code: "scrap", displayName: "خردة (Scrap)", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 12 },
-    { code: "billet_wire_6mm", displayName: "أسلاك تربيط بيلت مستورد 6 mm", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 13 },
-    { code: "rebar_under_70cm", displayName: "مبروم أقل من 70 سم", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 14 },
-    { code: "billet_scrap_10m", displayName: "بيلت خردة 10m", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 15 },
-    { code: "scrap_50cm_1m", displayName: "سكراب من 50 سم إلى 1 م", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 16 },
-    { code: "6mm", displayName: "6 مم", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: false, sortOrder: 0 },
+    { code: "8mm", displayName: "8 مم", displayNameEn: "8mm", isSpecialRatio: true, subjectToTolerance: false, isBundleType: true, isActive: true, sortOrder: 1 },
+    { code: "10mm", displayName: "10 مم", displayNameEn: "10mm", isSpecialRatio: true, subjectToTolerance: false, isBundleType: true, isActive: true, sortOrder: 2 },
+    { code: "12mm", displayName: "12 مم", displayNameEn: "12mm", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 3 },
+    { code: "14mm", displayName: "14 مم", displayNameEn: "14mm", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 4 },
+    { code: "16mm", displayName: "16 مم", displayNameEn: "16mm", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 5 },
+    { code: "18mm", displayName: "18 مم", displayNameEn: "18mm", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 6 },
+    { code: "20mm", displayName: "20 مم", displayNameEn: "20mm", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 7 },
+    { code: "22mm", displayName: "22 مم", displayNameEn: "22mm", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 8 },
+    { code: "25mm", displayName: "25 مم", displayNameEn: "25mm", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: true, sortOrder: 9 },
+    { code: "shortbar_1_4m", displayName: "قصائر 1–4 م", displayNameEn: "Short bars 1–4 m", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 10 },
+    { code: "shortbar_4_12m", displayName: "قصائر 4–12 م", displayNameEn: "Short bars 4–12 m", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 11 },
+    { code: "scrap", displayName: "خردة (Scrap)", displayNameEn: "Scrap", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 12 },
+    { code: "billet_wire_6mm", displayName: "أسلاك تربيط بيلت مستورد 6 mm", displayNameEn: "Imported billet tying wire 6mm", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 13 },
+    { code: "rebar_under_70cm", displayName: "مبروم أقل من 70 سم", displayNameEn: "Rebar under 70 cm", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 14 },
+    { code: "billet_scrap_10m", displayName: "بيلت خردة 10m", displayNameEn: "Billet scrap 10m", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 15 },
+    { code: "scrap_50cm_1m", displayName: "سكراب من 50 سم إلى 1 م", displayNameEn: "Scrap 50 cm to 1 m", isSpecialRatio: false, subjectToTolerance: true, isBundleType: false, isActive: true, sortOrder: 16 },
+    { code: "6mm", displayName: "6 مم", displayNameEn: "6mm", isSpecialRatio: false, subjectToTolerance: true, isBundleType: true, isActive: false, sortOrder: 0 },
   ];
 
   // Remove legacy "shortbar" if it exists (replaced by shortbar_1_4m / shortbar_4_12m)
@@ -153,20 +157,20 @@ async function main() {
 
   // ─── Destination Lookup ────────────────────────────────────────
   const destinations = [
-    { name: "دمشق", details: "المدينة والمناطق المحيطة", isActive: true, sortOrder: 1 },
-    { name: "ريف دمشق", details: "المنطقة الصناعية والمستودعات", isActive: true, sortOrder: 2 },
-    { name: "حمص", details: "المنطقة الوسطى", isActive: true, sortOrder: 3 },
-    { name: "حماة", details: "المنطقة الوسطى", isActive: true, sortOrder: 4 },
-    { name: "حلب", details: "المنطقة الشمالية", isActive: true, sortOrder: 5 },
-    { name: "اللاذقية", details: "الساحل", isActive: true, sortOrder: 6 },
-    { name: "طرطوس", details: "الساحل", isActive: true, sortOrder: 7 },
-    { name: "درعا", details: "المنطقة الجنوبية", isActive: true, sortOrder: 8 },
-    { name: "السويداء", details: "المنطقة الجنوبية", isActive: true, sortOrder: 9 },
-    { name: "إدلب", details: "المنطقة الشمالية", isActive: true, sortOrder: 10 },
-    { name: "الحسكة", details: "المنطقة الشرقية", isActive: true, sortOrder: 11 },
-    { name: "دير الزور", details: "المنطقة الشرقية", isActive: true, sortOrder: 12 },
-    { name: "الرقة", details: "المنطقة الشرقية", isActive: true, sortOrder: 13 },
-    { name: "القنيطرة", details: "المنطقة الجنوبية", isActive: true, sortOrder: 14 },
+    { name: "دمشق", nameEn: "Damascus", details: "المدينة والمناطق المحيطة", isActive: true, sortOrder: 1 },
+    { name: "ريف دمشق", nameEn: "Rural Damascus", details: "المنطقة الصناعية والمستودعات", isActive: true, sortOrder: 2 },
+    { name: "حمص", nameEn: "Homs", details: "المنطقة الوسطى", isActive: true, sortOrder: 3 },
+    { name: "حماة", nameEn: "Hama", details: "المنطقة الوسطى", isActive: true, sortOrder: 4 },
+    { name: "حلب", nameEn: "Aleppo", details: "المنطقة الشمالية", isActive: true, sortOrder: 5 },
+    { name: "اللاذقية", nameEn: "Lattakia", details: "الساحل", isActive: true, sortOrder: 6 },
+    { name: "طرطوس", nameEn: "Tartus", details: "الساحل", isActive: true, sortOrder: 7 },
+    { name: "درعا", nameEn: "Daraa", details: "المنطقة الجنوبية", isActive: true, sortOrder: 8 },
+    { name: "السويداء", nameEn: "As-Suwayda", details: "المنطقة الجنوبية", isActive: true, sortOrder: 9 },
+    { name: "إدلب", nameEn: "Idlib", details: "المنطقة الشمالية", isActive: true, sortOrder: 10 },
+    { name: "الحسكة", nameEn: "Al-Hasakah", details: "المنطقة الشرقية", isActive: true, sortOrder: 11 },
+    { name: "دير الزور", nameEn: "Deir ez-Zor", details: "المنطقة الشرقية", isActive: true, sortOrder: 12 },
+    { name: "الرقة", nameEn: "Raqqa", details: "المنطقة الشرقية", isActive: true, sortOrder: 13 },
+    { name: "القنيطرة", nameEn: "Quneitra", details: "المنطقة الجنوبية", isActive: true, sortOrder: 14 },
   ];
 
   for (const destination of destinations) {
@@ -196,15 +200,15 @@ async function main() {
   const sizeIdByCode = new Map(sizeRows.map((s) => [s.code, s.id]));
 
   const stockYards = [
-    { code: "FRONT", nameAr: "الساحة الأمامية" },
-    { code: "BACK", nameAr: "الساحة الخلفية" },
+    { code: "FRONT", nameAr: "الساحة الأمامية", nameEn: "Front Yard" },
+    { code: "BACK", nameAr: "الساحة الخلفية", nameEn: "Back Yard" },
   ];
   const yardIdByCode = new Map<string, number>();
   for (const yard of stockYards) {
     const row = await prisma.stockYard.upsert({
       where: { code: yard.code },
-      update: { nameAr: yard.nameAr },
-      create: { code: yard.code, nameAr: yard.nameAr },
+      update: { nameAr: yard.nameAr, nameEn: yard.nameEn },
+      create: { code: yard.code, nameAr: yard.nameAr, nameEn: yard.nameEn },
     });
     yardIdByCode.set(yard.code, row.id);
   }

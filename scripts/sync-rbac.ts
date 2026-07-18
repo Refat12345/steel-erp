@@ -109,7 +109,7 @@ async function planChanges(prisma: PrismaClient): Promise<ChangeSet> {
 
   // Roles --------------------------------------------------------
   const existingRoles = await prisma.role.findMany({
-    select: { code: true, displayName: true },
+    select: { code: true, displayName: true, displayNameEn: true },
   });
   const existingRoleByCode = new Map(existingRoles.map((r) => [r.code, r]));
   const sourceRoleCodes = new Set(RBAC_ROLES.map((r) => r.code));
@@ -118,7 +118,10 @@ async function planChanges(prisma: PrismaClient): Promise<ChangeSet> {
     const existing = existingRoleByCode.get(r.code);
     if (!existing) {
       cs.rolesToAdd.push(r.code);
-    } else if (existing.displayName !== r.displayName) {
+    } else if (
+      existing.displayName !== r.displayName ||
+      existing.displayNameEn !== r.displayNameEn
+    ) {
       cs.rolesToUpdate.push(r.code);
     }
   }
@@ -128,7 +131,7 @@ async function planChanges(prisma: PrismaClient): Promise<ChangeSet> {
 
   // Permissions --------------------------------------------------
   const existingPerms = await prisma.permission.findMany({
-    select: { code: true, displayName: true, module: true },
+    select: { code: true, displayName: true, displayNameEn: true, module: true },
   });
   const existingPermByCode = new Map(existingPerms.map((p) => [p.code, p]));
   const sourcePermCodes = new Set(RBAC_PERMISSIONS.map((p) => p.code));
@@ -140,6 +143,7 @@ async function planChanges(prisma: PrismaClient): Promise<ChangeSet> {
     } else {
       const reasons: string[] = [];
       if (existing.displayName !== p.displayName) reasons.push("displayName");
+      if (existing.displayNameEn !== p.displayNameEn) reasons.push("displayNameEn");
       if (existing.module !== p.module) reasons.push("module");
       if (reasons.length > 0)
         cs.permissionsToUpdate.push({ code: p.code, reason: reasons.join(",") });
@@ -290,14 +294,18 @@ async function applyChanges(
   for (const r of RBAC_ROLES) {
     await prisma.role.upsert({
       where: { code: r.code },
-      update: { displayName: r.displayName },
+      update: { displayName: r.displayName, displayNameEn: r.displayNameEn },
       create: r,
     });
   }
   for (const p of RBAC_PERMISSIONS) {
     await prisma.permission.upsert({
       where: { code: p.code },
-      update: { displayName: p.displayName, module: p.module },
+      update: {
+        displayName: p.displayName,
+        displayNameEn: p.displayNameEn,
+        module: p.module,
+      },
       create: p,
     });
   }
