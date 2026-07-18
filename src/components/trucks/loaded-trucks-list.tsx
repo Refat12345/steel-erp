@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
   Table,
@@ -17,7 +18,9 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ChevronLeft, ChevronRight, Search, CalendarDays } from "lucide-react";
 import { formatDate } from "@/lib/date-format";
+import { formatDecimal, formatInteger, formatKg } from "@/lib/number-format";
 import { defaultOperationalDateInput } from "@/lib/operational-day";
+import { getTextDirection, type Locale } from "@/i18n/config";
 
 interface LoadedSize {
   sizeId: number | null;
@@ -38,15 +41,10 @@ interface LoadedTruckItem {
 
 const PAGE_SIZE = 25;
 
-function formatKg(value: number): string {
-  return value.toLocaleString("en-US", { maximumFractionDigits: 1 });
-}
-
-function formatTons(value: number): string {
-  return value.toLocaleString("en-US", { maximumFractionDigits: 3 });
-}
-
 export function LoadedTrucksList() {
+  const t = useTranslations("trucks");
+  const locale = useLocale() as Locale;
+  const isRtl = getTextDirection(locale) === "rtl";
   const router = useRouter();
   const [data, setData] = useState<LoadedTruckItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -77,11 +75,11 @@ export function LoadedTrucksList() {
       setTotal(json.total);
       setAnalyticsStartDate(json.analyticsStartDate ?? null);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "خطأ في تحميل البيانات");
+      toast.error(e instanceof Error ? e.message : t("errorLoad"));
     } finally {
       setLoading(false);
     }
-  }, [page, customerSearch, operationalDate]);
+  }, [page, customerSearch, operationalDate, t]);
 
   useEffect(() => {
     fetchData();
@@ -96,10 +94,8 @@ export function LoadedTrucksList() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">حركة الشاحنات</h2>
-        <p className="text-sm text-muted-foreground">
-          عرض الزبون والوجهة وصافي القبان والأقطار المحمّلة لكل شاحنة
-        </p>
+        <h2 className="text-lg font-semibold">{t("loadedTitle")}</h2>
+        <p className="text-sm text-muted-foreground">{t("loadedSubtitle")}</p>
       </div>
 
       {/* Toolbar */}
@@ -111,13 +107,13 @@ export function LoadedTrucksList() {
               htmlFor="loaded-customer-search"
               className="text-xs font-medium text-muted-foreground"
             >
-              بحث
+              {t("search")}
             </label>
             <div className="relative">
               <Search className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 id="loaded-customer-search"
-                placeholder="بحث باسم الزبون..."
+                placeholder={t("searchCustomerPlaceholder")}
                 className="ps-9"
                 value={customerSearch}
                 onChange={(e) => setCustomerSearch(e.target.value)}
@@ -132,9 +128,11 @@ export function LoadedTrucksList() {
                 htmlFor="loaded-operational-date"
                 className="text-xs font-medium text-muted-foreground"
               >
-                يوم التشغيل
+                {t("operationalDay")}
               </label>
-              <span className="text-[11px] text-muted-foreground">(08:00 ← 08:00)</span>
+              <span className="text-[11px] text-muted-foreground">
+                {t("operationalDayHint")}
+              </span>
             </div>
             <div className="flex items-center gap-2">
               <Input
@@ -152,7 +150,7 @@ export function LoadedTrucksList() {
                 onClick={() => setOperationalDate(defaultOperationalDateInput())}
               >
                 <CalendarDays className="h-4 w-4 me-1" />
-                اليوم
+                {t("today")}
               </Button>
             </div>
           </div>
@@ -163,7 +161,7 @@ export function LoadedTrucksList() {
               variant="secondary"
               className="h-10 px-3 text-sm tabular-nums shrink-0"
             >
-              {loading ? "…" : `${total.toLocaleString("en-US")} شاحنة`}
+              {loading ? "…" : t("truckCount", { count: formatInteger(total) })}
             </Badge>
           )}
         </div>
@@ -174,11 +172,11 @@ export function LoadedTrucksList() {
         <Table className="min-w-[680px]">
           <TableHeader>
             <TableRow>
-              <TableHead>الزبون</TableHead>
-              <TableHead>الوجهة</TableHead>
-              <TableHead>صافي القبان (كغ)</TableHead>
-              <TableHead>الأقطار المحمّلة</TableHead>
-              <TableHead>التاريخ</TableHead>
+              <TableHead>{t("columns.customer")}</TableHead>
+              <TableHead>{t("columns.destination")}</TableHead>
+              <TableHead>{t("columns.bridgeNetKg")}</TableHead>
+              <TableHead>{t("columns.loadedSizes")}</TableHead>
+              <TableHead>{t("columns.date")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -198,7 +196,7 @@ export function LoadedTrucksList() {
                   colSpan={5}
                   className="text-center py-8 text-muted-foreground"
                 >
-                  لا توجد شاحنات
+                  {t("emptyTrucks")}
                 </TableCell>
               </TableRow>
             ) : (
@@ -238,11 +236,15 @@ export function LoadedTrucksList() {
                               <span className="font-medium">{s.displayName}</span>
                               {s.totalBundles != null && (
                                 <span className="ms-1">
-                                  {s.totalBundles.toLocaleString("en-US")} ربطة
+                                  {t("bundlesCount", {
+                                    count: formatInteger(s.totalBundles),
+                                  })}
                                 </span>
                               )}
                               <span className="ms-1 text-muted-foreground">
-                                ({formatTons(s.totalTons)} طن)
+                                {t("tonsParen", {
+                                  tons: formatDecimal(s.totalTons, 3),
+                                })}
                               </span>
                             </Badge>
                           ))}
@@ -265,8 +267,12 @@ export function LoadedTrucksList() {
         <div className="flex items-center justify-between text-sm text-muted-foreground">
           <span className="tabular-nums">
             {total > 0
-              ? `عرض ${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, total)} من ${total}`
-              : "لا توجد نتائج"}
+              ? t("paginationRange", {
+                  from: (page - 1) * PAGE_SIZE + 1,
+                  to: Math.min(page * PAGE_SIZE, total),
+                  total,
+                })
+              : t("emptyResults")}
           </span>
           <div className="flex items-center gap-1">
             <Button
@@ -275,7 +281,7 @@ export function LoadedTrucksList() {
               disabled={page <= 1}
               onClick={() => setPage((p) => p - 1)}
             >
-              <ChevronRight className="h-4 w-4" />
+              {isRtl ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             </Button>
             <span className="px-2 tabular-nums">
               {page} / {totalPages}
@@ -286,7 +292,7 @@ export function LoadedTrucksList() {
               disabled={page >= totalPages}
               onClick={() => setPage((p) => p + 1)}
             >
-              <ChevronLeft className="h-4 w-4" />
+              {isRtl ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
             </Button>
           </div>
         </div>

@@ -75,6 +75,58 @@ export function formatDurationCompactEn(ms: number | null | undefined): string {
   return `${minutes}m`;
 }
 
+/**
+ * Full English duration (mirror of formatDuration) for bilingual UI.
+ * Examples: "1 minute and 30 seconds", "1 hour and 30 minutes".
+ */
+export function formatDurationEn(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return "—";
+  if (ms < 1000) return "less than a second";
+
+  const totalSec = Math.floor(ms / 1000);
+  const days = Math.floor(totalSec / 86400);
+  const hours = Math.floor((totalSec % 86400) / 3600);
+  const minutes = Math.floor((totalSec % 3600) / 60);
+  const seconds = totalSec % 60;
+
+  const parts: string[] = [];
+  if (days > 0) parts.push(englishUnit(days, "day", "days"));
+  if (hours > 0) parts.push(englishUnit(hours, "hour", "hours"));
+  if (minutes > 0 && days === 0) {
+    parts.push(englishUnit(minutes, "minute", "minutes"));
+  }
+  if (seconds > 0 && days === 0 && hours === 0) {
+    parts.push(englishUnit(seconds, "second", "seconds"));
+  }
+
+  if (parts.length === 0) return "less than a second";
+  if (parts.length === 1) return parts[0];
+  return parts.slice(0, 2).join(" and ");
+}
+
+/** Locale-aware full duration for scale / truck timelines. */
+export function formatDurationLocalized(
+  ms: number | null | undefined,
+  locale: string,
+): string {
+  return locale === "en" ? formatDurationEn(ms) : formatDuration(ms);
+}
+
+/** Locale-aware compact duration for metric boxes / tables. */
+export function formatDurationCompactLocalized(
+  ms: number | null | undefined,
+  locale: string,
+): string {
+  return locale === "en"
+    ? formatDurationCompactEn(ms)
+    : formatDurationCompact(ms);
+}
+
+function englishUnit(n: number, singular: string, plural: string): string {
+  if (n === 1) return `1 ${singular}`;
+  return `${n} ${plural}`;
+}
+
 /** Compute milliseconds between two ISO-string/Date values. */
 export function durationBetween(
   from: string | Date | null | undefined,

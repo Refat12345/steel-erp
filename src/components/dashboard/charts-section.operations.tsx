@@ -67,6 +67,7 @@ import {
 } from "@/components/ui/card";
 
 type DashboardT = ReturnType<typeof useTranslations<"dashboard">>;
+type EnumsT = ReturnType<typeof useTranslations<"enums">>;
 
 // ─── Types — mirror the API response ──────────────────────────────────
 
@@ -222,17 +223,17 @@ const MATERIAL_KINDS = [
   "SCRAP_50CM_1M",
 ] as const;
 
-function truckStatusLabel(status: TruckStatus, t: DashboardT): string {
-  return t(`truckStatus.${status}`);
+function truckStatusLabel(status: TruckStatus, tEnums: EnumsT): string {
+  return tEnums(`truckStatus.${status}`);
 }
 
 function materialKindLabel(
   kind: string,
   fallback: string,
-  t: DashboardT,
+  tEnums: EnumsT,
 ): string {
   if ((MATERIAL_KINDS as readonly string[]).includes(kind)) {
-    return t(`materialKind.${kind as (typeof MATERIAL_KINDS)[number]}`);
+    return tEnums(`materialKind.${kind as (typeof MATERIAL_KINDS)[number]}`);
   }
   return fallback;
 }
@@ -709,6 +710,7 @@ function TruncatedYTick({
 
 export function ChartsSection() {
   const t = useTranslations("dashboard");
+  const tEnums = useTranslations("enums");
   const [period, setPeriod] = useState<Period>("today");
   const [data, setData] = useState<ApiResponse["data"] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -775,13 +777,13 @@ export function ChartsSection() {
   const tonsByKindLocalized =
     owner?.tonsByKind.map((entry) => ({
       ...entry,
-      label: materialKindLabel(entry.kind, entry.label, t),
+      label: materialKindLabel(entry.kind, entry.label, tEnums),
     })) ?? [];
 
   const fleetStatusLocalized =
     ops?.fleetStatus.map((entry) => ({
       ...entry,
-      label: truckStatusLabel(entry.status, t),
+      label: truckStatusLabel(entry.status, tEnums),
     })) ?? [];
 
   // ── Owner KPI cards (4) ──────────────────────────────────────────────
@@ -1240,7 +1242,7 @@ export function ChartsSection() {
                             {truck.plateNumber}
                           </span>
                           <span className="text-muted-foreground">
-                            {truckStatusLabel(truck.status, t)}
+                            {truckStatusLabel(truck.status, tEnums)}
                           </span>
                         </div>
                         <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground tabular-nums">
@@ -1341,7 +1343,7 @@ export function ChartsSection() {
                             {truck.plateNumber}
                           </td>
                           <td className="px-3 py-2 text-start text-muted-foreground">
-                            {truckStatusLabel(truck.status, t)}
+                            {truckStatusLabel(truck.status, tEnums)}
                           </td>
                           <td className="px-3 py-2 text-start tabular-nums text-amber-600">
                             {formatMinutes(truck.minutesSince, t)}
