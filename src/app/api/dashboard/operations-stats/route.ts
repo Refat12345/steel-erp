@@ -13,6 +13,24 @@ import {
 import { logger } from "@/lib/logger";
 import { getRequestLocale } from "@/lib/i18n/request-locale";
 import { translateError } from "@/lib/i18n/server-messages";
+import { localizedDestination } from "@/lib/localized-name";
+import type { Locale } from "@/i18n/config";
+import type { OwnerStats } from "@/lib/services/operations-stats.service";
+
+function localizeOwnerStats(owner: OwnerStats, locale: Locale): OwnerStats {
+  return {
+    ...owner,
+    topDestinations: owner.topDestinations.map((d) => ({
+      id: d.id,
+      name:
+        localizedDestination(
+          { name: d.name, nameEn: d.nameEn },
+          locale,
+        ) || d.name,
+      tons: d.tons,
+    })),
+  };
+}
 
 const OPS_PERMISSION = "dashboard.ops.view";
 
@@ -54,6 +72,7 @@ export async function GET(req: NextRequest) {
     // Owner-tier callers never pay the latency cost for data they will
     // not receive, and the sensitive fields are absent from the payload
     // (no client-side hiding only).
+    const locale = await getRequestLocale();
     const [owner, ops] = await Promise.all([
       getOwnerStatsCached(period),
       includeOps
@@ -61,13 +80,20 @@ export async function GET(req: NextRequest) {
         : (Promise.resolve(null) as Promise<OpsStats | null>),
     ]);
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        owner,
-        ops, // null for Owner-tier callers
+    return NextResponse.json(
+      {
+        success: true,
+        data: {
+          owner: localizeOwnerStats(owner, locale),
+          ops, // null for Owner-tier callers
+        },
       },
-    });
+      {
+        // Live stats: forbid browser/proxy caching so navigating back to the
+        // dashboard or toggling the period never replays a stale response.
+        headers: { "Cache-Control": "no-store, must-revalidate" },
+      },
+    );
   } catch (err) {
     logger.error({ err }, "operations dashboard stats error");
     const locale = await getRequestLocale();

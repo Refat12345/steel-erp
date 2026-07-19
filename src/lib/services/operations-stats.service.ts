@@ -284,6 +284,8 @@ export interface ActivitySeries {
 export interface NamedTotal {
   id: number;
   name: string;
+  /** Present for destinations; API localizes `name` from this when set. */
+  nameEn?: string | null;
   code?: string;
   tons: number;
 }
@@ -807,9 +809,11 @@ async function buildOwnerStats(period: DashboardPeriod): Promise<OwnerStats> {
     topDestIds.length
       ? prisma.destination.findMany({
           where: { id: { in: topDestIds } },
-          select: { id: true, name: true },
+          select: { id: true, name: true, nameEn: true },
         })
-      : Promise.resolve([] as { id: number; name: string }[]),
+      : Promise.resolve(
+          [] as { id: number; name: string; nameEn: string | null }[],
+        ),
   ]);
 
   const customerMap = new Map(customerRows.map((c) => [c.id, c]));
@@ -822,11 +826,15 @@ async function buildOwnerStats(period: DashboardPeriod): Promise<OwnerStats> {
     tons: Math.round((custTons.get(id) ?? 0) * 1000) / 1000,
   }));
 
-  const topDestinations: NamedTotal[] = topDestIds.map((id) => ({
-    id,
-    name: destMap.get(id)?.name ?? `وجهة #${id}`,
-    tons: Math.round((destTons.get(id) ?? 0) * 1000) / 1000,
-  }));
+  const topDestinations: NamedTotal[] = topDestIds.map((id) => {
+    const dest = destMap.get(id);
+    return {
+      id,
+      name: dest?.name ?? `وجهة #${id}`,
+      nameEn: dest?.nameEn ?? null,
+      tons: Math.round((destTons.get(id) ?? 0) * 1000) / 1000,
+    };
+  });
 
   const tonsByKind: KindTotal[] = (
     Object.keys(KIND_LABELS) as MaterialKind[]
