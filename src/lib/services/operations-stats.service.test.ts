@@ -686,8 +686,8 @@ describe("owner dashboard KPIs and rankings", () => {
       { id: 2, fullName: "زبون ب", code: "C2" },
     ]);
     mockPrisma.destination.findMany.mockResolvedValue([
-      { id: 11, name: "دمشق" },
-      { id: 22, name: "حلب" },
+      { id: 11, name: "دمشق", nameEn: "Damascus" },
+      { id: 22, name: "حلب", nameEn: "Aleppo" },
     ]);
 
     const stats = await getOwnerStatsCached("today");
@@ -697,8 +697,8 @@ describe("owner dashboard KPIs and rankings", () => {
       { id: 2, name: "زبون ب", code: "C2", tons: 10 },
     ]);
     expect(stats.topDestinations).toEqual([
-      { id: 11, name: "دمشق", tons: 40 }, // 30 + 10
-      { id: 22, name: "حلب", tons: 5 },
+      { id: 11, name: "دمشق", nameEn: "Damascus", tons: 40 }, // 30 + 10
+      { id: 22, name: "حلب", nameEn: "Aleppo", tons: 5 },
     ]);
   });
 

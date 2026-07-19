@@ -739,7 +739,11 @@ export function ChartsSection() {
     function load() {
       const silent = !initialLoad;
       initialLoad = false;
-      fetch(`/api/dashboard/operations-stats?period=${period}`)
+      // no-store: stats must never be served from the browser HTTP cache —
+      // stale JSON here made the dashboard show old data until a hard refresh.
+      fetch(`/api/dashboard/operations-stats?period=${period}`, {
+        cache: "no-store",
+      })
         .then((r) => r.json())
         .then((j: ApiResponse) => {
           if (cancelled) return;
