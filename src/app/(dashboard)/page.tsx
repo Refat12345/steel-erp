@@ -9,9 +9,11 @@ import {
   getRoleLandingPage,
   isAnalyticsRestrictedRole,
 } from "@/lib/rbac-policy";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { logger } from "@/lib/logger";
 import { formatDate } from "@/lib/date-format";
+import { pickLocalizedName } from "@/lib/localized-name";
+import type { Locale } from "@/i18n/config";
 
 export default async function DashboardPage() {
   const session = await getServerSession(authOptions);
@@ -75,9 +77,15 @@ export default async function DashboardPage() {
   }
 
   const dateStr = formatDate(new Date());
+  const locale = (await getLocale()) as Locale;
   const tBrand = await getTranslations("brand");
   const tDashboard = await getTranslations("dashboard");
   const userName = session?.user.name ?? "";
+  const roleLabel = pickLocalizedName(
+    locale,
+    session.user.roleName,
+    session.user.roleNameEn,
+  );
 
   return (
     <div className="space-y-8">
@@ -123,7 +131,7 @@ export default async function DashboardPage() {
               boxShadow: "inset 0 0 0 1px oklch(0.390 0.130 232 / 22%)",
             }}
           >
-            {session?.user.roleName}
+            {roleLabel}
           </span>
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <CalendarDays className="h-3.5 w-3.5 shrink-0" />

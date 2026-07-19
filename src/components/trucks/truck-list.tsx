@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import { RegisterTruckDialog } from "./register-truck-dialog";
 import { EditTruckDialog, type EditableTruck } from "./edit-truck-dialog";
-import { durationBetween, formatDurationCompact } from "@/lib/format-duration";
+import { durationBetween, formatDurationCompactLocalized } from "@/lib/format-duration";
 import { formatDate, formatDateTime } from "@/lib/date-format";
 import { formatInteger } from "@/lib/number-format";
 import { defaultOperationalDateInput } from "@/lib/operational-day";
@@ -373,7 +373,7 @@ export function TruckList() {
                           }`}
                           title={durationTitle}
                         >
-                          {formatDurationCompact(loadingMs)}
+                          {formatDurationCompactLocalized(loadingMs, locale)}
                           {loadingInProgress && (
                             <span className="ms-1 text-[10px] font-sans text-amber-600">
                               {t("loadingInProgress")}

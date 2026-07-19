@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useTranslations } from "next-intl";
 import { AlertTriangle, RotateCcw, Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -12,6 +13,9 @@ export default function DashboardError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const t = useTranslations("errors");
+  const tCommon = useTranslations("common");
+
   useEffect(() => {
     console.error("Dashboard error:", error);
   }, [error]);
@@ -23,10 +27,8 @@ export default function DashboardError({
           <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-destructive/10">
             <AlertTriangle className="h-7 w-7 text-destructive" />
           </div>
-          <h2 className="text-lg font-bold">حدث خطأ غير متوقع</h2>
-          <p className="text-sm text-muted-foreground">
-            عذراً، حدث خطأ أثناء تحميل الصفحة. يرجى المحاولة مرة أخرى.
-          </p>
+          <h2 className="text-lg font-bold">{t("dashboardErrorTitle")}</h2>
+          <p className="text-sm text-muted-foreground">{t("dashboardErrorBody")}</p>
           {error.digest && (
             <p className="text-xs text-muted-foreground font-mono" dir="ltr">
               {error.digest}
@@ -35,7 +37,7 @@ export default function DashboardError({
           <div className="flex gap-3 mt-2">
             <Button variant="outline" size="sm" onClick={reset}>
               <RotateCcw className="me-1.5 h-4 w-4" />
-              إعادة المحاولة
+              {tCommon("retry")}
             </Button>
             <Button
               variant="default"
@@ -43,7 +45,7 @@ export default function DashboardError({
               onClick={() => (window.location.href = "/")}
             >
               <Home className="me-1.5 h-4 w-4" />
-              الصفحة الرئيسية
+              {tCommon("home")}
             </Button>
           </div>
         </CardContent>
