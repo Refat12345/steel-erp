@@ -14,6 +14,7 @@ import {
 } from "@/lib/operational-day";
 import { listLoadedTrucks } from "@/lib/services/truck.service";
 import { getAnalyticsStartDateValue } from "@/lib/services/settings.service";
+import { getRequestLocale } from "@/lib/i18n/request-locale";
 
 export async function GET(req: NextRequest) {
   const session = await getApiSession();
@@ -35,6 +36,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    const locale = await getRequestLocale();
     const [result, analyticsStartDate] = await Promise.all([
       listLoadedTrucks(
         {
@@ -43,6 +45,7 @@ export async function GET(req: NextRequest) {
           dateTo: window?.to,
         },
         pagination,
+        locale,
       ),
       getAnalyticsStartDateValue(),
     ]);

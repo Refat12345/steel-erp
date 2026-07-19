@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { Check, ChevronsUpDown, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +17,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { getTextDirection, type Locale } from "@/i18n/config";
 import { cn } from "@/lib/utils";
 import {
   type DestinationOption,
@@ -35,11 +37,18 @@ export function DestinationSelect({
   onValueChange,
   disabled = false,
 }: DestinationSelectProps) {
+  const t = useTranslations("trucks.destinationSelect");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedOption, setSelectedOption] = useState<DestinationOption | null>(null);
   const debouncedSearch = useDebouncedValue(search, 300);
-  const { data: options, loading, error } = useDestinationOptions(debouncedSearch, open);
+  const { data: options, loading, error } = useDestinationOptions(
+    debouncedSearch,
+    open,
+    locale,
+  );
 
   const selectedDestination = useMemo(() => {
     if (value == null) return null;
@@ -50,7 +59,7 @@ export function DestinationSelect({
 
   const selectedLabel = selectedDestination
     ? formatDestinationLabel(selectedDestination)
-    : "اختر الوجهة (اختياري)";
+    : t("placeholder");
 
   return (
     <div className="flex min-w-0 gap-2">
@@ -62,7 +71,7 @@ export function DestinationSelect({
             "inline-flex h-8 min-w-0 flex-1 items-center justify-between rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm transition-colors outline-none hover:bg-muted focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50",
             !selectedDestination && "text-muted-foreground",
           )}
-          aria-label="اختيار الوجهة"
+          aria-label={t("ariaSelect")}
         >
           <span className="truncate">{selectedLabel}</span>
           <ChevronsUpDown className="ms-2 h-4 w-4 shrink-0 opacity-50" />
@@ -70,25 +79,26 @@ export function DestinationSelect({
         <PopoverContent
           className="w-[min(22rem,calc(100vw-2rem))] p-0"
           align="start"
+          dir={dir}
         >
           <Command shouldFilter={false}>
             <CommandInput
               value={search}
               onValueChange={setSearch}
-              placeholder="ابحث باسم الوجهة..."
+              placeholder={t("searchPlaceholder")}
             />
             <CommandList>
               {loading && (
                 <div className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  جاري تحميل الوجهات...
+                  {t("loading")}
                 </div>
               )}
               {!loading && error && (
                 <div className="px-3 py-3 text-sm text-destructive">{error}</div>
               )}
               {!loading && !error && options.length === 0 && (
-                <CommandEmpty>لا توجد نتائج</CommandEmpty>
+                <CommandEmpty>{t("empty")}</CommandEmpty>
               )}
               {!error && options.length > 0 && (
                 <CommandGroup>
@@ -135,7 +145,7 @@ export function DestinationSelect({
             onValueChange(null);
           }}
           disabled={disabled}
-          aria-label="مسح الوجهة"
+          aria-label={t("ariaClear")}
           className="shrink-0"
         >
           <X className="h-4 w-4" />

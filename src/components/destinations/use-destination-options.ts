@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
+import type { Locale } from "@/i18n/config";
 
 export interface DestinationOption {
   id: number;
@@ -28,7 +30,12 @@ export function formatDestinationLabel(destination: DestinationOption) {
     : destination.name;
 }
 
-export function useDestinationOptions(search: string, enabled: boolean) {
+export function useDestinationOptions(
+  search: string,
+  enabled: boolean,
+  locale: Locale,
+) {
+  const t = useTranslations("trucks.destinationSelect");
   const [data, setData] = useState<DestinationOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +44,7 @@ export function useDestinationOptions(search: string, enabled: boolean) {
     if (!enabled) return;
 
     const normalizedSearch = search.trim();
-    const cacheKey = normalizedSearch.toLocaleLowerCase();
+    const cacheKey = `${locale}|${normalizedSearch.toLocaleLowerCase()}`;
     const cached = optionCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
       let cancelled = false;
@@ -66,7 +73,7 @@ export function useDestinationOptions(search: string, enabled: boolean) {
     fetch(`/api/destinations?${params}`, { signal: controller.signal })
       .then((res) => res.json())
       .then((json) => {
-        if (!json.success) throw new Error(json.error || "خطأ في تحميل الوجهات");
+        if (!json.success) throw new Error(json.error || t("errorLoad"));
         const destinations = (json.data || []) as DestinationOption[];
         optionCache.set(cacheKey, {
           data: destinations,
@@ -76,14 +83,14 @@ export function useDestinationOptions(search: string, enabled: boolean) {
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        setError(err instanceof Error ? err.message : "خطأ في تحميل الوجهات");
+        setError(err instanceof Error ? err.message : t("errorLoad"));
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
 
     return () => controller.abort();
-  }, [enabled, search]);
+  }, [enabled, search, locale, t]);
 
   return { data, loading, error };
 }

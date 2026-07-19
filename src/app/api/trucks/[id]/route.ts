@@ -18,6 +18,8 @@ import {
 } from "@/lib/services/truck.service";
 import { computeTruckTimings } from "@/lib/truck-timing";
 import { NOTES_ONLY_EDITABLE_STATUSES } from "@/lib/truck-edit-ui";
+import { getRequestLocale } from "@/lib/i18n/request-locale";
+import { withLocalizedTruckLabels } from "@/lib/localized-name";
 
 export async function GET(
   _req: NextRequest,
@@ -36,7 +38,11 @@ export async function GET(
   if (isNaN(truckId)) return unauthorized();
 
   try {
-    const truck = await getOperationDetail(truckId);
+    const locale = await getRequestLocale();
+    const truck = withLocalizedTruckLabels(
+      await getOperationDetail(truckId),
+      locale,
+    );
     const timings = computeTruckTimings({
       createdAt: truck.createdAt,
       tareTime: truck.tareTime,

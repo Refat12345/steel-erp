@@ -21,6 +21,7 @@ export async function listActiveDestinations({
         ? {
             OR: [
               { name: { contains: normalizedSearch, mode: "insensitive" as const } },
+              { nameEn: { contains: normalizedSearch, mode: "insensitive" as const } },
               { details: { contains: normalizedSearch, mode: "insensitive" as const } },
             ],
           }

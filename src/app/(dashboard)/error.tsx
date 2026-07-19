@@ -34,7 +34,7 @@ export default function DashboardError({
           )}
           <div className="flex gap-3 mt-2">
             <Button variant="outline" size="sm" onClick={reset}>
-              <RotateCcw className="ml-1.5 h-4 w-4" />
+              <RotateCcw className="me-1.5 h-4 w-4" />
               إعادة المحاولة
             </Button>
             <Button
@@ -42,7 +42,7 @@ export default function DashboardError({
               size="sm"
               onClick={() => (window.location.href = "/")}
             >
-              <Home className="ml-1.5 h-4 w-4" />
+              <Home className="me-1.5 h-4 w-4" />
               الصفحة الرئيسية
             </Button>
           </div>
