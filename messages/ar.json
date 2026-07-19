@@ -513,6 +513,15 @@
     "customerRequired": "الزبون *",
     "selectCustomer": "اختر الزبون",
     "destinationOptional": "الوجهة (اختياري)",
+    "destinationSelect": {
+      "placeholder": "اختر الوجهة (اختياري)",
+      "searchPlaceholder": "ابحث باسم الوجهة...",
+      "loading": "جاري تحميل الوجهات...",
+      "empty": "لا توجد نتائج",
+      "errorLoad": "خطأ في تحميل الوجهات",
+      "ariaSelect": "اختيار الوجهة",
+      "ariaClear": "مسح الوجهة"
+    },
     "loadTypeOptional": "نوع الحمل (اختياري)",
     "selectLoadType": "اختر نوع الحمل",
     "loadTypeOther": "غير مبروم",

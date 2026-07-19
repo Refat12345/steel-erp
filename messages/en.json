@@ -513,6 +513,15 @@
     "customerRequired": "Customer *",
     "selectCustomer": "Select customer",
     "destinationOptional": "Destination (optional)",
+    "destinationSelect": {
+      "placeholder": "Select destination (optional)",
+      "searchPlaceholder": "Search by destination name...",
+      "loading": "Loading destinations...",
+      "empty": "No results",
+      "errorLoad": "Failed to load destinations",
+      "ariaSelect": "Select destination",
+      "ariaClear": "Clear destination"
+    },
     "loadTypeOptional": "Load type (optional)",
     "selectLoadType": "Select load type",
     "loadTypeOther": "Non-rebar",

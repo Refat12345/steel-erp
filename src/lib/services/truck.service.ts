@@ -19,6 +19,11 @@ import {
 import { requestSizeCodesExemptFromInternalWeighing } from "@/lib/material-kind";
 import { applyLoadOutForClose } from "./stock.service";
 import { clampEventWindow } from "./settings.service";
+import type { Locale } from "@/i18n/config";
+import {
+  localizedDestinationName,
+  localizedSize,
+} from "@/lib/localized-name";
 
 type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
@@ -2602,16 +2607,32 @@ export async function cancelOperation(truckId: number, reason: string, userId: n
 
 const DETAIL_INCLUDE = {
   customer: { select: { id: true, fullName: true, code: true } },
-  destination: { select: { id: true, name: true, details: true } },
+  destination: { select: { id: true, name: true, nameEn: true, details: true } },
   requestItems: {
     orderBy: { size: { sortOrder: "asc" as const } },
-    include: { size: { select: { id: true, code: true, displayName: true, isBundleType: true } } },
+    include: {
+      size: {
+        select: {
+          id: true,
+          code: true,
+          displayName: true,
+          displayNameEn: true,
+          isBundleType: true,
+        },
+      },
+    },
   },
   sessions: {
     orderBy: { sessionNumber: "asc" as const },
     include: {
       size: {
-        select: { id: true, code: true, displayName: true, isBundleType: true },
+        select: {
+          id: true,
+          code: true,
+          displayName: true,
+          displayNameEn: true,
+          isBundleType: true,
+        },
       },
     },
   },
@@ -2619,7 +2640,7 @@ const DETAIL_INCLUDE = {
     orderBy: { roundNumber: "asc" as const },
     include: {
       loader: { select: { id: true, fullName: true, username: true } },
-      size: { select: { id: true, displayName: true } },
+      size: { select: { id: true, displayName: true, displayNameEn: true } },
     },
   },
   photos: { orderBy: { capturedAt: "asc" as const } },
@@ -2662,9 +2683,19 @@ export interface TruckListFilters {
 export type TruckListItem = Prisma.TruckOperationGetPayload<{
   include: {
     customer: { select: { id: true; fullName: true; code: true } };
-    destination: { select: { id: true; name: true; details: true } };
+    destination: { select: { id: true; name: true; nameEn: true; details: true } };
     requestItems: {
-      include: { size: { select: { id: true; code: true; displayName: true; isBundleType: true } } };
+      include: {
+        size: {
+          select: {
+            id: true;
+            code: true;
+            displayName: true;
+            displayNameEn: true;
+            isBundleType: true;
+          };
+        };
+      };
     };
     creator: { select: { id: true; fullName: true } };
     _count: { select: { sessions: true; rounds: true } };
@@ -2704,10 +2735,20 @@ export async function listOperations(
       take: pagination.pageSize,
       include: {
         customer: { select: { id: true, fullName: true, code: true } },
-        destination: { select: { id: true, name: true, details: true } },
+        destination: { select: { id: true, name: true, nameEn: true, details: true } },
         requestItems: {
           orderBy: { size: { sortOrder: "asc" as const } },
-          include: { size: { select: { id: true, code: true, displayName: true, isBundleType: true } } },
+          include: {
+            size: {
+              select: {
+                id: true,
+                code: true,
+                displayName: true,
+                displayNameEn: true,
+                isBundleType: true,
+              },
+            },
+          },
         },
         creator: { select: { id: true, fullName: true } },
         _count: { select: { sessions: true, rounds: true } },
@@ -2747,6 +2788,7 @@ export interface LoadedTruckListItem {
 export async function listLoadedTrucks(
   filters: LoadedTruckFilters,
   pagination: PaginationParams,
+  locale: Locale = "ar",
 ): Promise<PaginatedResult<LoadedTruckListItem>> {
   const where: Prisma.TruckOperationWhereInput = {
     status: { not: "Cancelled" },
@@ -2773,10 +2815,12 @@ export async function listLoadedTrucks(
       take: pagination.pageSize,
       include: {
         customer: { select: { fullName: true } },
-        destination: { select: { name: true } },
+        destination: { select: { name: true, nameEn: true } },
         sessions: {
           orderBy: { sessionNumber: "asc" as const },
-          include: { size: { select: { displayName: true } } },
+          include: {
+            size: { select: { displayName: true, displayNameEn: true } },
+          },
         },
       },
     }),
@@ -2787,7 +2831,7 @@ export async function listLoadedTrucks(
     id: row.id,
     status: row.status,
     customerName: row.customer?.fullName ?? null,
-    destinationName: row.destination?.name ?? null,
+    destinationName: localizedDestinationName(row.destination, locale),
     tareWeightKg: row.tareWeightKg != null ? row.tareWeightKg.toString() : null,
     grossWeightKg: row.grossWeightKg != null ? row.grossWeightKg.toString() : null,
     createdAt: row.createdAt,
@@ -2796,7 +2840,9 @@ export async function listLoadedTrucks(
         sizeId: s.sizeId,
         bundleCount: s.bundleCount,
         weightTons: s.weightTons.toString(),
-        size: s.size,
+        size: s.size
+          ? { displayName: localizedSize(s.size, locale) }
+          : null,
       })),
     ),
   }));

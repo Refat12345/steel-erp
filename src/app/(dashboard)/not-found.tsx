@@ -20,7 +20,7 @@ export default function DashboardNotFound() {
             href="/"
             className={cn(buttonVariants({ variant: "default", size: "sm" }), "mt-2 inline-flex")}
           >
-            <Home className="ml-1.5 h-4 w-4" />
+            <Home className="me-1.5 h-4 w-4" />
             العودة للصفحة الرئيسية
           </Link>
         </CardContent>

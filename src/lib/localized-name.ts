@@ -99,3 +99,117 @@ export function localizedStockName(
   if (!entity) return "";
   return pickLocalizedName(locale, entity.nameAr, entity.nameEn);
 }
+
+type DestinationFields = {
+  id: number;
+  name: string;
+  nameEn?: string | null;
+  details: string | null;
+};
+
+/**
+ * Destination `details` is Arabic-only (no detailsEn column). For English
+ * UI we omit it so the secondary label never appears as Arabic prose.
+ */
+export function localizedDestinationDetails(
+  details: string | null | undefined,
+  locale: Locale,
+): string | null {
+  if (locale === "en") return null;
+  return details?.trim() ? details : null;
+}
+
+/**
+ * Rewrite `destination.name` for API responses so clients receive the
+ * locale-appropriate city label. Arabic-only `details` are cleared in EN.
+ */
+export function withLocalizedDestination<
+  T extends { destination: DestinationFields | null },
+>(entity: T, locale: Locale): T {
+  if (!entity.destination) return entity;
+  return {
+    ...entity,
+    destination: {
+      ...entity.destination,
+      name: localizedDestination(entity.destination, locale),
+      details: localizedDestinationDetails(entity.destination.details, locale),
+    },
+  };
+}
+
+export function localizedDestinationName(
+  destination:
+    | { name: string; nameEn?: string | null }
+    | null
+    | undefined,
+  locale: Locale,
+): string | null {
+  if (!destination) return null;
+  return localizedDestination(destination, locale) || null;
+}
+
+type SizeFields = {
+  displayName: string;
+  displayNameEn?: string | null;
+};
+
+function withLocalizedSizeFields<T extends SizeFields>(size: T, locale: Locale): T {
+  return { ...size, displayName: localizedSize(size, locale) };
+}
+
+/**
+ * Localize nested destination + size labels on a truck operation detail/list
+ * payload before sending it to the client.
+ */
+export function withLocalizedTruckLabels<T extends Record<string, unknown>>(
+  truck: T,
+  locale: Locale,
+): T {
+  const dest = truck.destination as DestinationFields | null | undefined;
+  const requestItems = truck.requestItems as
+    | Array<{ size: SizeFields } & Record<string, unknown>>
+    | undefined;
+  const sessions = truck.sessions as
+    | Array<{ size: SizeFields | null } & Record<string, unknown>>
+    | undefined;
+  const rounds = truck.rounds as
+    | Array<{ size: SizeFields | null } & Record<string, unknown>>
+    | undefined;
+
+  return {
+    ...truck,
+    ...(dest
+      ? {
+          destination: {
+            ...dest,
+            name: localizedDestination(dest, locale),
+            details: localizedDestinationDetails(dest.details, locale),
+          },
+        }
+      : {}),
+    ...(requestItems
+      ? {
+          requestItems: requestItems.map((item) => ({
+            ...item,
+            size: withLocalizedSizeFields(item.size, locale),
+          })),
+        }
+      : {}),
+    ...(sessions
+      ? {
+          sessions: sessions.map((s) => ({
+            ...s,
+            size: s.size ? withLocalizedSizeFields(s.size, locale) : s.size,
+          })),
+        }
+      : {}),
+    ...(rounds
+      ? {
+          rounds: rounds.map((r) => ({
+            ...r,
+            size: r.size ? withLocalizedSizeFields(r.size, locale) : r.size,
+          })),
+        }
+      : {}),
+  };
+}

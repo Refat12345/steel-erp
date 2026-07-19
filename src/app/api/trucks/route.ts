@@ -17,6 +17,8 @@ import {
 import { truckRegisterSchema } from "@/lib/validators/truck";
 import { registerTruck, listOperations } from "@/lib/services/truck.service";
 import { getAnalyticsStartDateValue } from "@/lib/services/settings.service";
+import { getRequestLocale } from "@/lib/i18n/request-locale";
+import { withLocalizedTruckLabels } from "@/lib/localized-name";
 import type { TruckStatus } from "@prisma/client";
 
 export async function GET(req: NextRequest) {
@@ -44,6 +46,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    const locale = await getRequestLocale();
     const [result, analyticsStartDate] = await Promise.all([
       listOperations(
         {
@@ -56,7 +59,12 @@ export async function GET(req: NextRequest) {
       ),
       getAnalyticsStartDateValue(),
     ]);
-    return NextResponse.json({ success: true, ...result, analyticsStartDate });
+    return NextResponse.json({
+      success: true,
+      ...result,
+      data: result.data.map((row) => withLocalizedTruckLabels(row, locale)),
+      analyticsStartDate,
+    });
   } catch (e) {
     return handleServiceError(e);
   }
