@@ -94,6 +94,7 @@ export const authOptions: NextAuthOptions = {
           username: user.username,
           role: user.roleCode,
           roleName: user.role.displayName,
+          roleNameEn: user.role.displayNameEn ?? null,
           permissions: Array.from(permissions),
         };
       },
@@ -110,7 +111,21 @@ export const authOptions: NextAuthOptions = {
         token.username = user.username;
         token.role = user.role;
         token.roleName = user.roleName;
+        token.roleNameEn = user.roleNameEn;
         token.permissions = user.permissions;
+      } else if (token.role && token.roleNameEn === undefined) {
+        // Backfill English role label for sessions issued before roleNameEn
+        // was added to the JWT (one DB read, then cached on the token).
+        const role = await prisma.role.findUnique({
+          where: { code: token.role as string },
+          select: { displayName: true, displayNameEn: true },
+        });
+        if (role) {
+          token.roleName = role.displayName;
+          token.roleNameEn = role.displayNameEn ?? null;
+        } else {
+          token.roleNameEn = null;
+        }
       }
       return token;
     },
@@ -119,6 +134,7 @@ export const authOptions: NextAuthOptions = {
       session.user.username = token.username as string;
       session.user.role = token.role as string;
       session.user.roleName = token.roleName as string;
+      session.user.roleNameEn = (token.roleNameEn as string | null | undefined) ?? null;
       session.user.permissions = token.permissions as string[];
       return session;
     },

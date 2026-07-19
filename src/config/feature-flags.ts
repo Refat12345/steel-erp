@@ -25,11 +25,11 @@ export function isStockModuleEnabled(): boolean {
 }
 
 /**
- * Language switcher (bilingual i18n rollout). Dark-launched: the i18n
- * infrastructure ships early, but users cannot switch away from Arabic until
- * translations are complete (plan phase 7). Enable locally / on production
- * with `LANGUAGE_SWITCHER_ENABLED=true`.
+ * Language switcher (i18n plan phase 7 — revealed). Visible by default after
+ * deploy; no env change required. Emergency kill-switch: set
+ * `LANGUAGE_SWITCHER_ENABLED=false` in the server env and `pm2 reload`
+ * (no rebuild). Any other value or unset → shown.
  */
 export function isLanguageSwitcherEnabled(): boolean {
-  return process.env.LANGUAGE_SWITCHER_ENABLED === "true";
+  return process.env.LANGUAGE_SWITCHER_ENABLED !== "false";
 }

@@ -31,9 +31,10 @@ The app is bilingual Arabic (RTL, default) / English (LTR). Locale comes from th
   - Display with the helpers in `src/lib/localized-name.ts`: `localizedDestination`, `localizedSize`, `localizedRole`, `localizedPermission`, `localizedStockName`, or the generic `localizedName(entity, locale, { arField, enField })` / `pickLocalizedName(locale, ar, en)`.
   - Prefer localizing at the API/service boundary (get the locale via `getRequestLocale()` in Node route handlers) so the existing `name`/`displayName` field already carries the right language — see `/api/destinations`, `/api/sizes`, `/api/admin/roles`, and the user-permission matrix service (which takes an optional `locale`).
   - The English seed values for destinations/sizes mirror `src/lib/en-labels.ts`; roles/permissions carry `displayNameEn` in `prisma/rbac-source.ts` and are synced by `scripts/sync-rbac.ts` (`npm run rbac:sync:dry` before `rbac:sync`).
-  - Still Arabic-only for now (gradual migration): destination/size names embedded in truck / scale / stock / billet list responses, the report exports (which keep `en-labels.ts` as a documented fallback), and `session.roleName` baked into the JWT at login.
+  - Still Arabic-only for now (gradual migration): destination/size names embedded in truck / scale / stock / billet list responses, and the report exports (which keep `en-labels.ts` as a documented fallback). Session role labels use `roleName` + `roleNameEn` from the JWT with `pickLocalizedName` at the sidebar/dashboard.
 - `ServiceError` / Zod messages use translation keys (phase 4) resolved at the API/middleware boundary. To include an enum value in a message, pass an enum-reference param like `@enums.materialKind.REBAR` (or `@enums.contractStatus.active`); `resolveEnumRefs` in `src/lib/i18n/server-messages.ts` translates it to the request locale. Never pass raw Arabic label strings as params.
 
-## Rollout Guard
+## Language Switcher (phase 7 complete)
 
-- The language switcher is dark-launched behind `LANGUAGE_SWITCHER_ENABLED` (see `src/config/feature-flags.ts`). Do NOT render it unconditionally or remove the flag until the i18n plan's phase 7 (full translation coverage).
+- The switcher is **shown by default** in the dashboard header (`LocaleSwitcher`).
+- Emergency kill-switch: set `LANGUAGE_SWITCHER_ENABLED=false` in the server env and `pm2 reload` (no rebuild). Unset or any other value → switcher visible. See `src/config/feature-flags.ts`.

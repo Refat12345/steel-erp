@@ -44,6 +44,7 @@ import { isNavUrlSuspended } from "@/config/suspended-pages";
 import { isAnalyticsRestrictedRole } from "@/lib/rbac-policy";
 import { BrandWordmark } from "@/components/layout/brand-wordmark";
 import { getTextDirection, type Locale } from "@/i18n/config";
+import { pickLocalizedName } from "@/lib/localized-name";
 
 /* CSS custom properties defined in globals.css */
 const BLUE = "oklch(0.620 0.175 222)";
@@ -434,7 +435,11 @@ export function AppSidebar({
               className="truncate text-[10px] font-medium leading-snug"
               style={{ color: BLUE_70 }}
             >
-              {session.user.roleName}
+              {pickLocalizedName(
+                locale,
+                session.user.roleName,
+                session.user.roleNameEn,
+              )}
             </span>
           </div>
         </div>

@@ -13,8 +13,8 @@ import type { Locale } from "@/i18n/config";
  * reload so <html lang/dir> and all server components re-render in the new
  * locale.
  *
- * Dark-launched: only rendered when LANGUAGE_SWITCHER_ENABLED=true
- * (see feature-flags.ts) until the i18n rollout is complete.
+ * Shown by default (phase 7). Hidden only when LANGUAGE_SWITCHER_ENABLED=false
+ * (emergency kill-switch — see feature-flags.ts).
  */
 export function LocaleSwitcher() {
   const locale = useLocale() as Locale;
