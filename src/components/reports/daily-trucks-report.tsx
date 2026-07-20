@@ -13,6 +13,7 @@ import {
   FileSpreadsheet,
   Layers,
   Loader2,
+  MapPinned,
   Printer,
   RefreshCw,
   Truck,
@@ -874,6 +875,23 @@ export function ReportsIndexView() {
                   <h2 className="font-semibold">Customer Withdrawals by Size</h2>
                   <p className="text-sm text-muted-foreground mt-1">
                     Bundles and weight withdrawn per customer and size over a date range
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+        ) : null}
+        {canDailyTrucks ? (
+          <Link href="/reports/governorate-withdrawals" className="block min-w-0">
+            <Card className="h-full shadow-sm transition-colors hover:bg-muted/40">
+              <CardContent className="flex items-start gap-4 p-5">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                  <MapPinned className="h-5 w-5 text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="font-semibold">Governorate Withdrawals</h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Internal weigh tons and bundles withdrawn per governorate over a date range
                   </p>
                 </div>
               </CardContent>

@@ -17,7 +17,8 @@ export async function GET(req: NextRequest) {
   if (!session) return unauthorized();
   if (
     !hasPermission(session, "contract.view") &&
-    !hasPermission(session, "truck.register")
+    !hasPermission(session, "truck.register") &&
+    !hasPermission(session, "report.daily_trucks")
   )
     return forbidden();
 
