@@ -1148,6 +1148,324 @@ export async function getCustomerWithdrawalsReport(
   };
 }
 
+// ─── Governorate Withdrawals ──────────────────────────────────────────
+// "How much was withdrawn to each destination (governorate) between date A
+// and date B?" Same inclusion rules as customer withdrawals: Completed
+// trucks only, anchored on `closedAt`, quantities from internal weigh
+// sessions so totals and per-size filters stay consistent.
+
+export interface GovernorateWithdrawalsReportParams {
+  fromDate: string;
+  toDate: string;
+  /** Omitted = all customers. */
+  customerId?: number;
+  /** Omitted = all destinations. */
+  destinationId?: number;
+  /** Omitted = all sizes. */
+  sizeId?: number;
+}
+
+export interface GovernorateWithdrawalRow {
+  destinationId: number | null;
+  destinationName: string;
+  truckCount: number;
+  /** Null when any counted session is missing a bundle count. */
+  totalBundles: number | null;
+  totalTons: number;
+  sharePct: number;
+}
+
+export interface GovernorateWithdrawalSizeTotal {
+  sizeId: number | null;
+  code: string | null;
+  displayName: string;
+  totalBundles: number | null;
+  totalTons: number;
+  truckCount: number;
+}
+
+export interface GovernorateWithdrawalsReport {
+  fromDate: string;
+  toDate: string;
+  windowFrom: string;
+  windowTo: string;
+  generatedAt: string;
+  analyticsStartDate: string | null;
+  windowClamped: boolean;
+  filters: {
+    customerId?: number;
+    customerName?: string;
+    destinationId?: number;
+    destinationName?: string;
+    sizeId?: number;
+    sizeDisplayName?: string;
+  };
+  totals: {
+    truckCount: number;
+    governorateCount: number;
+    totalBundles: number | null;
+    totalTons: number;
+  };
+  rows: GovernorateWithdrawalRow[];
+  sizeTotals: GovernorateWithdrawalSizeTotal[];
+}
+
+export async function getGovernorateWithdrawalsReport(
+  params: GovernorateWithdrawalsReportParams,
+): Promise<GovernorateWithdrawalsReport> {
+  let window;
+  try {
+    window = getReportRangeWindow(params.fromDate, params.toDate);
+  } catch (err) {
+    const code = err instanceof Error ? err.message : "";
+    if (code === "INVALID_RANGE_ORDER") {
+      throw new ServiceError("fromDateAfterToDate", "BAD_REQUEST");
+    }
+    if (code === "RANGE_TOO_LARGE") {
+      throw new ServiceError("dateRangeExceedsOneYear", "BAD_REQUEST");
+    }
+    throw new ServiceError("invalidDate", "BAD_REQUEST");
+  }
+  const clampMeta = await clampReportWindow(window);
+  window = clampMeta.window;
+  const effectiveFromDate = clampMeta.windowClamped
+    ? formatLocalDateInput(window.from)
+    : params.fromDate;
+
+  let customerFilterMeta: { customerId?: number; customerName?: string } = {};
+  if (params.customerId != null) {
+    const customer = await prisma.customer.findUnique({
+      where: { id: params.customerId },
+      select: { id: true, fullName: true },
+    });
+    if (!customer) {
+      throw new ServiceError("customerNotFound", "NOT_FOUND");
+    }
+    customerFilterMeta = {
+      customerId: customer.id,
+      customerName: customer.fullName,
+    };
+  }
+
+  let destinationFilterMeta: {
+    destinationId?: number;
+    destinationName?: string;
+  } = {};
+  if (params.destinationId != null) {
+    const destination = await prisma.destination.findUnique({
+      where: { id: params.destinationId },
+      select: { id: true, name: true },
+    });
+    if (!destination) {
+      throw new ServiceError("destinationNotFound", "NOT_FOUND");
+    }
+    destinationFilterMeta = {
+      destinationId: destination.id,
+      destinationName: destination.name,
+    };
+  }
+
+  let sizeFilterMeta: { sizeId?: number; sizeDisplayName?: string } = {};
+  if (params.sizeId != null) {
+    const size = await prisma.sizeLookup.findUnique({
+      where: { id: params.sizeId },
+      select: { id: true, displayName: true },
+    });
+    if (!size) {
+      throw new ServiceError("sizeNotFound", "NOT_FOUND");
+    }
+    sizeFilterMeta = { sizeId: size.id, sizeDisplayName: size.displayName };
+  }
+
+  const trucks = await prisma.truckOperation.findMany({
+    where: {
+      ...(params.customerId != null ? { customerId: params.customerId } : {}),
+      ...(params.destinationId != null
+        ? { destinationId: params.destinationId }
+        : {}),
+      status: "Completed",
+      closedAt: { gte: window.from, lt: window.to },
+      ...(params.sizeId != null
+        ? { sessions: { some: { sizeId: params.sizeId } } }
+        : {}),
+    },
+    orderBy: { closedAt: "asc" },
+    select: {
+      id: true,
+      destinationId: true,
+      destination: { select: { id: true, name: true, sortOrder: true } },
+      sessions: {
+        ...(params.sizeId != null ? { where: { sizeId: params.sizeId } } : {}),
+        select: {
+          sizeId: true,
+          bundleCount: true,
+          weightTons: true,
+          size: { select: { code: true, displayName: true, sortOrder: true } },
+        },
+      },
+    },
+  });
+
+  type DestAcc = {
+    destinationId: number | null;
+    destinationName: string;
+    sortOrder: number;
+    totalBundles: number;
+    anyMissingBundle: boolean;
+    totalTons: number;
+    truckIds: Set<number>;
+  };
+  type SizeAcc = {
+    sizeId: number | null;
+    code: string | null;
+    displayName: string;
+    sortOrder: number;
+    totalBundles: number;
+    anyMissingBundle: boolean;
+    totalTons: number;
+    truckIds: Set<number>;
+  };
+
+  const destMap = new Map<string, DestAcc>();
+  const sizeMap = new Map<string, SizeAcc>();
+  let totalTons = 0;
+  let totalBundles = 0;
+  let anyMissingBundle = false;
+  let truckCount = 0;
+
+  for (const truck of trucks) {
+    let truckTons = 0;
+    let truckBundles = 0;
+    let truckMissingBundle = false;
+    let hasSession = false;
+
+    for (const session of truck.sessions) {
+      const weightTons = Number(session.weightTons);
+      if (!Number.isFinite(weightTons)) continue;
+      hasSession = true;
+
+      truckTons += weightTons;
+      if (session.bundleCount == null) {
+        truckMissingBundle = true;
+      } else {
+        truckBundles += session.bundleCount;
+      }
+
+      const sizeKey = session.sizeId != null ? `id:${session.sizeId}` : "none";
+      let sizeAcc = sizeMap.get(sizeKey);
+      if (!sizeAcc) {
+        sizeAcc = {
+          sizeId: session.sizeId,
+          code: session.size?.code ?? null,
+          displayName: session.size?.displayName ?? "No size",
+          sortOrder: session.size?.sortOrder ?? Number.MAX_SAFE_INTEGER,
+          totalBundles: 0,
+          anyMissingBundle: false,
+          totalTons: 0,
+          truckIds: new Set<number>(),
+        };
+        sizeMap.set(sizeKey, sizeAcc);
+      }
+      sizeAcc.totalTons += weightTons;
+      sizeAcc.truckIds.add(truck.id);
+      if (session.bundleCount == null) {
+        sizeAcc.anyMissingBundle = true;
+      } else {
+        sizeAcc.totalBundles += session.bundleCount;
+      }
+    }
+
+    if (!hasSession) continue;
+
+    truckCount += 1;
+    totalTons += truckTons;
+    if (truckMissingBundle) {
+      anyMissingBundle = true;
+    } else {
+      totalBundles += truckBundles;
+    }
+
+    const destKey =
+      truck.destinationId != null ? `id:${truck.destinationId}` : "none";
+    let destAcc = destMap.get(destKey);
+    if (!destAcc) {
+      destAcc = {
+        destinationId: truck.destinationId,
+        destinationName: truck.destination?.name ?? "No destination",
+        sortOrder: truck.destination?.sortOrder ?? Number.MAX_SAFE_INTEGER,
+        totalBundles: 0,
+        anyMissingBundle: false,
+        totalTons: 0,
+        truckIds: new Set<number>(),
+      };
+      destMap.set(destKey, destAcc);
+    }
+    destAcc.totalTons += truckTons;
+    destAcc.truckIds.add(truck.id);
+    if (truckMissingBundle) {
+      destAcc.anyMissingBundle = true;
+    } else {
+      destAcc.totalBundles += truckBundles;
+    }
+  }
+
+  const roundedTotalTons = round3(totalTons);
+  const rows: GovernorateWithdrawalRow[] = Array.from(destMap.values())
+    .sort(
+      (a, b) =>
+        b.totalTons - a.totalTons ||
+        a.sortOrder - b.sortOrder ||
+        a.destinationName.localeCompare(b.destinationName, "ar"),
+    )
+    .map((acc) => ({
+      destinationId: acc.destinationId,
+      destinationName: acc.destinationName,
+      truckCount: acc.truckIds.size,
+      totalBundles: acc.anyMissingBundle ? null : acc.totalBundles,
+      totalTons: round3(acc.totalTons),
+      sharePct: sharePercent(acc.totalTons, totalTons),
+    }));
+
+  const sizeTotals: GovernorateWithdrawalSizeTotal[] = Array.from(
+    sizeMap.values(),
+  )
+    .sort(
+      (a, b) =>
+        a.sortOrder - b.sortOrder || a.displayName.localeCompare(b.displayName),
+    )
+    .map((acc) => ({
+      sizeId: acc.sizeId,
+      code: acc.code,
+      displayName: acc.displayName,
+      totalBundles: acc.anyMissingBundle ? null : acc.totalBundles,
+      totalTons: round3(acc.totalTons),
+      truckCount: acc.truckIds.size,
+    }));
+
+  return {
+    fromDate: effectiveFromDate,
+    toDate: params.toDate,
+    windowFrom: window.from.toISOString(),
+    windowTo: window.to.toISOString(),
+    generatedAt: new Date().toISOString(),
+    analyticsStartDate: clampMeta.analyticsStartDate,
+    windowClamped: clampMeta.windowClamped,
+    filters: {
+      ...customerFilterMeta,
+      ...destinationFilterMeta,
+      ...sizeFilterMeta,
+    },
+    totals: {
+      truckCount,
+      governorateCount: rows.length,
+      totalBundles: anyMissingBundle ? null : totalBundles,
+      totalTons: roundedTotalTons,
+    },
+    rows,
+    sizeTotals,
+  };
+}
+
 // ─── Daily Billet Receiving Report ───────────────────────────────────────────
 
 const BILLET_TONNAGE_NOTE: Record<ReportTonnageStatus, string | null> = {

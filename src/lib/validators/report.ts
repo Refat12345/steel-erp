@@ -72,6 +72,27 @@ export type CustomerWithdrawalsQuery = z.infer<
   typeof customerWithdrawalsQuerySchema
 >;
 
+export const governorateWithdrawalsQuerySchema = z.object({
+  from: dateInputSchema,
+  to: dateInputSchema,
+  customerId: z.preprocess(
+    (v) => (v === "" || v === null || v === undefined ? undefined : v),
+    z.coerce.number().int().positive().optional(),
+  ),
+  destinationId: z.preprocess(
+    (v) => (v === "" || v === null || v === undefined ? undefined : v),
+    z.coerce.number().int().positive().optional(),
+  ),
+  sizeId: z.preprocess(
+    (v) => (v === "" || v === null || v === undefined ? undefined : v),
+    z.coerce.number().int().positive().optional(),
+  ),
+});
+
+export type GovernorateWithdrawalsQuery = z.infer<
+  typeof governorateWithdrawalsQuerySchema
+>;
+
 export const billetBalanceQuerySchema = z.object({
   supplierName: z.string().trim().min(1, "supplierRequired"),
   contractNumber: z

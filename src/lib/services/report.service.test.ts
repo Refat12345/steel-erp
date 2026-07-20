@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockPrisma = vi.hoisted(() => ({
   customer: { findUnique: vi.fn() },
+  destination: { findUnique: vi.fn() },
+  sizeLookup: { findUnique: vi.fn() },
   truckOperation: { findMany: vi.fn() },
   billetReceipt: { findMany: vi.fn() },
   supplierContract: { findUnique: vi.fn(), findMany: vi.fn() },
@@ -27,6 +29,7 @@ import {
   getDailyTrucksReport,
   getDailyLoadingSummary,
   getCustomerWithdrawalsReport,
+  getGovernorateWithdrawalsReport,
   getDailyBilletReport,
 } from "./report.service";
 import { ServiceError } from "./errors";
@@ -841,6 +844,377 @@ describe("getCustomerWithdrawalsReport analytics-start clamping", () => {
     );
     expect(report.fromDate).toBe("2026-06-05");
     expect(report.windowClamped).toBe(false);
+  });
+});
+
+describe("getGovernorateWithdrawalsReport", () => {
+  beforeEach(() => {
+    mockPrisma.truckOperation.findMany.mockResolvedValue([]);
+  });
+
+  it("aggregates internal session tons by destination with share %", async () => {
+    mockPrisma.truckOperation.findMany.mockResolvedValue([
+      {
+        id: 1,
+        destinationId: 10,
+        destination: { id: 10, name: "درعا", sortOrder: 1 },
+        sessions: [
+          {
+            sizeId: 1,
+            bundleCount: 10,
+            weightTons: 5,
+            size: { code: "16", displayName: "16 مم", sortOrder: 1 },
+          },
+        ],
+      },
+      {
+        id: 2,
+        destinationId: 10,
+        destination: { id: 10, name: "درعا", sortOrder: 1 },
+        sessions: [
+          {
+            sizeId: 2,
+            bundleCount: 4,
+            weightTons: 3,
+            size: { code: "12", displayName: "12 مم", sortOrder: 2 },
+          },
+        ],
+      },
+      {
+        id: 3,
+        destinationId: 20,
+        destination: { id: 20, name: "حلب", sortOrder: 2 },
+        sessions: [
+          {
+            sizeId: 1,
+            bundleCount: 2,
+            weightTons: 2,
+            size: { code: "16", displayName: "16 مم", sortOrder: 1 },
+          },
+        ],
+      },
+    ]);
+
+    const report = await getGovernorateWithdrawalsReport({
+      fromDate: "2026-06-01",
+      toDate: "2026-06-10",
+    });
+
+    expect(report.totals.truckCount).toBe(3);
+    expect(report.totals.totalTons).toBe(10);
+    expect(report.totals.totalBundles).toBe(16);
+    expect(report.totals.governorateCount).toBe(2);
+    expect(report.rows).toEqual([
+      {
+        destinationId: 10,
+        destinationName: "درعا",
+        truckCount: 2,
+        totalBundles: 14,
+        totalTons: 8,
+        sharePct: 80,
+      },
+      {
+        destinationId: 20,
+        destinationName: "حلب",
+        truckCount: 1,
+        totalBundles: 2,
+        totalTons: 2,
+        sharePct: 20,
+      },
+    ]);
+    expect(report.sizeTotals).toHaveLength(2);
+  });
+
+  it("filters by customer, destination and size", async () => {
+    mockPrisma.customer.findUnique.mockResolvedValue({
+      id: 5,
+      fullName: "زبون تجريبي",
+    });
+    mockPrisma.destination.findUnique.mockResolvedValue({
+      id: 10,
+      name: "درعا",
+    });
+    mockPrisma.sizeLookup.findUnique.mockResolvedValue({
+      id: 1,
+      displayName: "16 مم",
+    });
+    mockPrisma.truckOperation.findMany.mockResolvedValue([]);
+
+    const report = await getGovernorateWithdrawalsReport({
+      fromDate: "2026-06-01",
+      toDate: "2026-06-10",
+      customerId: 5,
+      destinationId: 10,
+      sizeId: 1,
+    });
+
+    expect(mockPrisma.truckOperation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          customerId: 5,
+          destinationId: 10,
+          status: "Completed",
+          sessions: { some: { sizeId: 1 } },
+        }),
+      }),
+    );
+    expect(report.filters.customerName).toBe("زبون تجريبي");
+  });
+
+  it("rejects an unknown customer filter", async () => {
+    mockPrisma.customer.findUnique.mockResolvedValue(null);
+    await expect(
+      getGovernorateWithdrawalsReport({
+        fromDate: "2026-06-01",
+        toDate: "2026-06-10",
+        customerId: 999,
+      }),
+    ).rejects.toMatchObject({ messageKey: "customerNotFound" });
+  });
+
+  it("aggregates governorates within a customer-filtered subset", async () => {
+    mockPrisma.customer.findUnique.mockResolvedValue({
+      id: 5,
+      fullName: "زبون تجريبي",
+    });
+    mockPrisma.truckOperation.findMany.mockResolvedValue([
+      {
+        id: 11,
+        destinationId: 10,
+        destination: { id: 10, name: "درعا", sortOrder: 1 },
+        sessions: [
+          {
+            sizeId: 1,
+            bundleCount: 6,
+            weightTons: 4,
+            size: { code: "16", displayName: "16 مم", sortOrder: 1 },
+          },
+        ],
+      },
+      {
+        id: 12,
+        destinationId: 20,
+        destination: { id: 20, name: "حلب", sortOrder: 2 },
+        sessions: [
+          {
+            sizeId: 1,
+            bundleCount: 2,
+            weightTons: 1,
+            size: { code: "16", displayName: "16 مم", sortOrder: 1 },
+          },
+        ],
+      },
+    ]);
+
+    const report = await getGovernorateWithdrawalsReport({
+      fromDate: "2026-06-01",
+      toDate: "2026-06-10",
+      customerId: 5,
+    });
+
+    expect(mockPrisma.truckOperation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ customerId: 5 }),
+      }),
+    );
+    expect(report.filters).toEqual({
+      customerId: 5,
+      customerName: "زبون تجريبي",
+    });
+    expect(report.totals).toEqual({
+      truckCount: 2,
+      governorateCount: 2,
+      totalBundles: 8,
+      totalTons: 5,
+    });
+    // Shares are relative to the customer subset, not all customers.
+    expect(report.rows.map((r) => r.sharePct)).toEqual([80, 20]);
+    expect(report.sizeTotals).toEqual([
+      {
+        sizeId: 1,
+        code: "16",
+        displayName: "16 مم",
+        totalBundles: 8,
+        totalTons: 5,
+        truckCount: 2,
+      },
+    ]);
+  });
+
+  it("raises the range floor when analytics start clamps the window", async () => {
+    const analyticsStart = new Date(2026, 5, 1, 8, 0, 0, 0);
+    mockClampEventWindow.mockResolvedValueOnce({
+      from: analyticsStart,
+      to: new Date(2026, 5, 11, 8, 0, 0, 0),
+      clamped: true,
+      analyticsStartDate: "2026-06-01",
+    });
+
+    const report = await getGovernorateWithdrawalsReport({
+      fromDate: "2026-05-01",
+      toDate: "2026-06-10",
+    });
+
+    expect(report.fromDate).toBe("2026-06-01");
+    expect(report.windowClamped).toBe(true);
+  });
+
+  it("buckets trucks with no destination and nulls bundles when any session omits them", async () => {
+    mockPrisma.truckOperation.findMany.mockResolvedValue([
+      {
+        id: 1,
+        destinationId: null,
+        destination: null,
+        sessions: [
+          {
+            sizeId: 1,
+            bundleCount: null,
+            weightTons: 4.5,
+            size: { code: "16", displayName: "16 مم", sortOrder: 1 },
+          },
+        ],
+      },
+      {
+        id: 2,
+        destinationId: null,
+        destination: null,
+        sessions: [
+          {
+            sizeId: 1,
+            bundleCount: 3,
+            weightTons: 1.5,
+            size: { code: "16", displayName: "16 مم", sortOrder: 1 },
+          },
+        ],
+      },
+    ]);
+
+    const report = await getGovernorateWithdrawalsReport({
+      fromDate: "2026-06-01",
+      toDate: "2026-06-10",
+    });
+
+    expect(report.rows).toEqual([
+      {
+        destinationId: null,
+        destinationName: "No destination",
+        truckCount: 2,
+        totalBundles: null,
+        totalTons: 6,
+        sharePct: 100,
+      },
+    ]);
+    expect(report.totals.totalBundles).toBeNull();
+    expect(report.totals.totalTons).toBe(6);
+    expect(report.sizeTotals[0]?.totalBundles).toBeNull();
+  });
+
+  it("skips trucks that have no usable session weights", async () => {
+    mockPrisma.truckOperation.findMany.mockResolvedValue([
+      {
+        id: 1,
+        destinationId: 10,
+        destination: { id: 10, name: "درعا", sortOrder: 1 },
+        sessions: [{ sizeId: 1, bundleCount: 2, weightTons: NaN, size: null }],
+      },
+      {
+        id: 2,
+        destinationId: 10,
+        destination: { id: 10, name: "درعا", sortOrder: 1 },
+        sessions: [],
+      },
+    ]);
+
+    const report = await getGovernorateWithdrawalsReport({
+      fromDate: "2026-06-01",
+      toDate: "2026-06-10",
+    });
+
+    expect(report.rows).toHaveLength(0);
+    expect(report.totals.truckCount).toBe(0);
+    expect(report.totals.totalTons).toBe(0);
+  });
+
+  it("rejects inverted and oversized date ranges", async () => {
+    await expect(
+      getGovernorateWithdrawalsReport({
+        fromDate: "2026-06-10",
+        toDate: "2026-06-01",
+      }),
+    ).rejects.toMatchObject({ messageKey: "fromDateAfterToDate" });
+
+    await expect(
+      getGovernorateWithdrawalsReport({
+        fromDate: "2025-01-01",
+        toDate: "2026-06-01",
+      }),
+    ).rejects.toMatchObject({ messageKey: "dateRangeExceedsOneYear" });
+  });
+
+  it("rejects unknown destination or size filters", async () => {
+    mockPrisma.destination.findUnique.mockResolvedValue(null);
+    await expect(
+      getGovernorateWithdrawalsReport({
+        fromDate: "2026-06-01",
+        toDate: "2026-06-10",
+        destinationId: 999,
+      }),
+    ).rejects.toMatchObject({ messageKey: "destinationNotFound" });
+
+    mockPrisma.destination.findUnique.mockResolvedValue({
+      id: 10,
+      name: "درعا",
+    });
+    mockPrisma.sizeLookup.findUnique.mockResolvedValue(null);
+    await expect(
+      getGovernorateWithdrawalsReport({
+        fromDate: "2026-06-01",
+        toDate: "2026-06-10",
+        destinationId: 10,
+        sizeId: 999,
+      }),
+    ).rejects.toMatchObject({ messageKey: "sizeNotFound" });
+  });
+
+  it("keeps size totals consistent with destination-filtered tons", async () => {
+    mockPrisma.destination.findUnique.mockResolvedValue({
+      id: 10,
+      name: "درعا",
+    });
+    mockPrisma.truckOperation.findMany.mockResolvedValue([
+      {
+        id: 1,
+        destinationId: 10,
+        destination: { id: 10, name: "درعا", sortOrder: 1 },
+        sessions: [
+          {
+            sizeId: 1,
+            bundleCount: 5,
+            weightTons: 2.25,
+            size: { code: "16", displayName: "16 مم", sortOrder: 1 },
+          },
+          {
+            sizeId: 2,
+            bundleCount: 1,
+            weightTons: 0.75,
+            size: { code: "12", displayName: "12 مم", sortOrder: 2 },
+          },
+        ],
+      },
+    ]);
+
+    const report = await getGovernorateWithdrawalsReport({
+      fromDate: "2026-06-01",
+      toDate: "2026-06-10",
+      destinationId: 10,
+    });
+
+    const sizeTonsSum = report.sizeTotals.reduce((sum, s) => sum + s.totalTons, 0);
+    expect(report.totals.totalTons).toBe(3);
+    expect(sizeTonsSum).toBe(3);
+    expect(report.filters.destinationName).toBe("درعا");
+    expect(report.rows).toHaveLength(1);
+    expect(report.rows[0]?.sharePct).toBe(100);
   });
 });
 
