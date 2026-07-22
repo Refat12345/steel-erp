@@ -6,6 +6,8 @@ import {
   badRequest,
   ok,
   hasPermission,
+  hasAnyPermission,
+  STOCK_STRUCTURE_READ_PERMISSIONS,
   handleServiceError,
 } from "@/lib/api-utils";
 import { stockLocationCreateSchema } from "@/lib/validators/stock-location";
@@ -18,7 +20,9 @@ import { listActiveSizes } from "@/lib/services/size-lookup.service";
 export async function GET() {
   const session = await getApiSession();
   if (!session) return unauthorized();
-  if (!hasPermission(session, "stock.view")) return forbidden();
+  if (!hasAnyPermission(session, ...STOCK_STRUCTURE_READ_PERMISSIONS)) {
+    return forbidden();
+  }
 
   try {
     const [yards, sizes] = await Promise.all([

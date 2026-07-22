@@ -41,6 +41,7 @@ interface LocationBalance {
   unit: StockUnit;
   isDualUnit: boolean;
   isActive: boolean;
+  expectedSize: { id: number; displayName: string } | null;
   lines: BalanceLine[];
   totalQuantity: number;
   totalTons: number | null;
@@ -142,7 +143,8 @@ export function StockTransferForm() {
   }, [source, selectedSizeId, isDual]);
 
   // Destination candidates: same unit, not the source. Classify each as
-  // blocked (holds a different size), suggested (empty or same size), or plain.
+  // blocked (holds a different size / empty with mismatched expectedSize),
+  // suggested (empty or same size), or plain.
   const destOptions = useMemo(() => {
     if (!source) return [];
     return balances
@@ -150,26 +152,38 @@ export function StockTransferForm() {
       .map((b) => {
         // The ISOLATION zone accepts multiple sizes, so a different size there
         // is not a blocker — only single-size (first-grade) sites are blocked.
-        const otherSize =
-          isBundle && segmentEnforcesOneSize(b.segment)
-            ? b.lines.some(
-                (l) => l.unit === "BUNDLE" && l.sizeId !== selectedSizeId && l.quantity > 0,
-              )
-            : false;
+        const enforces = isBundle && segmentEnforcesOneSize(b.segment);
+        const otherSize = enforces
+          ? b.lines.some(
+              (l) => l.unit === "BUNDLE" && l.sizeId !== selectedSizeId && l.quantity > 0,
+            )
+          : false;
         const sameSize = isBundle
           ? b.lines.some((l) => l.unit === "BUNDLE" && l.sizeId === selectedSizeId && l.quantity > 0)
           : false;
+        const emptyBundles = !b.lines.some(
+          (l) => l.unit === "BUNDLE" && l.sizeId != null && l.quantity > 0,
+        );
         const empty = b.totalQuantity === 0;
+        // Empty (no positive bundles): expectedSize must match the transferred size.
+        const expectedMismatch =
+          enforces &&
+          emptyBundles &&
+          b.expectedSize != null &&
+          selectedSizeId != null &&
+          b.expectedSize.id !== selectedSizeId;
         let reasonLabel = "";
         if (sameSize) reasonLabel = t("destSameSize");
+        else if (expectedMismatch)
+          reasonLabel = t("destExpectedSizeOnly", { size: b.expectedSize!.displayName });
         else if (empty)
           reasonLabel =
             b.segment === source.segment ? t("destEmptySameSegment") : t("destEmpty");
         else if (otherSize) reasonLabel = t("destOccupiedOtherSize");
         return {
           loc: b,
-          blocked: otherSize,
-          suggested: empty || sameSize,
+          blocked: otherSize || expectedMismatch,
+          suggested: (empty || sameSize) && !expectedMismatch,
           reasonLabel,
         };
       })
@@ -244,6 +258,16 @@ export function StockTransferForm() {
         toast.error(t("weightExceedsAvailable", { available: fmt(availableTons) }));
         return;
       }
+    }
+    const destMeta = destOptions.find((o) => o.loc.locationId === dest.locationId);
+    if (destMeta?.blocked) {
+      toast.error(
+        destMeta.reasonLabel ||
+          t("locationSizeMustMatchExpectedToast", {
+            size: dest.expectedSize?.displayName ?? t("emDash"),
+          }),
+      );
+      return;
     }
 
     setSubmitting(true);

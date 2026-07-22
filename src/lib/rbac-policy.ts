@@ -34,7 +34,7 @@ export const REPORTS_PERMISSION = "reports.view";
  * Edits require a code change (and therefore code review).
  */
 export const ANALYTICS_RESTRICTED_ROLES: ReadonlySet<string> = new Set([
-  "scale_operator", // External Scale Worker — عامل القبان الخارجي
+  "scale_operator", // External Scale Operator — موظف القبان الخارجي
 ]);
 
 /**

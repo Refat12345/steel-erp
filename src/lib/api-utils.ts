@@ -116,6 +116,27 @@ export function hasPermission(session: ApiSession, code: string): boolean {
   return session.permissions.includes(code);
 }
 
+/** True when the session holds at least one of the listed permission codes. */
+export function hasAnyPermission(session: ApiSession, ...codes: string[]): boolean {
+  return codes.some((code) => session.permissions.includes(code));
+}
+
+/**
+ * Read access to stock structure (yards/locations/balances) for operational
+ * screens. Map/overview still requires `stock.view` at the page layer; clerks
+ * with only production / transfer / adjust must still load location pickers.
+ */
+export const STOCK_STRUCTURE_READ_PERMISSIONS = [
+  "stock.view",
+  "stock.movements.view",
+  "stock.production.ton",
+  "stock.production.bundle",
+  "stock.transfer",
+  "stock.adjust",
+  "stock.opening_balance",
+  "stock.location.manage",
+] as const;
+
 export interface PaginationParams {
   page: number;
   pageSize: number;

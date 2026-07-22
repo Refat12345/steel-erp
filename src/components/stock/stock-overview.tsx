@@ -121,11 +121,19 @@ function LiveYardMap({ locations }: { locations: LocationBalance[] }) {
                 gridColumn: `${l.gridCol} / span ${l.gridSpan}`,
                 gridRow: `${l.gridRow}`,
               }}
-              title={`${l.nameAr} — ${segmentLabel}`}
+              title={`${l.nameAr} (${l.code}) — ${segmentLabel}`}
             >
-              <div className="flex items-center justify-between gap-1">
-                <span className="font-mono text-xs font-bold leading-none">{l.code}</span>
-                <span className={cn("h-2 w-2 shrink-0 rounded-full", meta.dot)} />
+              <div className="flex items-start justify-between gap-1">
+                <span
+                  className="line-clamp-2 min-w-0 text-start text-sm font-bold leading-snug"
+                  dir={dir}
+                >
+                  {l.nameAr}
+                </span>
+                <span className={cn("mt-0.5 h-2 w-2 shrink-0 rounded-full", meta.dot)} />
+              </div>
+              <div className="mt-0.5 truncate text-[10px] font-medium opacity-80" dir={dir}>
+                {segmentLabel}
               </div>
               <div
                 className="mt-1 text-base font-bold leading-none tabular-nums"
@@ -147,8 +155,11 @@ function LiveYardMap({ locations }: { locations: LocationBalance[] }) {
                   </>
                 )}
               </div>
-              <div className="mt-0.5 truncate text-[10px] opacity-75" dir={dir}>
-                {sizeLabel}
+              <div className="mt-0.5 flex items-center justify-between gap-1 text-[10px] opacity-75">
+                <span className="truncate" dir={dir}>
+                  {sizeLabel}
+                </span>
+                <span className="shrink-0 font-mono tabular-nums opacity-70">{l.code}</span>
               </div>
             </div>
           );

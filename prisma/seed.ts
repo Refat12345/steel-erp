@@ -417,7 +417,7 @@ async function main() {
   }> = [
     { username: "finance", fullName: "موظف المالية (تجريبي)", roleCode: "finance" },
     { username: "logistics", fullName: "موظف اللوجستيك (تجريبي)", roleCode: "logistics" },
-    { username: "scale", fullName: "عامل القبان الخارجي (تجريبي)", roleCode: "scale_operator" },
+    { username: "scale", fullName: "موظف القبان الخارجي (تجريبي)", roleCode: "scale_operator" },
     { username: "loader", fullName: "عامل التحميل الداخلي (تجريبي)", roleCode: "internal_loader" },
     { username: "manager", fullName: "صاحب المصنع", roleCode: "manager" },
   ];

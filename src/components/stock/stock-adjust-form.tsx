@@ -22,6 +22,7 @@ import { formatDecimal } from "@/lib/number-format";
 import { getTextDirection, type Locale } from "@/i18n/config";
 import {
   isDualUnitSegment,
+  segmentEnforcesOneSize,
   type Segment,
   type StockUnit,
   type SizeOption,
@@ -42,6 +43,7 @@ interface LocationBalance {
   unit: StockUnit;
   isDualUnit: boolean;
   isActive: boolean;
+  expectedSize: { id: number; displayName: string } | null;
   lines: BalanceLine[];
   totalQuantity: number;
   totalTons: number | null;
@@ -77,14 +79,34 @@ export function StockAdjustForm() {
       ]);
       const balJson = await balRes.json();
       const locJson = await locRes.json();
-      if (balJson.success) setBalances(balJson.data as LocationBalance[]);
-      else toast.error(balJson.error || t("errorLoadBalances"));
-      if (locJson.success) {
+      if (balJson.success && locJson.success) {
+        // Merge expectedSize from locations (balances payload already has it,
+        // but keep an explicit map so empty bays still lock correctly).
+        const expectedById = new Map<number, { id: number; displayName: string } | null>();
+        for (const y of locJson.data.yards as Array<{
+          locations: Array<{
+            id: number;
+            expectedSize: { id: number; displayName: string } | null;
+          }>;
+        }>) {
+          for (const l of y.locations) {
+            expectedById.set(l.id, l.expectedSize);
+          }
+        }
+        setBalances(
+          (balJson.data as LocationBalance[]).map((b) => ({
+            ...b,
+            expectedSize: b.expectedSize ?? expectedById.get(b.locationId) ?? null,
+          })),
+        );
         setSizes(
           (locJson.data.sizes as (SizeOption & { isBundleType: boolean })[]).filter(
             (s) => s.isBundleType,
           ),
         );
+      } else {
+        if (!balJson.success) toast.error(balJson.error || t("errorLoadBalances"));
+        if (!locJson.success) toast.error(locJson.error || t("errorLoadLocations"));
       }
     } catch {
       toast.error(t("errorConnection"));
@@ -111,6 +133,28 @@ export function StockAdjustForm() {
   const isBundle = effectiveUnit === "BUNDLE";
   // Rebar needs a size for both units; short-bar carries no size.
   const needsSize = selected != null && isDualUnitSegment(selected.segment);
+
+  // GENERAL / GOVERNORATES: lock to the occupied bundle size (or expected
+  // size when empty). Same rule as production-in — prevents parking tons of
+  // a different diameter on a bay that already holds 8mm bundles.
+  const currentSize = useMemo(() => {
+    if (!selected || !segmentEnforcesOneSize(selected.segment)) return null;
+    const line = selected.lines.find(
+      (l) => l.unit === "BUNDLE" && l.sizeId != null && l.quantity > 0,
+    );
+    if (line?.sizeId != null) {
+      return { id: line.sizeId, displayName: line.sizeName ?? String(line.sizeId) };
+    }
+    return selected.expectedSize;
+  }, [selected]);
+  const sizeLocked = currentSize != null;
+  const lockedSizeLabel = currentSize?.displayName ?? "";
+
+  useEffect(() => {
+    if (!sizeLocked || !currentSize) return;
+    const locked = String(currentSize.id);
+    if (sizeId !== locked) setSizeId(locked);
+  }, [sizeLocked, currentSize, sizeId]);
 
   // Base UI's Select shows the raw value in the trigger unless an items
   // (value → label) map is provided.
@@ -148,10 +192,22 @@ export function StockAdjustForm() {
       : null;
 
   function handleLocationChange(v: string | null) {
-    setLocationId(v ?? "");
+    const value = v ?? "";
+    setLocationId(value);
     setUnit("");
-    setSizeId("");
     setActual("");
+    const loc = balances.find((b) => String(b.locationId) === value);
+    if (loc && segmentEnforcesOneSize(loc.segment)) {
+      const line = loc.lines.find(
+        (l) => l.unit === "BUNDLE" && l.sizeId != null && l.quantity > 0,
+      );
+      const size = line?.sizeId != null
+        ? { id: line.sizeId, displayName: line.sizeName ?? "" }
+        : loc.expectedSize;
+      setSizeId(size ? String(size.id) : "");
+    } else {
+      setSizeId("");
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -167,6 +223,14 @@ export function StockAdjustForm() {
     }
     if (needsSize && !sizeId) {
       toast.error(t("sizeRequiredForLocation"));
+      return;
+    }
+    if (sizeLocked && currentSize && Number(sizeId) !== currentSize.id) {
+      toast.error(
+        t("locationSizeMustMatchExpectedToast", {
+          size: currentSize.displayName,
+        }),
+      );
       return;
     }
     if (isBundle && !Number.isInteger(parsedActual)) {
@@ -278,33 +342,48 @@ export function StockAdjustForm() {
           {needsSize && effectiveUnit && (
             <div className="space-y-1.5">
               <Label>{t("sizeRequired")}</Label>
-              <Select items={sizeItems} value={sizeId} onValueChange={(v) => setSizeId(v ?? "")}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder={t("selectSize")} />
-                </SelectTrigger>
-                <SelectContent dir={dir}>
-                  {sizes.map((s) => {
-                    const line = selected?.lines.find(
-                      (l) => l.unit === effectiveUnit && l.sizeId === s.id,
-                    );
-                    return (
-                      <SelectItem key={s.id} value={String(s.id)}>
-                        <span className="flex w-full items-center justify-between gap-3">
-                          <span>{s.displayName}</span>
-                          {line && (
-                            <span
-                              className="text-xs tabular-nums text-muted-foreground"
-                              dir="ltr"
-                            >
-                              {fmt(line.quantity)}
-                            </span>
-                          )}
-                        </span>
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
+              {sizeLocked ? (
+                <>
+                  <div className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm font-medium">
+                    {lockedSizeLabel}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {selected?.lines.some(
+                      (l) => l.unit === "BUNDLE" && l.sizeId != null && l.quantity > 0,
+                    )
+                      ? t("sizeLockedToBalanceHint")
+                      : t("sizeLockedToLocationHint")}
+                  </p>
+                </>
+              ) : (
+                <Select items={sizeItems} value={sizeId} onValueChange={(v) => setSizeId(v ?? "")}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder={t("selectSize")} />
+                  </SelectTrigger>
+                  <SelectContent dir={dir}>
+                    {sizes.map((s) => {
+                      const line = selected?.lines.find(
+                        (l) => l.unit === effectiveUnit && l.sizeId === s.id,
+                      );
+                      return (
+                        <SelectItem key={s.id} value={String(s.id)}>
+                          <span className="flex w-full items-center justify-between gap-3">
+                            <span>{s.displayName}</span>
+                            {line && (
+                              <span
+                                className="text-xs tabular-nums text-muted-foreground"
+                                dir="ltr"
+                              >
+                                {fmt(line.quantity)}
+                              </span>
+                            )}
+                          </span>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
           )}
 

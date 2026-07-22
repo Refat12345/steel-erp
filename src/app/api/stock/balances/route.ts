@@ -4,7 +4,8 @@ import {
   unauthorized,
   forbidden,
   ok,
-  hasPermission,
+  hasAnyPermission,
+  STOCK_STRUCTURE_READ_PERMISSIONS,
   handleServiceError,
 } from "@/lib/api-utils";
 import {
@@ -16,7 +17,9 @@ import { getLocationBalances, type BalanceFilters } from "@/lib/services/stock.s
 export async function GET(req: NextRequest) {
   const session = await getApiSession();
   if (!session) return unauthorized();
-  if (!hasPermission(session, "stock.view")) return forbidden();
+  if (!hasAnyPermission(session, ...STOCK_STRUCTURE_READ_PERMISSIONS)) {
+    return forbidden();
+  }
 
   const { searchParams } = req.nextUrl;
   const filters: BalanceFilters = {};

@@ -12,6 +12,8 @@ vi.mock("next/headers", () => ({
 
 import {
   hasPermission,
+  hasAnyPermission,
+  STOCK_STRUCTURE_READ_PERMISSIONS,
   parsePagination,
   handleServiceError,
 } from "./api-utils";
@@ -51,6 +53,40 @@ describe("hasPermission", () => {
 
   it("returns false when permission is missing", () => {
     expect(hasPermission(user, "contract.create")).toBe(false);
+  });
+});
+
+// ─── hasAnyPermission / stock structure reads ──────────────────
+
+describe("hasAnyPermission", () => {
+  const productionClerk: ApiSession = {
+    userId: 3,
+    username: "prod",
+    role: "logistics",
+    permissions: ["stock.production.bundle"],
+  };
+
+  it("returns true when at least one listed code is held", () => {
+    expect(
+      hasAnyPermission(
+        productionClerk,
+        "stock.view",
+        "stock.production.bundle",
+        "stock.transfer",
+      ),
+    ).toBe(true);
+  });
+
+  it("returns false when none of the listed codes are held", () => {
+    expect(
+      hasAnyPermission(productionClerk, "stock.view", "stock.transfer"),
+    ).toBe(false);
+  });
+
+  it("lets a production clerk pass STOCK_STRUCTURE_READ_PERMISSIONS", () => {
+    expect(
+      hasAnyPermission(productionClerk, ...STOCK_STRUCTURE_READ_PERMISSIONS),
+    ).toBe(true);
   });
 });
 

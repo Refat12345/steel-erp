@@ -110,7 +110,7 @@ async function ensureRbacAndSizes(): Promise<void> {
     { code: "admin", displayName: "المدير العام" },
     { code: "finance", displayName: "المالية" },
     { code: "logistics", displayName: "اللوجستيك" },
-    { code: "scale_operator", displayName: "عامل القبان الخارجي" },
+    { code: "scale_operator", displayName: "موظف القبان الخارجي" },
     { code: "internal_loader", displayName: "عامل التحميل الداخلي" },
   ];
   for (const role of roles) {
