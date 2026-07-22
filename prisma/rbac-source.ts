@@ -37,7 +37,7 @@ export const RBAC_ROLES: ReadonlyArray<RbacRoleDef> = [
   { code: "admin", displayName: "المدير العام", displayNameEn: "General Manager" },
   { code: "finance", displayName: "المالية", displayNameEn: "Finance" },
   { code: "logistics", displayName: "اللوجستيك", displayNameEn: "Logistics" },
-  { code: "scale_operator", displayName: "عامل القبان الخارجي", displayNameEn: "External Scale Operator" },
+  { code: "scale_operator", displayName: "موظف القبان الخارجي", displayNameEn: "External Scale Operator" },
   { code: "internal_loader", displayName: "عامل التحميل الداخلي", displayNameEn: "Internal Loader" },
   { code: "manager", displayName: "صاحب المصنع", displayNameEn: "Factory Owner" },
 ];

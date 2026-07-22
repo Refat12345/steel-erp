@@ -343,32 +343,48 @@ async function recordInbound(
             throw new ServiceError("locationGradeUnset");
           }
 
-          // One-size-per-location rule (checked on BUNDLE balances only — the
-          // tonnage line mirrors the same size): block if the site still holds
-          // a POSITIVE bundle balance of a DIFFERENT size. Lifted for the
-          // multi-size ISOLATION zone.
-          if (unit === "BUNDLE" && enforcesOneSize(location.segment)) {
-            const otherSizes = await tx.stockMovement.groupBy({
+          // Single-size zones (GENERAL / GOVERNORATES):
+          //  1) If the bay already holds a positive BUNDLE balance, that size
+          //     wins (physical stock on the ground) — expectedSize is only a
+          //     hint for empty bays and can lag behind reassignments.
+          //  2) If the bay is empty and expectedSize is configured, inbound
+          //     must match it so the clerk cannot park the wrong diameter.
+          if (enforcesOneSize(location.segment)) {
+            const bundleBalances = await tx.stockMovement.groupBy({
               by: ["sizeId"],
               where: {
                 locationId: location.id,
                 unit: "BUNDLE",
-                sizeId: { not: sizeId },
+                sizeId: { not: null },
               },
               _sum: { quantity: true },
             });
-            const blockingSizeId = otherSizes.find((row) =>
+            const positive = bundleBalances.filter((row) =>
               new Decimal(row._sum.quantity ?? 0).greaterThan(0),
-            )?.sizeId;
-            if (blockingSizeId != null) {
+            );
+            const occupyingSizeId = positive.find((row) => row.sizeId === sizeId)
+              ? sizeId
+              : positive[0]?.sizeId ?? null;
+
+            if (occupyingSizeId != null && sizeId !== occupyingSizeId) {
               const existing = await tx.sizeLookup.findUnique({
-                where: { id: blockingSizeId },
+                where: { id: occupyingSizeId },
                 select: { displayName: true },
               });
-              const existingName = existing?.displayName ?? "آخر";
               throw new ServiceError("locationHasOtherSizeEmptyFirst", "BAD_REQUEST", {
                 locationName: location.nameAr,
-                sizeName: existingName,
+                sizeName: existing?.displayName ?? "آخر",
+              });
+            }
+
+            if (
+              occupyingSizeId == null &&
+              location.expectedSizeId != null &&
+              sizeId !== location.expectedSizeId
+            ) {
+              throw new ServiceError("locationSizeMustMatchExpected", "BAD_REQUEST", {
+                locationName: location.nameAr,
+                sizeName: location.expectedSize?.displayName ?? "—",
               });
             }
           }
@@ -483,7 +499,10 @@ export async function recordTransfer(
       async (tx) => {
         const [from, to] = await Promise.all([
           tx.stockLocation.findUnique({ where: { id: data.fromLocationId } }),
-          tx.stockLocation.findUnique({ where: { id: data.toLocationId } }),
+          tx.stockLocation.findUnique({
+            where: { id: data.toLocationId },
+            include: { expectedSize: { select: { id: true, displayName: true } } },
+          }),
         ]);
         if (!from) throw new ServiceError("sourceLocationNotFound", "NOT_FOUND");
         if (!to) throw new ServiceError("destLocationNotFound", "NOT_FOUND");
@@ -512,27 +531,47 @@ export async function recordTransfer(
           if (!size) throw new ServiceError("sizeNotFound", "BAD_REQUEST");
           sizeId = size.id;
 
-          // Destination one-size rule (BUNDLE balances only): block if it holds
-          // a positive balance of a DIFFERENT size. Lifted for the multi-size
-          // ISOLATION zone.
+          // Destination single-size rule (same as production-in / adjust):
+          //  1) Positive BUNDLE balance of another size blocks the transfer.
+          //  2) Empty bay with expectedSize configured must match that size.
+          // Lifted for the multi-size ISOLATION zone.
           if (enforcesOneSize(to.segment)) {
-            const destOther = await tx.stockMovement.groupBy({
+            const destBundles = await tx.stockMovement.groupBy({
               by: ["sizeId"],
-              where: { locationId: to.id, unit: "BUNDLE", sizeId: { not: sizeId } },
+              where: {
+                locationId: to.id,
+                unit: "BUNDLE",
+                sizeId: { not: null },
+              },
               _sum: { quantity: true },
             });
-            const destBlockId = destOther.find((r) =>
-              new Decimal(r._sum.quantity ?? 0).greaterThan(0),
-            )?.sizeId;
-            if (destBlockId != null) {
+            const positive = destBundles.filter((row) =>
+              new Decimal(row._sum.quantity ?? 0).greaterThan(0),
+            );
+            const occupyingSizeId = positive.find((row) => row.sizeId === sizeId)
+              ? sizeId
+              : positive[0]?.sizeId ?? null;
+
+            if (occupyingSizeId != null && sizeId !== occupyingSizeId) {
               const existing = await tx.sizeLookup.findUnique({
-                where: { id: destBlockId },
+                where: { id: occupyingSizeId },
                 select: { displayName: true },
               });
               throw new ServiceError("destLocationHasOtherSizeEmptyFirst", "BAD_REQUEST", {
-              locationName: to.nameAr,
-              sizeName: existing?.displayName ?? "آخر",
-            });
+                locationName: to.nameAr,
+                sizeName: existing?.displayName ?? "آخر",
+              });
+            }
+
+            if (
+              occupyingSizeId == null &&
+              to.expectedSizeId != null &&
+              sizeId !== to.expectedSizeId
+            ) {
+              throw new ServiceError("locationSizeMustMatchExpected", "BAD_REQUEST", {
+                locationName: to.nameAr,
+                sizeName: to.expectedSize?.displayName ?? "—",
+              });
             }
           }
         }
@@ -723,31 +762,48 @@ export async function recordAdjustment(
           throw new ServiceError("noStockDifference");
         }
 
-        // Block introducing a new bundle size while another size is still
-        // positive (checked on BUNDLE balances only). Lifted for the multi-size
-        // ISOLATION zone.
-        if (
-          unit === "BUNDLE" &&
-          enforcesOneSize(location.segment) &&
-          current.lessThanOrEqualTo(0) &&
-          delta.greaterThan(0)
-        ) {
-          const others = await tx.stockMovement.groupBy({
+        // Single-size zones: if the bay already holds a positive BUNDLE
+        // balance of size X, BUNDLE and TON corrections for a different size
+        // are blocked when they would create a new line (current ≤ 0). Legacy
+        // wrong-size lines that are already positive may still be counted
+        // down to zero. ISOLATION is multi-size and skips this rule.
+        if (enforcesOneSize(location.segment) && sizeId != null && current.lessThanOrEqualTo(0)) {
+          const bundleBalances = await tx.stockMovement.groupBy({
             by: ["sizeId"],
-            where: { locationId: location.id, unit: "BUNDLE", sizeId: { not: sizeId } },
+            where: {
+              locationId: location.id,
+              unit: "BUNDLE",
+              sizeId: { not: null },
+            },
             _sum: { quantity: true },
           });
-          const blockingId = others.find((r) =>
-            new Decimal(r._sum.quantity ?? 0).greaterThan(0),
+          const occupyingSizeId = bundleBalances.find((row) =>
+            new Decimal(row._sum.quantity ?? 0).greaterThan(0),
           )?.sizeId;
-          if (blockingId != null) {
+          if (occupyingSizeId != null && sizeId !== occupyingSizeId) {
             const existing = await tx.sizeLookup.findUnique({
-              where: { id: blockingId },
+              where: { id: occupyingSizeId },
               select: { displayName: true },
             });
             throw new ServiceError("locationHasOtherSizeCorrectFirst", "BAD_REQUEST", {
               locationName: location.nameAr,
               sizeName: existing?.displayName ?? "آخر",
+            });
+          }
+          // Empty bay: if expected size is configured, new lines must match it.
+          if (
+            occupyingSizeId == null &&
+            location.expectedSizeId != null &&
+            sizeId !== location.expectedSizeId &&
+            delta.greaterThan(0)
+          ) {
+            const expected = await tx.sizeLookup.findUnique({
+              where: { id: location.expectedSizeId },
+              select: { displayName: true },
+            });
+            throw new ServiceError("locationSizeMustMatchExpected", "BAD_REQUEST", {
+              locationName: location.nameAr,
+              sizeName: expected?.displayName ?? "—",
             });
           }
         }
@@ -1091,7 +1147,14 @@ export async function listMovements(
  * Entries recorded in the morning grace window but assigned to the previous
  * EVENING shift belong to the previous operational day and are excluded.
  */
-export async function listTodayProduction(): Promise<MovementListItem[]> {
+/** Today's production feed — includes segment/sizeId so the UI can flag
+ *  rebar sites that received only one of the two parallel units. */
+export interface TodayProductionItem extends MovementListItem {
+  sizeId: number | null;
+  segment: StockLocationSegment;
+}
+
+export async function listTodayProduction(): Promise<TodayProductionItem[]> {
   const start = operationalDayStart(new Date());
 
   const rows = await prisma.stockMovement.findMany({
@@ -1105,7 +1168,7 @@ export async function listTodayProduction(): Promise<MovementListItem[]> {
     orderBy: { createdAt: "desc" },
     take: 100,
     include: {
-      location: { select: { code: true, nameAr: true } },
+      location: { select: { code: true, nameAr: true, segment: true } },
       size: { select: { displayName: true } },
       creator: { select: { username: true, fullName: true } },
     },
@@ -1120,7 +1183,9 @@ export async function listTodayProduction(): Promise<MovementListItem[]> {
       locationId: r.locationId,
       locationCode: r.location.code,
       locationNameAr: r.location.nameAr,
+      sizeId: r.sizeId,
       sizeName: r.size?.displayName ?? null,
+      segment: r.location.segment,
       grade: r.grade,
       quantity: new Decimal(r.quantity).toNumber(),
       unit: r.unit,

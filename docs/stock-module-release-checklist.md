@@ -90,11 +90,13 @@
   - `internal_loader` — يحتاجها لاختيار موقع المصدر في نافذة الوزنة.
   - `manager` — عرض فقط.
 - [ ] قرّر إسناد بقية الصلاحيات (افتراضيات أدوار أو منح فردية من واجهة الأدمن):
-  - `stock.production.ton` / `stock.production.bundle` — موظفَا تسجيل الإنتاج.
+  - `stock.production.ton` / `stock.production.bundle` — موظفَا تسجيل الإنتاج
+    (تكفي وحدها لفتح `/stock/production-in`؛ لا يشترطان `stock.view`).
   - `stock.transfer` — من ينفّذ الترحيل بين المواقع.
   - `stock.adjust` — من يصحّح الجرد.
   - `stock.movements.view` — من يدقّق سجل الحركات (ليست افتراضية لأي دور — منح فردي).
   - `stock.location.manage` — إدارة المواقع (يُفضَّل إبقاؤها للأدمن).
+  - `stock.view` — فقط لمن يحتاج خريطة الأرصدة `/stock` (مدير، لوجستيك، محمّل…).
 - [ ] انشر التعديل (commit + deploy عبر `deploy.sh`) ثم:
 
   ```bash

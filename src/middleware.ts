@@ -73,6 +73,21 @@ const ROUTE_PERMISSIONS: RouteRule[] = [
     pattern: /^\/api\/stock\/production-today$/,
     permissions: ["stock.production.ton", "stock.production.bundle", "stock.movements.view"],
   },
+  // Location/balance reads for pickers on production / transfer / adjust —
+  // handlers still enforce manage on mutations.
+  {
+    pattern: /^\/api\/stock\/(balances|locations)(\/.*)?$/,
+    permissions: [
+      "stock.view",
+      "stock.movements.view",
+      "stock.production.ton",
+      "stock.production.bundle",
+      "stock.transfer",
+      "stock.adjust",
+      "stock.opening_balance",
+      "stock.location.manage",
+    ],
+  },
   { pattern: /^\/api\/stock(\/.*)?$/, permissions: ["stock.view"] },
 
   // System settings — stricter than the /admin wildcard (specific first).

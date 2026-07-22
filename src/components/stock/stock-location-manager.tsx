@@ -97,13 +97,19 @@ function YardMap({ yard }: { yard: Yard }) {
                 gridColumn: `${l.gridCol} / span ${l.gridSpan}`,
                 gridRow: `${l.gridRow}`,
               }}
-              title={`${l.nameAr} — ${segmentLabel}`}
+              title={`${l.nameAr} (${l.code}) — ${segmentLabel}`}
             >
-              <div className="font-mono text-sm font-bold leading-tight">
-                {l.code}
-              </div>
-              <div className="truncate text-[10px] opacity-80" dir={dir}>
+              <div
+                className="line-clamp-2 text-sm font-bold leading-snug"
+                dir={dir}
+              >
                 {l.nameAr}
+              </div>
+              <div className="truncate text-[10px] font-medium opacity-80" dir={dir}>
+                {segmentLabel}
+              </div>
+              <div className="font-mono text-[10px] tabular-nums opacity-60">
+                {l.code}
               </div>
               <div className="text-[10px] font-medium opacity-70">
                 {l.expectedSize
