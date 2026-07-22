@@ -250,7 +250,9 @@ describe("recordTransfer — destination expectedSize / one-size", () => {
     expectedSize: null,
   });
 
-  function mockLocations(to: ReturnType<typeof generalLocation>) {
+  function mockLocations(
+    to: ReturnType<typeof generalLocation> | ReturnType<typeof isolationLocation>,
+  ) {
     mockPrisma.stockLocation.findUnique.mockImplementation(
       async ({ where }: { where: { id: number } }) => {
         if (where.id === from.id) return from;
