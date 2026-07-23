@@ -6,9 +6,10 @@ import { ChartsSection } from "@/components/dashboard/charts-section.operations"
 import { resolveUserAuth } from "@/lib/permissions";
 import {
   canAccessDashboard,
-  getRoleLandingPage,
   isAnalyticsRestrictedRole,
+  resolveLandingPage,
 } from "@/lib/rbac-policy";
+import { isStockModuleEnabled } from "@/config/feature-flags";
 import { getLocale, getTranslations } from "next-intl/server";
 import { logger } from "@/lib/logger";
 import { formatDate } from "@/lib/date-format";
@@ -38,11 +39,14 @@ export default async function DashboardPage() {
     const reason = isAnalyticsRestrictedRole(auth.roleCode)
       ? "role is on ANALYTICS_RESTRICTED_ROLES denylist"
       : "missing dashboard.view permission";
-    // Prefer the role's configured landing page (e.g. shop-floor
-    // roles land on /trucks) so login never ends on a dead-end
-    // /forbidden screen. Fall back to /forbidden only when there is
-    // no mapped home for the role.
-    const landingPage = getRoleLandingPage(auth.roleCode);
+    // Permission-aware landing so login never ends on /forbidden when the
+    // user still has an operational surface (e.g. stock-only loader).
+    const landingPage = resolveLandingPage({
+      roleCode: auth.roleCode,
+      permissions: auth.permissions,
+      stockModuleEnabled: isStockModuleEnabled(),
+      excludePath: "/",
+    });
 
     if (landingPage) {
       // Expected, benign redirect: operational roles always land on `/`
@@ -60,8 +64,8 @@ export default async function DashboardPage() {
         "redirecting non-dashboard role to landing page",
       );
     } else {
-      // No mapped home: a role with no dashboard access AND no operational
-      // surface reaching `/` is genuinely unexpected — keep it at WARN.
+      // No accessible home: role lacks dashboard and every operational
+      // fallback — keep it at WARN.
       logger.warn(
         {
           userId: auth.userId,

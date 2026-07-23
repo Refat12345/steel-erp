@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
-import { getRoleLandingPage } from "@/lib/rbac-policy";
+import { resolveLandingPage } from "@/lib/rbac-policy";
 import { isStockModuleEnabled } from "@/config/feature-flags";
 import { LOCALE_COOKIE } from "@/i18n/config";
 import {
@@ -175,9 +175,9 @@ export async function middleware(req: NextRequest) {
   }
 
   const permissions = (token.permissions as string[] | undefined) ?? [];
-  // `token.role` is used ONLY to pick a friendly redirect destination on
-  // deny (shop-floor roles land on /trucks instead of /forbidden). All
-  // security decisions above use `token.permissions` — never the role.
+  // `token.role` is used ONLY as a soft hint for the deny redirect
+  // (role-preferred landing, then permission fallbacks). All security
+  // decisions use `token.permissions` — never the role.
   const roleCode = (token.role as string | undefined) ?? "";
 
   for (const rule of ROUTE_PERMISSIONS) {
@@ -194,12 +194,16 @@ export async function middleware(req: NextRequest) {
           { status: 403 },
         );
       }
-      const landing = getRoleLandingPage(roleCode);
-      // Avoid a redirect loop if the role's landing page is the very
-      // path that was just denied (shouldn't happen, but defensive).
-      const destination =
-        landing && landing !== pathname ? landing : "/forbidden";
-      return NextResponse.redirect(new URL(destination, req.url));
+      // Permission-aware landing: role preference only if the user can
+      // open it; otherwise first fallback they can access (e.g. stock
+      // clerk without truck.* → /stock/...). excludePath prevents loops.
+      const landing = resolveLandingPage({
+        roleCode,
+        permissions,
+        stockModuleEnabled: isStockModuleEnabled(),
+        excludePath: pathname,
+      });
+      return NextResponse.redirect(new URL(landing ?? "/forbidden", req.url));
     }
     break;
   }
