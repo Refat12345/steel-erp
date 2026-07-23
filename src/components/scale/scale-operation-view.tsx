@@ -75,6 +75,7 @@ import {
 import { formatDateTime } from "@/lib/date-format";
 import type { TruckTimings } from "@/lib/truck-timing";
 import { AdminCorrectionPanel } from "@/components/scale/admin-correction-panel";
+import { formatSessionSourceLabel } from "@/lib/weigh-session-source";
 
 interface SizeOption {
   id: number;
@@ -101,11 +102,19 @@ interface WeighSessionItem {
   bundleCount: number | null;
   weightTons: string;
   version: number;
+  fromProduction: boolean;
+  sourceLocationId: number | null;
   size: {
     id: number;
     code: string;
     displayName: string;
     isBundleType: boolean;
+  } | null;
+  sourceLocation: {
+    id: number;
+    code: string;
+    nameAr: string;
+    yard: { id: number; nameAr: string } | null;
   } | null;
 }
 
@@ -730,12 +739,17 @@ export function ScaleOperationView({
             </p>
           ) : (
             <div className="overflow-x-auto">
-              <Table className="min-w-[480px]">
+              <Table
+                className={
+                  stockModuleEnabled ? "min-w-[640px]" : "min-w-[480px]"
+                }
+              >
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[50px]">#</TableHead>
                     {isMultiRound && <TableHead className="w-[60px]">{t("round")}</TableHead>}
                     <TableHead>{t("size")}</TableHead>
+                    {stockModuleEnabled && <TableHead>{t("source")}</TableHead>}
                     <TableHead>{t("bundles")}</TableHead>
                     <TableHead>{t("weightTons")}</TableHead>
                     {canManageSession && <TableHead className="w-[100px]">{t("actions")}</TableHead>}
@@ -759,6 +773,14 @@ export function ScaleOperationView({
                         </TableCell>
                       )}
                       <TableCell>{s.size?.displayName ?? t("emDash")}</TableCell>
+                      {stockModuleEnabled && (
+                        <TableCell className="text-sm">
+                          {formatSessionSourceLabel(s, {
+                            fromProduction: t("fromProduction"),
+                            emDash: t("emDash"),
+                          })}
+                        </TableCell>
+                      )}
                       <TableCell>{s.bundleCount ?? t("emDash")}</TableCell>
                       <TableCell className="font-mono">
                         {formatDecimal(Number(s.weightTons), 3)}
@@ -795,7 +817,15 @@ export function ScaleOperationView({
                     );
                   })}
                   <TableRow className="font-bold">
-                    <TableCell colSpan={isMultiRound ? 4 : 3}>{t("grandTotalAllSessions")}</TableCell>
+                    <TableCell
+                      colSpan={
+                        (isMultiRound ? 3 : 2) +
+                        (stockModuleEnabled ? 1 : 0) +
+                        1
+                      }
+                    >
+                      {t("grandTotalAllSessions")}
+                    </TableCell>
                     <TableCell className="font-mono">
                       {formatDecimal(totalSessionsTons, 3)}
                     </TableCell>

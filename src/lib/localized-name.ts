@@ -153,8 +153,24 @@ type SizeFields = {
   displayNameEn?: string | null;
 };
 
+type StockNameFields = {
+  nameAr: string;
+  nameEn?: string | null;
+};
+
+type SourceLocationFields = StockNameFields & {
+  yard?: StockNameFields | null;
+};
+
 function withLocalizedSizeFields<T extends SizeFields>(size: T, locale: Locale): T {
   return { ...size, displayName: localizedSize(size, locale) };
+}
+
+function withLocalizedStockNameFields<T extends StockNameFields>(
+  entity: T,
+  locale: Locale,
+): T {
+  return { ...entity, nameAr: localizedStockName(entity, locale) };
 }
 
 /**
@@ -170,7 +186,12 @@ export function withLocalizedTruckLabels<T extends Record<string, unknown>>(
     | Array<{ size: SizeFields } & Record<string, unknown>>
     | undefined;
   const sessions = truck.sessions as
-    | Array<{ size: SizeFields | null } & Record<string, unknown>>
+    | Array<
+        {
+          size: SizeFields | null;
+          sourceLocation?: SourceLocationFields | null;
+        } & Record<string, unknown>
+      >
     | undefined;
   const rounds = truck.rounds as
     | Array<{ size: SizeFields | null } & Record<string, unknown>>
@@ -197,10 +218,26 @@ export function withLocalizedTruckLabels<T extends Record<string, unknown>>(
       : {}),
     ...(sessions
       ? {
-          sessions: sessions.map((s) => ({
-            ...s,
-            size: s.size ? withLocalizedSizeFields(s.size, locale) : s.size,
-          })),
+          sessions: sessions.map((s) => {
+            const sourceLocation = s.sourceLocation
+              ? {
+                  ...withLocalizedStockNameFields(s.sourceLocation, locale),
+                  ...(s.sourceLocation.yard
+                    ? {
+                        yard: withLocalizedStockNameFields(
+                          s.sourceLocation.yard,
+                          locale,
+                        ),
+                      }
+                    : {}),
+                }
+              : s.sourceLocation;
+            return {
+              ...s,
+              size: s.size ? withLocalizedSizeFields(s.size, locale) : s.size,
+              sourceLocation,
+            };
+          }),
         }
       : {}),
     ...(rounds

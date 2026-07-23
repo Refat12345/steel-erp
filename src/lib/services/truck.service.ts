@@ -2634,6 +2634,15 @@ const DETAIL_INCLUDE = {
           isBundleType: true,
         },
       },
+      sourceLocation: {
+        select: {
+          id: true,
+          code: true,
+          nameAr: true,
+          nameEn: true,
+          yard: { select: { id: true, nameAr: true, nameEn: true } },
+        },
+      },
     },
   },
   rounds: {
