@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { resolveUserAuth } from "@/lib/permissions";
-import { getRoleLandingPage } from "@/lib/rbac-policy";
+import { resolveLandingPage } from "@/lib/rbac-policy";
+import { isStockModuleEnabled } from "@/config/feature-flags";
 import { logger } from "@/lib/logger";
 
 interface PageSession {
@@ -70,11 +71,16 @@ export async function requirePagePermission(
       },
       "page access denied — missing permission",
     );
-    // Prefer the role's configured landing page (e.g. shop-floor and
-    // logistics roles land on /trucks) so login never ends on a
-    // dead-end /forbidden screen for a legitimate worker. Fall back
-    // to /forbidden when no landing page is mapped.
-    redirect(getRoleLandingPage(session.role) ?? "/forbidden");
+    // Permission-aware landing so a worker stripped of the role's
+    // preferred surface (e.g. trucks) still reaches another page they
+    // can open (e.g. stock). Fall back to /forbidden only when none.
+    redirect(
+      resolveLandingPage({
+        roleCode: session.role,
+        permissions: session.permissions,
+        stockModuleEnabled: isStockModuleEnabled(),
+      }) ?? "/forbidden",
+    );
   }
 
   return session;
