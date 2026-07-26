@@ -31,7 +31,10 @@ import {
   Clock3,
   UserRound,
   TriangleAlert,
+  StickyNote,
+  Pencil,
 } from "lucide-react";
+import { ProductionCorrectDialog } from "@/components/stock/production-correct-dialog";
 import {
   segmentTrackedUnits,
   isDualUnitSegment,
@@ -58,6 +61,7 @@ interface TodayEntry {
   quantity: number;
   unit: StockUnit;
   shift: ShiftValue;
+  reason: string | null;
   createdBy: string;
 }
 
@@ -105,10 +109,13 @@ interface ApiYard {
 export function ProductionInForm({
   mode = "production",
   allowedUnits = ["BUNDLE", "TON"],
+  canCorrect = false,
 }: {
   mode?: EntryMode;
   /** Counting units the current user may enter (from their permissions). */
   allowedUnits?: StockUnit[];
+  /** May open the correct-entry dialog (stock.production.correct). */
+  canCorrect?: boolean;
 }) {
   const t = useTranslations("stock");
   const tEnums = useTranslations("enums");
@@ -136,8 +143,10 @@ export function ProductionInForm({
   const [quantity, setQuantity] = useState("");
   const [reason, setReason] = useState("");
   const [todayEntries, setTodayEntries] = useState<TodayEntry[]>([]);
+  const [correcting, setCorrecting] = useState<TodayEntry | null>(null);
   const quantityRef = useRef<HTMLInputElement>(null);
   const formCardRef = useRef<HTMLDivElement>(null);
+  const canCreate = allowedUnits.length > 0;
 
   // Wall clock, refreshed every 30 s — drives the shift grace-window UI so the
   // toggle appears/disappears on time even if the page stays open for hours.
@@ -408,39 +417,6 @@ export function ProductionInForm({
     return { bundles, tons };
   }, [selected, todayEntries, needsSize, sizeId]);
 
-  /** One-tap fix from the pair-gap alert: pre-fill location, size, and the
-   *  missing unit, then focus the quantity input. */
-  function quickFillFromGap(p: IncompletePair) {
-    const missingUnit: StockUnit = p.gap === "missing_bundles" ? "BUNDLE" : "TON";
-    if (!allowedUnits.includes(missingUnit)) {
-      toast.error(t("pairGapNoPermission"));
-      return;
-    }
-    // Gap size must match the size the bay will accept: current balance if
-    // occupied, otherwise the configured expected size.
-    const loc = locations.find((l) => l.id === p.locationId);
-    if (loc && segmentEnforcesOneSize(loc.segment) && p.sizeId != null) {
-      const accepted = loc.currentSize ?? loc.expectedSize;
-      if (accepted != null && p.sizeId !== accepted.id) {
-        toast.error(
-          t("pairGapSizeConflict", {
-            entrySize: p.sizeName ?? "—",
-            expectedSize: accepted.displayName,
-          }),
-          { duration: 8000 },
-        );
-        return;
-      }
-    }
-    setLocationId(String(p.locationId));
-    setSizeId(p.sizeId != null ? String(p.sizeId) : "");
-    setUnit(missingUnit);
-    setQuantity("");
-    formCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    // Wait for the quantity field to render (it mounts once a unit is set).
-    setTimeout(() => quantityRef.current?.focus(), 150);
-  }
-
   // Base UI's Select shows the raw value in the trigger unless items provided.
   const locationItems = useMemo(
     () =>
@@ -582,6 +558,7 @@ export function ProductionInForm({
           : "flex max-w-lg flex-col",
       )}
     >
+      {canCreate ? (
       <Card
         ref={formCardRef}
         className={cn("min-w-0", showToday && "lg:sticky lg:top-4")}
@@ -801,6 +778,16 @@ export function ProductionInForm({
           </form>
         </CardContent>
       </Card>
+      ) : (
+        showToday &&
+        canCorrect && (
+          <Card className="min-w-0 lg:sticky lg:top-4">
+            <CardContent className="p-4 text-sm text-muted-foreground">
+              {t("correctEntryNoCreateHint")}
+            </CardContent>
+          </Card>
+        )
+      )}
 
       {showToday && (
         <Card className="min-w-0 overflow-hidden">
@@ -844,11 +831,7 @@ export function ProductionInForm({
                   <div className="min-w-0 space-y-1.5">
                     <p className="text-xs font-semibold">{t("pairGapAlertTitle")}</p>
                     <ul className="space-y-1.5 text-xs">
-                      {incompletePairs.map((p) => {
-                        const missingUnit: StockUnit =
-                          p.gap === "missing_bundles" ? "BUNDLE" : "TON";
-                        const canFix = allowedUnits.includes(missingUnit);
-                        return (
+                      {incompletePairs.map((p) => (
                           <li
                             key={p.key}
                             className="flex flex-wrap items-center gap-1.5"
@@ -868,20 +851,8 @@ export function ProductionInForm({
                                 ? t("pairGapMissingBundles")
                                 : t("pairGapMissingTons")}
                             </span>
-                            {canFix && (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="h-6 border-amber-400 bg-amber-100/60 px-2 text-[11px] text-amber-950 hover:bg-amber-100"
-                                onClick={() => quickFillFromGap(p)}
-                              >
-                                {t("pairGapFixNow")}
-                              </Button>
-                            )}
                           </li>
-                        );
-                      })}
+                        ))}
                     </ul>
                   </div>
                 </div>
@@ -996,21 +967,46 @@ export function ProductionInForm({
                                     {e.createdBy}
                                   </span>
                                 </div>
+                                {e.reason?.trim() ? (
+                                  <p className="flex items-start gap-1 text-[11px] text-muted-foreground">
+                                    <StickyNote className="mt-0.5 h-3 w-3 shrink-0" />
+                                    <span className="min-w-0 break-words">
+                                      <span className="font-medium text-foreground/80">
+                                        {t("notes")}:{" "}
+                                      </span>
+                                      {e.reason.trim()}
+                                    </span>
+                                  </p>
+                                ) : null}
                               </div>
-                              <div
-                                className={cn(
-                                  "inline-flex shrink-0 items-baseline gap-1.5 self-start rounded-lg px-2.5 py-1.5 sm:self-center",
-                                  e.unit === "BUNDLE"
-                                    ? "bg-sky-100 text-sky-950"
-                                    : "bg-emerald-100 text-emerald-950",
+                              <div className="flex shrink-0 items-center gap-1.5 self-start sm:self-center">
+                                {canCorrect && (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 gap-1 px-2 text-[11px]"
+                                    onClick={() => setCorrecting(e)}
+                                  >
+                                    <Pencil className="h-3 w-3" />
+                                    {t("correctEntry")}
+                                  </Button>
                                 )}
-                              >
-                                <span className="text-base font-bold tabular-nums leading-none">
-                                  {qtyLabel}
-                                </span>
-                                <span className="text-[11px] font-medium">
-                                  {tEnums(`stockUnit.${e.unit}`)}
-                                </span>
+                                <div
+                                  className={cn(
+                                    "inline-flex items-baseline gap-1.5 rounded-lg px-2.5 py-1.5",
+                                    e.unit === "BUNDLE"
+                                      ? "bg-sky-100 text-sky-950"
+                                      : "bg-emerald-100 text-emerald-950",
+                                  )}
+                                >
+                                  <span className="text-base font-bold tabular-nums leading-none">
+                                    {qtyLabel}
+                                  </span>
+                                  <span className="text-[11px] font-medium">
+                                    {tEnums(`stockUnit.${e.unit}`)}
+                                  </span>
+                                </div>
                               </div>
                             </li>
                           );
@@ -1023,6 +1019,21 @@ export function ProductionInForm({
             )}
           </CardContent>
         </Card>
+      )}
+
+      {canCorrect && (
+        <ProductionCorrectDialog
+          entry={correcting}
+          locations={locations}
+          open={correcting != null}
+          onOpenChange={(open) => {
+            if (!open) setCorrecting(null);
+          }}
+          onCorrected={() => {
+            void fetchToday();
+            void refreshCurrentSizes();
+          }}
+        />
       )}
     </div>
   );

@@ -18,6 +18,7 @@ export default async function StockLayout({
     "stock.movements.view",
     "stock.production.ton",
     "stock.production.bundle",
+    "stock.production.correct",
     "stock.transfer",
     "stock.adjust",
     "stock.opening_balance",
