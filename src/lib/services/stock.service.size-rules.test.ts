@@ -533,26 +533,33 @@ describe("correctProductionIn — destination one-size", () => {
     });
   });
 
-  it("rejects when remaining balance cannot reverse the original entry", async () => {
+  it("partially reverses when remaining balance is below the original entry", async () => {
+    const loc = generalLocation();
     mockPrisma.stockMovement.findUnique.mockResolvedValue(original);
     mockPrisma.stockMovement.aggregate.mockResolvedValue({
       _sum: { quantity: 1 },
     });
+    mockPrisma.stockLocation.findUnique.mockResolvedValue(loc);
+    mockPrisma.stockMovement.groupBy.mockResolvedValue([
+      { sizeId: SIZE_10.id, _sum: { quantity: 1 } },
+    ]);
+    mockPrisma.stockMovement.update.mockResolvedValue({});
 
-    await expect(
-      correctProductionIn(
-        {
-          movementId: original.id,
-          locationId: 33,
-          quantity: 4,
-          reason: "already-loaded",
-        },
-        USER_ID,
-      ),
-    ).rejects.toMatchObject({
-      messageKey: "productionCorrectInsufficientBalance",
-    });
+    const result = await correctProductionIn(
+      {
+        movementId: original.id,
+        locationId: loc.id,
+        quantity: 3,
+        reason: "already-loaded",
+      },
+      USER_ID,
+    );
 
-    expect(mockPrisma.stockLocation.findUnique).not.toHaveBeenCalled();
+    expect(result.partialReverse).toBe(true);
+    expect(result.reversedQuantity).toBe(1);
+    expect(result.warningKey).toBe("productionCorrectPartialReverse");
+    expect(mockPrisma.stockMovement.create).toHaveBeenCalledTimes(2);
+    expect(mockPrisma.stockMovement.create.mock.calls[0][0].data.quantity).toBe("-1.000");
+    expect(mockPrisma.stockMovement.create.mock.calls[1][0].data.quantity).toBe("3.000");
   });
 });

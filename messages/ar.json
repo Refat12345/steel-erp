@@ -202,6 +202,7 @@
     "productionEntryAlreadyCorrected": "تم تصحيح إدخال الإنتاج هذا مسبقاً",
     "productionCorrectNoChange": "لا تغيير — الكمية والموقع مطابقان للإدخال الأصلي",
     "productionCorrectInsufficientBalance": "الرصيد في «{locationName}» هو {available} فقط — يلزم {needed} لعكس هذا الإدخال (قد يكون جزء منه حُمّل مسبقاً)",
+    "productionCorrectPartialReverse": "تم التصحيح — عُكس {reversed} من أصل {original} المتبقي في «{locationName}» (الباقي كان قد خرج مسبقاً)، وسُجّل الإدخال الجديد",
     "productionEntryRequired": "إدخال الإنتاج مطلوب",
     "quantityMustBePositive": "الكمية يجب أن تكون أكبر من صفر",
     "recordModifiedByAnotherUser": "تم تعديل السجل من قِبل مستخدم آخر. يرجى تحديث الصفحة وإعادة المحاولة",
