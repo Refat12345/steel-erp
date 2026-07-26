@@ -136,6 +136,7 @@ export function ProductionCorrectDialog({
         toast.error(json.error || t("errorCorrectEntry"));
         return;
       }
+      if (json.data?.warning) toast.warning(json.data.warning);
       toast.success(t("correctEntrySuccess"));
       onOpenChange(false);
       onCorrected();

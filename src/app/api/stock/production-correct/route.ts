@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { getTranslations } from "next-intl/server";
 import {
   getApiSession,
   unauthorized,
@@ -30,7 +31,19 @@ export async function POST(req: NextRequest) {
 
   try {
     const result = await correctProductionIn(parsed.data, session.userId);
-    return ok(result);
+    let warning: string | null = null;
+    if (result.warningKey && result.warningParams) {
+      const t = await getTranslations("errors");
+      warning = t(result.warningKey, result.warningParams);
+    }
+    return ok({
+      originalMovementId: result.originalMovementId,
+      reverseMovementId: result.reverseMovementId,
+      newMovementId: result.newMovementId,
+      reversedQuantity: result.reversedQuantity,
+      partialReverse: result.partialReverse,
+      warning,
+    });
   } catch (e) {
     return handleServiceError(e);
   }

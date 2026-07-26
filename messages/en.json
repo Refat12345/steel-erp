@@ -202,6 +202,7 @@
     "productionEntryAlreadyCorrected": "This production entry was already corrected",
     "productionCorrectNoChange": "No change — quantity and location are the same as the original entry",
     "productionCorrectInsufficientBalance": "Balance at «{locationName}» is only {available} — need {needed} to reverse this entry (part of it may already have been loaded out)",
+    "productionCorrectPartialReverse": "Corrected — only {reversed} of {original} was still at «{locationName}» (the rest had already left); the new entry was recorded",
     "productionEntryRequired": "Production entry is required",
     "quantityMustBePositive": "Quantity must be greater than zero",
     "recordModifiedByAnotherUser": "Record was modified by another user. Refresh the page and try again",

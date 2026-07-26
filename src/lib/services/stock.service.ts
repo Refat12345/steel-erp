@@ -479,18 +479,30 @@ export function recordOpeningBalance(
 
 export interface CorrectProductionResult {
   originalMovementId: number;
-  reverseMovementId: number;
+  reverseMovementId: number | null;
   newMovementId: number;
+  /** Quantity actually reversed from the old bay (may be < original). */
+  reversedQuantity: number;
+  /** True when prior load-out/transfer left less than the original entry qty. */
+  partialReverse: boolean;
+  /** i18n key under `errors` when partialReverse; null otherwise. */
+  warningKey: "productionCorrectPartialReverse" | null;
+  warningParams: {
+    locationName: string;
+    reversed: string;
+    original: string;
+  } | null;
 }
 
 /**
  * Correct a PRODUCTION_IN without rewriting history:
- *  1) ADJUSTMENT (−original qty) on the old bay
+ *  1) ADJUSTMENT (−min(original, available)) on the old bay
  *  2) new PRODUCTION_IN with the corrected qty/location
  *  3) mark the original as superseded (excluded from today's feed)
  *
- * Destination one-size rules match production-in / transfer. Reversal requires
- * enough remaining balance at the original bay (post load-out may block).
+ * If part of the original qty was already loaded out / transferred, reverse
+ * only what remains (partial reverse) instead of blocking the correction.
+ * Destination one-size rules match production-in / transfer.
  */
 export async function correctProductionIn(
   data: CorrectProductionInInput,
@@ -537,7 +549,8 @@ export async function correctProductionIn(
           throw new ServiceError("productionCorrectNoChange", "BAD_REQUEST");
         }
 
-        // Enough stock left at the original bay to reverse this entry.
+        // Reverse at most what is still on the bay. Prior load-outs reduce
+        // available below the original entry — clamp instead of rejecting.
         const sourceAgg = await tx.stockMovement.aggregate({
           where: {
             locationId: original.locationId,
@@ -547,13 +560,8 @@ export async function correctProductionIn(
           _sum: { quantity: true },
         });
         const available = new Decimal(sourceAgg._sum.quantity ?? 0);
-        if (available.lessThan(oldQty)) {
-          throw new ServiceError("productionCorrectInsufficientBalance", "BAD_REQUEST", {
-            locationName: original.location.nameAr,
-            available: available.toString(),
-            needed: oldQty.toString(),
-          });
-        }
+        const reverseQty = Decimal.min(oldQty, Decimal.max(available, 0));
+        const partialReverse = reverseQty.lessThan(oldQty);
 
         const dest = await tx.stockLocation.findUnique({
           where: { id: data.locationId },
@@ -574,9 +582,7 @@ export async function correctProductionIn(
 
           // One-size zones: destination must already hold this size, or be
           // empty (and match expectedSize when configured). Same-bay qty-only
-          // corrections skip the "other size" check against the pre-reverse
-          // balance of this very entry — we evaluate after the reverse below
-          // for same-location, and against current balance for a new bay.
+          // corrections simulate the reverse before checking occupancy.
           if (enforcesOneSize(dest.segment)) {
             const bundleBalances = await tx.stockMovement.groupBy({
               by: ["sizeId"],
@@ -588,23 +594,18 @@ export async function correctProductionIn(
               _sum: { quantity: true },
             });
 
-            // When correcting away from / onto the same bay, the reverse will
-            // remove `oldQty` of this size from the BUNDLE balance first. For
-            // a different destination bay the reverse does not affect it.
             let positive = bundleBalances.filter((row) =>
               new Decimal(row._sum.quantity ?? 0).greaterThan(0),
             );
 
-            if (sameLocation && unit === "BUNDLE") {
+            if (sameLocation && unit === "BUNDLE" && reverseQty.greaterThan(0)) {
               positive = positive
                 .map((row) => {
                   if (row.sizeId !== sizeId) return row;
-                  const remaining = new Decimal(row._sum.quantity ?? 0).minus(oldQty);
+                  const remaining = new Decimal(row._sum.quantity ?? 0).minus(reverseQty);
                   return { ...row, _sum: { quantity: remaining } };
                 })
                 .filter((row) => new Decimal(row._sum.quantity ?? 0).greaterThan(0));
-            } else if (sameLocation && unit === "TON") {
-              // Ton reverse does not change BUNDLE occupancy; use as-is.
             }
 
             const occupyingSizeId = positive.find((row) => row.sizeId === sizeId)
@@ -635,18 +636,22 @@ export async function correctProductionIn(
           }
         }
 
-        const reverse = await tx.stockMovement.create({
-          data: {
-            locationId: original.locationId,
-            type: "ADJUSTMENT" satisfies StockMovementType,
-            sizeId,
-            grade,
-            quantity: oldQty.negated().toFixed(3),
-            unit,
-            reason,
-            createdById: userId,
-          },
-        });
+        let reverseId: number | null = null;
+        if (reverseQty.greaterThan(0)) {
+          const reverse = await tx.stockMovement.create({
+            data: {
+              locationId: original.locationId,
+              type: "ADJUSTMENT" satisfies StockMovementType,
+              sizeId,
+              grade,
+              quantity: reverseQty.negated().toFixed(3),
+              unit,
+              reason,
+              createdById: userId,
+            },
+          });
+          reverseId = reverse.id;
+        }
 
         const replacement = await tx.stockMovement.create({
           data: {
@@ -675,7 +680,7 @@ export async function correctProductionIn(
           details: {
             event: "production_in_correct",
             originalMovementId: original.id,
-            reverseMovementId: reverse.id,
+            reverseMovementId: reverseId,
             newMovementId: replacement.id,
             fromLocationId: original.locationId,
             toLocationId: dest.id,
@@ -683,6 +688,8 @@ export async function correctProductionIn(
             toLocationCode: dest.code,
             sizeId,
             previousQuantity: oldQty.toNumber(),
+            reversedQuantity: reverseQty.toNumber(),
+            partialReverse,
             newQuantity: newQuantity.toNumber(),
             unit,
             shift,
@@ -692,8 +699,18 @@ export async function correctProductionIn(
 
         return {
           originalMovementId: original.id,
-          reverseMovementId: reverse.id,
+          reverseMovementId: reverseId,
           newMovementId: replacement.id,
+          reversedQuantity: reverseQty.toNumber(),
+          partialReverse,
+          warningKey: partialReverse ? ("productionCorrectPartialReverse" as const) : null,
+          warningParams: partialReverse
+            ? {
+                locationName: original.location.nameAr,
+                reversed: reverseQty.toFixed(3),
+                original: oldQty.toFixed(3),
+              }
+            : null,
         };
       },
       { isolationLevel: "Serializable" },
@@ -705,6 +722,8 @@ export async function correctProductionIn(
       originalMovementId: result.originalMovementId,
       newMovementId: result.newMovementId,
       locationId: data.locationId,
+      reversedQuantity: result.reversedQuantity,
+      partialReverse: result.partialReverse,
     },
     "stock production-in corrected",
   );
