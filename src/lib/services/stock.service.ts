@@ -11,6 +11,7 @@ import type {
   ProductionInInput,
   TransferInput,
   AdjustmentInput,
+  CorrectProductionInInput,
 } from "@/lib/validators/stock-movement";
 import type { PaginationParams, PaginatedResult } from "@/lib/api-utils";
 import { ServiceError } from "./errors";
@@ -472,6 +473,242 @@ export function recordOpeningBalance(
   userId: number,
 ): Promise<RecordProductionResult> {
   return recordInbound("OPENING_BALANCE", data, userId);
+}
+
+// ── Correct production-in (qty and/or bay) ───────────────────────────────────
+
+export interface CorrectProductionResult {
+  originalMovementId: number;
+  reverseMovementId: number;
+  newMovementId: number;
+}
+
+/**
+ * Correct a PRODUCTION_IN without rewriting history:
+ *  1) ADJUSTMENT (−original qty) on the old bay
+ *  2) new PRODUCTION_IN with the corrected qty/location
+ *  3) mark the original as superseded (excluded from today's feed)
+ *
+ * Destination one-size rules match production-in / transfer. Reversal requires
+ * enough remaining balance at the original bay (post load-out may block).
+ */
+export async function correctProductionIn(
+  data: CorrectProductionInInput,
+  userId: number,
+): Promise<CorrectProductionResult> {
+  const newQuantity = new Decimal(data.quantity);
+  const reason = data.reason.trim();
+
+  const result = await withRetry(() =>
+    prisma.$transaction(
+      async (tx) => {
+        const original = await tx.stockMovement.findUnique({
+          where: { id: data.movementId },
+          include: {
+            location: { select: { id: true, code: true, nameAr: true, isVirtual: true } },
+          },
+        });
+        if (!original || original.location.isVirtual) {
+          throw new ServiceError("productionEntryNotFound", "NOT_FOUND");
+        }
+        if (original.type !== "PRODUCTION_IN") {
+          throw new ServiceError("productionEntryNotCorrectable", "BAD_REQUEST");
+        }
+        if (original.supersededById != null) {
+          throw new ServiceError("productionEntryAlreadyCorrected", "BAD_REQUEST");
+        }
+
+        const unit = original.unit as StockUnit;
+        const sizeId = original.sizeId;
+        const grade = original.grade;
+        const shift = original.shift;
+        const oldQty = new Decimal(original.quantity);
+        if (oldQty.lessThanOrEqualTo(0)) {
+          throw new ServiceError("productionEntryNotCorrectable", "BAD_REQUEST");
+        }
+
+        if (unit === "BUNDLE" && !newQuantity.isInteger()) {
+          throw new ServiceError("bundleCountMustBeInteger");
+        }
+
+        const sameLocation = data.locationId === original.locationId;
+        const sameQuantity = newQuantity.equals(oldQty);
+        if (sameLocation && sameQuantity) {
+          throw new ServiceError("productionCorrectNoChange", "BAD_REQUEST");
+        }
+
+        // Enough stock left at the original bay to reverse this entry.
+        const sourceAgg = await tx.stockMovement.aggregate({
+          where: {
+            locationId: original.locationId,
+            sizeId,
+            unit,
+          },
+          _sum: { quantity: true },
+        });
+        const available = new Decimal(sourceAgg._sum.quantity ?? 0);
+        if (available.lessThan(oldQty)) {
+          throw new ServiceError("productionCorrectInsufficientBalance", "BAD_REQUEST", {
+            locationName: original.location.nameAr,
+            available: available.toString(),
+            needed: oldQty.toString(),
+          });
+        }
+
+        const dest = await tx.stockLocation.findUnique({
+          where: { id: data.locationId },
+          include: { expectedSize: { select: { id: true, displayName: true } } },
+        });
+        if (!dest || dest.isVirtual) {
+          throw new ServiceError("locationNotFound", "NOT_FOUND");
+        }
+        if (!dest.isActive) throw new ServiceError("locationDisabled");
+        if (!trackedUnits(dest.segment).includes(unit)) {
+          throw new ServiceError("inputUnitNotAllowedForLocation");
+        }
+
+        const needsSize = unit === "BUNDLE" || tonNeedsSize(dest.segment);
+        if (needsSize) {
+          if (sizeId == null) throw new ServiceError("sizeRequiredForLocation");
+          if (!dest.allowedGrade) throw new ServiceError("locationGradeUnset");
+
+          // One-size zones: destination must already hold this size, or be
+          // empty (and match expectedSize when configured). Same-bay qty-only
+          // corrections skip the "other size" check against the pre-reverse
+          // balance of this very entry — we evaluate after the reverse below
+          // for same-location, and against current balance for a new bay.
+          if (enforcesOneSize(dest.segment)) {
+            const bundleBalances = await tx.stockMovement.groupBy({
+              by: ["sizeId"],
+              where: {
+                locationId: dest.id,
+                unit: "BUNDLE",
+                sizeId: { not: null },
+              },
+              _sum: { quantity: true },
+            });
+
+            // When correcting away from / onto the same bay, the reverse will
+            // remove `oldQty` of this size from the BUNDLE balance first. For
+            // a different destination bay the reverse does not affect it.
+            let positive = bundleBalances.filter((row) =>
+              new Decimal(row._sum.quantity ?? 0).greaterThan(0),
+            );
+
+            if (sameLocation && unit === "BUNDLE") {
+              positive = positive
+                .map((row) => {
+                  if (row.sizeId !== sizeId) return row;
+                  const remaining = new Decimal(row._sum.quantity ?? 0).minus(oldQty);
+                  return { ...row, _sum: { quantity: remaining } };
+                })
+                .filter((row) => new Decimal(row._sum.quantity ?? 0).greaterThan(0));
+            } else if (sameLocation && unit === "TON") {
+              // Ton reverse does not change BUNDLE occupancy; use as-is.
+            }
+
+            const occupyingSizeId = positive.find((row) => row.sizeId === sizeId)
+              ? sizeId
+              : positive[0]?.sizeId ?? null;
+
+            if (occupyingSizeId != null && sizeId !== occupyingSizeId) {
+              const existing = await tx.sizeLookup.findUnique({
+                where: { id: occupyingSizeId },
+                select: { displayName: true },
+              });
+              throw new ServiceError("locationHasOtherSizeEmptyFirst", "BAD_REQUEST", {
+                locationName: dest.nameAr,
+                sizeName: existing?.displayName ?? "آخر",
+              });
+            }
+
+            if (
+              occupyingSizeId == null &&
+              dest.expectedSizeId != null &&
+              sizeId !== dest.expectedSizeId
+            ) {
+              throw new ServiceError("locationSizeMustMatchExpected", "BAD_REQUEST", {
+                locationName: dest.nameAr,
+                sizeName: dest.expectedSize?.displayName ?? "—",
+              });
+            }
+          }
+        }
+
+        const reverse = await tx.stockMovement.create({
+          data: {
+            locationId: original.locationId,
+            type: "ADJUSTMENT" satisfies StockMovementType,
+            sizeId,
+            grade,
+            quantity: oldQty.negated().toFixed(3),
+            unit,
+            reason,
+            createdById: userId,
+          },
+        });
+
+        const replacement = await tx.stockMovement.create({
+          data: {
+            locationId: dest.id,
+            type: "PRODUCTION_IN" satisfies StockMovementType,
+            sizeId: needsSize ? sizeId : null,
+            grade: needsSize ? dest.allowedGrade : null,
+            quantity: newQuantity.toFixed(3),
+            unit,
+            shift,
+            reason,
+            createdById: userId,
+          },
+        });
+
+        await tx.stockMovement.update({
+          where: { id: original.id },
+          data: { supersededById: replacement.id },
+        });
+
+        await logAudit(tx, {
+          userId,
+          action: "create",
+          entityType: "StockMovement",
+          entityId: String(replacement.id),
+          details: {
+            event: "production_in_correct",
+            originalMovementId: original.id,
+            reverseMovementId: reverse.id,
+            newMovementId: replacement.id,
+            fromLocationId: original.locationId,
+            toLocationId: dest.id,
+            fromLocationCode: original.location.code,
+            toLocationCode: dest.code,
+            sizeId,
+            previousQuantity: oldQty.toNumber(),
+            newQuantity: newQuantity.toNumber(),
+            unit,
+            shift,
+            reason,
+          },
+        });
+
+        return {
+          originalMovementId: original.id,
+          reverseMovementId: reverse.id,
+          newMovementId: replacement.id,
+        };
+      },
+      { isolationLevel: "Serializable" },
+    ),
+  );
+
+  logger.info(
+    {
+      originalMovementId: result.originalMovementId,
+      newMovementId: result.newMovementId,
+      locationId: data.locationId,
+    },
+    "stock production-in corrected",
+  );
+  return result;
 }
 
 // ── Transfer between locations ──────────────────────────────────────────────
@@ -1159,10 +1396,12 @@ export async function listTodayProduction(): Promise<TodayProductionItem[]> {
 
   const rows = await prisma.stockMovement.findMany({
     // Exclude the virtual cross-dock receipts — those are dispatch trail, not
-    // real production entries the clerks are reconciling.
+    // real production entries the clerks are reconciling. Superseded rows are
+    // hidden so a corrected entry does not double-count in the feed.
     where: {
       type: "PRODUCTION_IN",
       createdAt: { gte: start },
+      supersededById: null,
       location: { isVirtual: false },
     },
     orderBy: { createdAt: "desc" },

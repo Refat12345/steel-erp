@@ -96,3 +96,29 @@ export const adjustmentSchema = z.object({
 });
 
 export type AdjustmentInput = z.infer<typeof adjustmentSchema>;
+
+/**
+ * Correct a production-in entry: change quantity and/or storage location.
+ * Unit, size, and shift are taken from the original row (not client-editable).
+ * Reason is mandatory for the audit trail.
+ */
+export const correctProductionInSchema = z.object({
+  movementId: z
+    .number({ message: "productionEntryRequired" })
+    .int()
+    .positive("productionEntryRequired"),
+  locationId: z
+    .number({ message: "locationRequired" })
+    .int()
+    .positive("locationRequired"),
+  quantity: z
+    .number({ message: "quantityRequired" })
+    .positive("quantityMustBePositive"),
+  reason: z
+    .string({ message: "correctionReasonRequired" })
+    .trim()
+    .min(5, "correctionReasonMinLength")
+    .max(500, "reasonTooLong"),
+});
+
+export type CorrectProductionInInput = z.infer<typeof correctProductionInSchema>;

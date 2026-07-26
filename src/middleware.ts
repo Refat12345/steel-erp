@@ -52,7 +52,11 @@ const ROUTE_PERMISSIONS: RouteRule[] = [
   { pattern: /^\/stock\/locations(\/.*)?$/, permissions: ["stock.location.manage"] },
   {
     pattern: /^\/stock\/production-in$/,
-    permissions: ["stock.production.ton", "stock.production.bundle"],
+    permissions: [
+      "stock.production.ton",
+      "stock.production.bundle",
+      "stock.production.correct",
+    ],
   },
   { pattern: /^\/stock\/opening-balance$/, permissions: ["stock.opening_balance"] },
   { pattern: /^\/stock\/transfer$/, permissions: ["stock.transfer"] },
@@ -71,7 +75,16 @@ const ROUTE_PERMISSIONS: RouteRule[] = [
   // can spot duplicate/missing entries even without the full movement-log view.
   {
     pattern: /^\/api\/stock\/production-today$/,
-    permissions: ["stock.production.ton", "stock.production.bundle", "stock.movements.view"],
+    permissions: [
+      "stock.production.ton",
+      "stock.production.bundle",
+      "stock.production.correct",
+      "stock.movements.view",
+    ],
+  },
+  {
+    pattern: /^\/api\/stock\/production-correct$/,
+    permissions: ["stock.production.correct"],
   },
   // Location/balance reads for pickers on production / transfer / adjust —
   // handlers still enforce manage on mutations.
@@ -82,6 +95,7 @@ const ROUTE_PERMISSIONS: RouteRule[] = [
       "stock.movements.view",
       "stock.production.ton",
       "stock.production.bundle",
+      "stock.production.correct",
       "stock.transfer",
       "stock.adjust",
       "stock.opening_balance",

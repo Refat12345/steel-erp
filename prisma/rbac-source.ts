@@ -143,6 +143,14 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
     displayNameEn: "Record production entry in bundles",
     module: "stock",
   },
+  // Correct a production-in row (qty and/or bay). Unassigned to role defaults —
+  // grant per user from the permission matrix.
+  {
+    code: "stock.production.correct",
+    displayName: "تصحيح دخول إنتاج (كمية / موقع)",
+    displayNameEn: "Correct production entry (quantity / location)",
+    module: "stock",
+  },
   { code: "stock.transfer", displayName: "ترحيل مخزون بين المواقع", displayNameEn: "Transfer stock between locations", module: "stock" },
   // Opening-balance is superseded by stock.adjust (kept wired, unassigned).
   {

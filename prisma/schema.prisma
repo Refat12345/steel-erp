@@ -580,6 +580,10 @@ model StockMovement {
   /// the clerk records within the grace window right after a shift boundary.
   shift            StockShift?
   reason           String?
+  /// Set on a PRODUCTION_IN that was corrected: points at the replacement
+  /// PRODUCTION_IN. Quantity/location on this row stay immutable; the row is
+  /// excluded from today's production feed so totals do not double-count.
+  supersededById   Int?              @map("superseded_by_id")
   createdById      Int               @map("created_by_id")
   createdAt        DateTime          @default(now()) @map("created_at")
 
@@ -588,11 +592,14 @@ model StockMovement {
   weighSession   WeighSession?   @relation(fields: [weighSessionId], references: [id])
   truckOperation TruckOperation? @relation(fields: [truckOperationId], references: [id])
   creator        User            @relation("StockMovementCreator", fields: [createdById], references: [id])
+  supersededBy   StockMovement?  @relation("StockMovementSupersede", fields: [supersededById], references: [id])
+  supersedes     StockMovement[] @relation("StockMovementSupersede")
 
   @@index([locationId, sizeId])
   @@index([truckOperationId])
   @@index([transferGroupId])
   @@index([type, createdAt])
+  @@index([supersededById])
   @@map("stock_movements")
 }
 

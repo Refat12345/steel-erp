@@ -17,6 +17,8 @@ const mockPrisma = vi.hoisted(() => ({
     groupBy: vi.fn(),
     aggregate: vi.fn(),
     create: vi.fn(),
+    findUnique: vi.fn(),
+    update: vi.fn(),
   },
   auditLog: { create: vi.fn() },
 }));
@@ -47,6 +49,7 @@ import {
   recordProductionIn,
   recordTransfer,
   recordAdjustment,
+  correctProductionIn,
 } from "./stock.service";
 import { ServiceError } from "./errors";
 
@@ -438,5 +441,118 @@ describe("recordAdjustment — expectedSize on empty bay", () => {
     expect(result.movementId).toBe(100);
     // one-size branch only runs when current ≤ 0
     expect(mockPrisma.stockMovement.groupBy).not.toHaveBeenCalled();
+  });
+});
+
+// ── Production-in correct ───────────────────────────────────────────────────
+
+describe("correctProductionIn — destination one-size", () => {
+  const original = {
+    id: 55,
+    type: "PRODUCTION_IN" as const,
+    locationId: 22,
+    sizeId: SIZE_10.id,
+    grade: "FIRST" as const,
+    quantity: 4,
+    unit: "BUNDLE" as const,
+    shift: "MORNING" as const,
+    supersededById: null,
+    location: {
+      id: 22,
+      code: "A1",
+      nameAr: "A1 أمامية",
+      isVirtual: false,
+    },
+  };
+
+  it("rejects moving to a bay that holds a different size", async () => {
+    const dest = generalLocation({
+      id: 33,
+      code: "B3",
+      nameAr: "B3",
+      expectedSizeId: SIZE_12.id,
+      expectedSize: SIZE_12,
+    });
+    mockPrisma.stockMovement.findUnique.mockResolvedValue(original);
+    mockPrisma.stockMovement.aggregate.mockResolvedValue({
+      _sum: { quantity: 4 },
+    });
+    mockPrisma.stockLocation.findUnique.mockResolvedValue(dest);
+    mockPrisma.stockMovement.groupBy.mockResolvedValue([
+      { sizeId: SIZE_12.id, _sum: { quantity: 8 } },
+    ]);
+
+    await expect(
+      correctProductionIn(
+        {
+          movementId: original.id,
+          locationId: dest.id,
+          quantity: 4,
+          reason: "wrong-bay-size",
+        },
+        USER_ID,
+      ),
+    ).rejects.toMatchObject({
+      messageKey: "locationHasOtherSizeEmptyFirst",
+      params: { locationName: dest.nameAr, sizeName: SIZE_12.displayName },
+    });
+
+    expect(mockPrisma.stockMovement.create).not.toHaveBeenCalled();
+  });
+
+  it("accepts a qty-only correction on the same bay", async () => {
+    const loc = generalLocation();
+    mockPrisma.stockMovement.findUnique.mockResolvedValue(original);
+    mockPrisma.stockMovement.aggregate.mockResolvedValue({
+      _sum: { quantity: 4 },
+    });
+    mockPrisma.stockLocation.findUnique.mockResolvedValue(loc);
+    // After reverse simulation the bay is empty of positive bundles
+    mockPrisma.stockMovement.groupBy.mockResolvedValue([
+      { sizeId: SIZE_10.id, _sum: { quantity: 4 } },
+    ]);
+    mockPrisma.stockMovement.update.mockResolvedValue({});
+
+    const result = await correctProductionIn(
+      {
+        movementId: original.id,
+        locationId: loc.id,
+        quantity: 3,
+        reason: "count-fix",
+      },
+      USER_ID,
+    );
+
+    expect(result.originalMovementId).toBe(55);
+    expect(result.reverseMovementId).toBe(100);
+    expect(result.newMovementId).toBe(101);
+    expect(mockPrisma.stockMovement.create).toHaveBeenCalledTimes(2);
+    expect(mockPrisma.stockMovement.update).toHaveBeenCalledWith({
+      where: { id: 55 },
+      data: { supersededById: 101 },
+    });
+  });
+
+  it("rejects when remaining balance cannot reverse the original entry", async () => {
+    mockPrisma.stockMovement.findUnique.mockResolvedValue(original);
+    mockPrisma.stockMovement.aggregate.mockResolvedValue({
+      _sum: { quantity: 1 },
+    });
+
+    await expect(
+      correctProductionIn(
+        {
+          movementId: original.id,
+          locationId: 33,
+          quantity: 4,
+          reason: "already-loaded",
+        },
+        USER_ID,
+      ),
+    ).rejects.toMatchObject({
+      messageKey: "productionCorrectInsufficientBalance",
+    });
+
+    expect(mockPrisma.stockLocation.findUnique).not.toHaveBeenCalled();
   });
 });

@@ -133,7 +133,11 @@ const navItems: {
     titleKey: "stockProductionIn",
     url: "/stock/production-in",
     icon: PackagePlus,
-    permission: ["stock.production.ton", "stock.production.bundle"],
+    permission: [
+      "stock.production.ton",
+      "stock.production.bundle",
+      "stock.production.correct",
+    ],
   },
   // Opening-balance (/stock/opening-balance) intentionally hidden — stock
   // adjust covers it. Page + guards remain (admin) and can be restored here.
