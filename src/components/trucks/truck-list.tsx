@@ -124,6 +124,7 @@ export function TruckList() {
   const canRegister = sessionHasPermission(session, "truck.register");
   const canEditQueued = sessionHasPermission(session, "truck.edit_queued");
   const canEditApproved = sessionHasPermission(session, "truck.edit_approved");
+  const canViewHistory = sessionHasPermission(session, "truck.view_history");
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -210,39 +211,41 @@ export function TruckList() {
             </Select>
           </div>
 
-          {/* Operational day */}
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-2">
-              <label
-                htmlFor="truck-operational-date"
-                className="text-xs font-medium text-muted-foreground"
-              >
-                {t("operationalDay")}
-              </label>
-              <span className="text-[11px] text-muted-foreground">
-                {t("operationalDayHint")}
-              </span>
+          {/* Operational day — history holders only */}
+          {canViewHistory && (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-2">
+                <label
+                  htmlFor="truck-operational-date"
+                  className="text-xs font-medium text-muted-foreground"
+                >
+                  {t("operationalDay")}
+                </label>
+                <span className="text-[11px] text-muted-foreground">
+                  {t("operationalDayHint")}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="truck-operational-date"
+                  type="date"
+                  className="w-[10.5rem] shrink-0"
+                  value={operationalDate}
+                  min={analyticsStartDate ?? undefined}
+                  onChange={(e) => setOperationalDate(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant={isTodaySelected ? "default" : "outline"}
+                  className="shrink-0"
+                  onClick={() => setOperationalDate(defaultOperationalDateInput())}
+                >
+                  <CalendarDays className="h-4 w-4 me-1" />
+                  {t("today")}
+                </Button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Input
-                id="truck-operational-date"
-                type="date"
-                className="w-[10.5rem] shrink-0"
-                value={operationalDate}
-                min={analyticsStartDate ?? undefined}
-                onChange={(e) => setOperationalDate(e.target.value)}
-              />
-              <Button
-                type="button"
-                variant={isTodaySelected ? "default" : "outline"}
-                className="shrink-0"
-                onClick={() => setOperationalDate(defaultOperationalDateInput())}
-              >
-                <CalendarDays className="h-4 w-4 me-1" />
-                {t("today")}
-              </Button>
-            </div>
-          </div>
+          )}
 
           {/* Count */}
           {operationalDate && (

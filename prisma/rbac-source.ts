@@ -62,6 +62,12 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
   { code: "truck.edit_approved", displayName: "تعديل طلبية شاحنة معتمدة", displayNameEn: "Edit approved truck request", module: "logistics" },
   { code: "truck.view_queue", displayName: "عرض الطابور", displayNameEn: "View queue", module: "logistics" },
   { code: "truck.view_approved", displayName: "عرض المعتمدة فقط", displayNameEn: "View approved only", module: "logistics" },
+  {
+    code: "truck.view_history",
+    displayName: "تصفح أرشيف الشاحنات بالتاريخ",
+    displayNameEn: "Browse truck history by date",
+    module: "logistics",
+  },
   // Finance
   { code: "payment.create", displayName: "إدخال دفعة مالية", displayNameEn: "Record payment", module: "finance" },
   { code: "payment.view", displayName: "عرض الدفعات", displayNameEn: "View payments", module: "finance" },
@@ -104,6 +110,12 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
   { code: "billet.contract.change_status", displayName: "تغيير حالة عقد مورّد", displayNameEn: "Change supplier contract status", module: "purchasing" },
   { code: "billet.contract.upload", displayName: "رفع مرفقات عقد مورّد", displayNameEn: "Upload supplier contract attachments", module: "purchasing" },
   { code: "billet.receipt.view", displayName: "عرض سجلات استلام البيلت", displayNameEn: "View billet receipts", module: "purchasing" },
+  {
+    code: "billet.receipt.view_history",
+    displayName: "تصفح أرشيف استلام البيلت بالتاريخ",
+    displayNameEn: "Browse billet receipt history by date",
+    module: "purchasing",
+  },
   { code: "billet.receipt.register", displayName: "تسجيل شاحنة بيلت مسبقاً", displayNameEn: "Pre-register billet truck", module: "purchasing" },
   { code: "billet.receipt.weigh", displayName: "إدخال وزن البيلت المحمّل", displayNameEn: "Enter loaded billet weight", module: "purchasing" },
   { code: "billet.receipt.unload", displayName: "تفريغ البيلت (صورة + عدّ + مرتجع)", displayNameEn: "Unload billet (photo + count + rejects)", module: "purchasing" },
@@ -285,6 +297,7 @@ export const RBAC_ROLE_PERMISSIONS: Readonly<Record<string, ReadonlyArray<string
     "salesorder.view",
     "truck.view_queue",
     "truck.view_approved",
+    "truck.view_history",
     "payment.view",
     "reports.view",
     "report.daily_trucks",
@@ -294,6 +307,7 @@ export const RBAC_ROLE_PERMISSIONS: Readonly<Record<string, ReadonlyArray<string
     // Billet receiving: owner views supplier contracts and inbound receipts.
     "billet.contract.view",
     "billet.receipt.view",
+    "billet.receipt.view_history",
     // Stock (dark-launched): owner will see the yard map/balances (read-only)
     // at release. `stock.view` is NOT a default while STOCK_MODULE_ENABLED is
     // off, and the movements ledger (`stock.movements.view`) is never a

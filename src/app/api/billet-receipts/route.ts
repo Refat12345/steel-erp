@@ -11,6 +11,7 @@ import {
 } from "@/lib/api-utils";
 import {
   getOperationalDayWindow,
+  resolveOperationalListDate,
   type OperationalDayWindow,
 } from "@/lib/operational-day";
 import { registerReceiptSchema } from "@/lib/validators/billet-receipt";
@@ -29,15 +30,18 @@ export async function GET(req: NextRequest) {
   const supplierContractNumber = searchParams.get("contractNumber") || "";
   const operationalDate = searchParams.get("operationalDate");
   const pagination = parsePagination(searchParams);
+  const canViewHistory = hasPermission(session, "billet.receipt.view_history");
 
   try {
+    const resolved = resolveOperationalListDate(operationalDate, canViewHistory);
+    if (!resolved.ok) {
+      if (resolved.reason === "historyForbidden") return forbidden();
+      return badRequest("invalidOperationalDate");
+    }
+
     let window: OperationalDayWindow | null = null;
-    if (operationalDate) {
-      try {
-        window = getOperationalDayWindow(operationalDate);
-      } catch {
-        return badRequest("invalidOperationalDate");
-      }
+    if (resolved.date) {
+      window = getOperationalDayWindow(resolved.date);
     }
 
     const [result, analyticsStartDate] = await Promise.all([

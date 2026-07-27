@@ -259,6 +259,48 @@ export function defaultOperationalDateInput(
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * Resolve the operational date for list endpoints (trucks / billet receipts).
+ *
+ * - Without history permission: always today's operational day. A non-today
+ *   request is rejected (`historyForbidden`). Missing date → today.
+ * - With history permission: honor the requested date, or `null` (no date
+ *   filter) when omitted — preserving the previous open-ended list behavior.
+ */
+export function resolveOperationalListDate(
+  requestedDate: string | null | undefined,
+  canViewHistory: boolean,
+  now: Date = new Date(),
+):
+  | { ok: true; date: string | null }
+  | { ok: false; reason: "invalidOperationalDate" | "historyForbidden" } {
+  const today = defaultOperationalDateInput(now);
+
+  if (!canViewHistory) {
+    if (requestedDate) {
+      try {
+        parseOperationalDateInput(requestedDate);
+      } catch {
+        return { ok: false, reason: "invalidOperationalDate" };
+      }
+      if (requestedDate !== today) {
+        return { ok: false, reason: "historyForbidden" };
+      }
+    }
+    return { ok: true, date: today };
+  }
+
+  if (!requestedDate) {
+    return { ok: true, date: null };
+  }
+  try {
+    parseOperationalDateInput(requestedDate);
+  } catch {
+    return { ok: false, reason: "invalidOperationalDate" };
+  }
+  return { ok: true, date: requestedDate };
+}
+
 export function formatOperationalWindowLabel(window: OperationalDayWindow): string {
   return `${formatDateTime(window.from)} → ${formatDateTime(window.to)}`;
 }
