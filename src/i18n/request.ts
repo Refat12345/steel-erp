@@ -7,8 +7,8 @@ import { DEFAULT_LOCALE, LOCALE_COOKIE, isLocale } from "./config";
  *
  * The locale comes from the NEXT_LOCALE cookie only — URLs are never
  * localized, so existing links and the RBAC middleware stay untouched.
- * The cookie is written by /api/user/locale (which also persists the
- * preference to User.locale for future sessions/devices).
+ * The cookie is written by /api/locale (anonymous, cookie only — e.g. login)
+ * or /api/user/locale (authenticated — also persists User.locale).
  */
 export default getRequestConfig(async () => {
   const store = await cookies();

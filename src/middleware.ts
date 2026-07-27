@@ -132,7 +132,7 @@ const ROUTE_PERMISSIONS: RouteRule[] = [
   { pattern: /^\/api\/analytics(\/.*)?$/, permissions: ["dashboard.view"] },
 ];
 
-const PUBLIC_PATHS = new Set(["/login", "/forbidden"]);
+const PUBLIC_PATHS = new Set(["/login", "/forbidden", "/api/locale"]);
 
 function isPublicPath(pathname: string): boolean {
   const normalized =
@@ -230,7 +230,11 @@ export const config = {
     // Exclude:
     //   - Next.js asset paths
     //   - favicon / PWA icons (must be public — browsers fetch before auth)
+    //   - /images/*         — public marketing/brand assets (login hero, etc.)
+    //   - common static extensions under /public (webp/png/…) so unauthenticated
+    //     pages like /login can load decorative images without a login redirect
     //   - /api/auth/*       — NextAuth handles its own session flows
+    //   - /api/locale       — public cookie-only language switch (login page)
     //   - /api/health       — public liveness probe (PM2 + monitoring)
     //   - /api/maintenance/cleanup-idempotency
     //       This endpoint is invoked by an unauthenticated cron job that
@@ -240,6 +244,6 @@ export const config = {
     //       the endpoint remains protected even though middleware is skipped.
     //       Without this exemption, the bearer-only cron path is rejected
     //       at Layer 1 with 401 before the handler ever runs.
-    "/((?!_next/static|_next/image|favicon.ico|apple-icon.png|steeltech-logo.png|api/auth|api/health|api/maintenance/cleanup-idempotency).*)",
+    "/((?!_next/static|_next/image|favicon.ico|apple-icon.png|steeltech-logo.png|images/|.*\\.(?:webp|png|jpg|jpeg|gif|svg|ico|woff2?)(?:\\?.*)?$|api/auth|api/locale|api/health|api/maintenance/cleanup-idempotency).*)",
   ],
 };

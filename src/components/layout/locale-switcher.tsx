@@ -1,24 +1,36 @@
 "use client";
 
 import { useState } from "react";
+import { useSession } from "next-auth/react";
 import { useLocale, useTranslations } from "next-intl";
 import { Languages, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type { Locale } from "@/i18n/config";
 
+type LocaleSwitcherProps = {
+  /** Dark login surfaces need lighter ghost styling */
+  variant?: "default" | "on-dark";
+  className?: string;
+};
+
 /**
- * Toggles the UI language between Arabic and English. Persists the
- * preference (cookie + User.locale) via /api/user/locale, then does a full
- * reload so <html lang/dir> and all server components re-render in the new
- * locale.
+ * Toggles the UI language between Arabic and English.
+ * - Authenticated: PUT /api/user/locale (cookie + User.locale)
+ * - Anonymous (login): PUT /api/locale (cookie only)
+ * Then full reload so <html lang/dir> and server components refresh.
  *
  * Shown by default (phase 7). Hidden only when LANGUAGE_SWITCHER_ENABLED=false
  * (emergency kill-switch — see feature-flags.ts).
  */
-export function LocaleSwitcher() {
+export function LocaleSwitcher({
+  variant = "default",
+  className,
+}: LocaleSwitcherProps) {
   const locale = useLocale() as Locale;
   const t = useTranslations("common");
+  const { status } = useSession();
   const [isPending, setIsPending] = useState(false);
 
   const target: Locale = locale === "ar" ? "en" : "ar";
@@ -27,7 +39,9 @@ export function LocaleSwitcher() {
   async function switchLocale() {
     setIsPending(true);
     try {
-      const res = await fetch("/api/user/locale", {
+      const endpoint =
+        status === "authenticated" ? "/api/user/locale" : "/api/locale";
+      const res = await fetch(endpoint, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ locale: target }),
@@ -45,11 +59,17 @@ export function LocaleSwitcher() {
       variant="ghost"
       size="sm"
       onClick={() => void switchLocale()}
-      disabled={isPending}
+      disabled={isPending || status === "loading"}
       aria-label={t("language")}
-      className="gap-1.5 text-muted-foreground"
+      className={cn(
+        "gap-1.5",
+        variant === "on-dark"
+          ? "text-white/75 hover:bg-white/10 hover:text-white"
+          : "text-muted-foreground",
+        className,
+      )}
     >
-      {isPending ? (
+      {isPending || status === "loading" ? (
         <Loader2 className="h-4 w-4 animate-spin" />
       ) : (
         <Languages className="h-4 w-4" />

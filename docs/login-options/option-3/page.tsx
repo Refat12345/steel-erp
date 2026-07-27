@@ -17,6 +17,27 @@ import { Label } from "@/components/ui/label";
 import { BrandWordmark } from "@/components/layout/brand-wordmark";
 import { LoginForgeScene } from "@/components/auth/login-forge-scene";
 
+function FdMonogram({ size = "md" }: { size?: "md" | "lg" }) {
+  const tBrand = useTranslations("brand");
+  const box = size === "lg" ? "h-[4.25rem] w-[4.25rem]" : "h-14 w-14";
+  const type = size === "lg" ? "text-[18px]" : "text-[15px]";
+
+  return (
+    <div
+      className={`auth-login-brand-icon relative flex items-center justify-center rounded-2xl ${box}`}
+      aria-hidden
+    >
+      <span className="auth-login-brand-orbit" />
+      <span
+        className={`auth-login-monogram relative z-[1] font-bold tracking-[0.16em] ${type}`}
+        dir="ltr"
+      >
+        {tBrand("monogram")}
+      </span>
+    </div>
+  );
+}
+
 export default function LoginPage() {
   const t = useTranslations("auth");
   const tBrand = useTranslations("brand");
@@ -78,32 +99,41 @@ export default function LoginPage() {
         <div className="auth-login-seam" />
 
         <div className="auth-login-enter-brand relative z-10 max-w-md">
-          <h1 className="leading-none">
+          <FdMonogram size="md" />
+          <h1 className="mt-9 leading-none">
             <BrandWordmark
               size="lg"
               variant="on-dark"
-              className="text-[2.35rem] drop-shadow-[0_2px_16px_rgba(0,0,0,0.45)]"
+              className="text-[2.35rem]"
             />
           </h1>
-          <p className="auth-login-brand-subtitle mt-4 max-w-[22rem] text-[15px] leading-relaxed font-semibold">
+          <p className="auth-login-brand-subtitle mt-4 max-w-[22rem] text-[15px] leading-relaxed font-medium">
             {tBrand("tagline")}
           </p>
-          <p className="auth-login-hero-support mt-2 max-w-[22rem] text-[13px] leading-relaxed">
+          <p className="auth-login-panel-subtitle mt-2 max-w-[22rem] text-[13px] leading-relaxed">
             {tBrand("heroSupport")}
           </p>
         </div>
 
         <div className="auth-login-enter-footer relative z-10">
           <div className="auth-login-status-line mb-4 h-px w-16" />
-          <p className="auth-login-footer text-xs">
+          <p className="auth-login-ambient text-[12px] font-medium tracking-[0.04em]">
+            {t("ambient")}
+          </p>
+          <p className="auth-login-footer mt-6 text-xs">
             {tBrand("footer")} · {new Date().getFullYear()}
           </p>
         </div>
       </aside>
 
-      {/* Mobile atmosphere — compact illustrated scene */}
+      {/* Mobile atmosphere — compact scene */}
       <div className="auth-login-mobile-scene pointer-events-none absolute inset-0 lg:hidden">
-        <LoginForgeScene idPrefix="auth-mob" monogram={monogram} compact />
+        <LoginForgeScene
+          idPrefix="auth-mob"
+          monogram={monogram}
+          compact
+        />
+        <div className="auth-login-dot-grid absolute inset-0 opacity-40" />
       </div>
 
       {/* Form panel */}
@@ -120,19 +150,16 @@ export default function LoginPage() {
         </span>
 
         <div className="relative w-full max-w-[25rem]">
-          <div className="auth-login-enter-brand mb-8 flex flex-col items-center gap-3 lg:hidden">
+          <div className="auth-login-enter-brand mb-8 flex flex-col items-center gap-4 lg:hidden">
+            <FdMonogram size="lg" />
             <div className="max-w-[20rem] text-center">
               <h1 className="leading-none">
-                <BrandWordmark
-                  size="lg"
-                  variant="on-dark"
-                  className="drop-shadow-[0_2px_14px_rgba(0,0,0,0.5)]"
-                />
+                <BrandWordmark size="lg" variant="on-dark" />
               </h1>
-              <p className="auth-login-brand-subtitle mt-1.5 text-[13px] leading-snug font-semibold">
+              <p className="auth-login-brand-subtitle mt-1.5 text-[13px] leading-snug font-medium">
                 {tBrand("tagline")}
               </p>
-              <p className="auth-login-hero-support mt-1 text-[12px] leading-relaxed">
+              <p className="auth-login-panel-subtitle mt-1 text-[12px] leading-relaxed">
                 {tBrand("heroSupport")}
               </p>
             </div>

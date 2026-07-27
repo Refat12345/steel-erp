@@ -11,14 +11,16 @@
     "retry": "إعادة المحاولة"
   },
   "brand": {
-    "tagline": "نظام إدارة المصنع — ERP",
-    "metadataTitle": "steelTech | نظام ERP",
-    "metadataDescription": "نظام إدارة مصنع الحديد — ERP",
-    "header": "steelTech · نظام ERP",
+    "tagline": "سجل واحد حيّ لكل المصنع.",
+    "heroSupport": "ادخل بحساب المصنع. الوصول يتبع دورك.",
+    "metadataTitle": "steelTech",
+    "metadataDescription": "نظام إدارة مصنع الحديد",
+    "header": "steelTech",
     "welcome": "مرحباً بك في نظام steelTech",
-    "footer": "steelTech · نظام ERP",
-    "sidebarSubtitle": "نظام ERP",
-    "helloName": "أهلاً، <highlight>{name}</highlight>"
+    "footer": "steelTech",
+    "sidebarSubtitle": "نظام المصنع",
+    "helloName": "أهلاً، <highlight>{name}</highlight>",
+    "monogram": "FD"
   },
   "nav": {
     "dashboard": "لوحة المؤشرات",
@@ -42,7 +44,8 @@
   },
   "auth": {
     "title": "تسجيل الدخول",
-    "subtitle": "أدخل بيانات حسابك للمتابعة",
+    "subtitle": "أدخل اسم المستخدم وكلمة المرور للمتابعة.",
+    "ambient": "عقود · قبان · ساحات",
     "username": "اسم المستخدم",
     "usernamePlaceholder": "اسم المستخدم",
     "password": "كلمة المرور",

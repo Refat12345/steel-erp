@@ -1,0 +1,33 @@
+---
+description: Login page Option 3 snapshot — restore when user asks for خيار 3 / option 3
+globs:
+  - src/app/(auth)/login/**
+  - src/components/auth/**
+alwaysApply: false
+---
+
+# Login page — Option 3 (saved baseline)
+
+When the user says **ارجع للخيار 3** / **restore option 3** / **خيار رقم 3**, restore from:
+
+`docs/login-options/option-3/`
+
+## What Option 3 is
+
+Flagship split login ("Mill Gate"):
+- Desktop: left visual panel + right form
+- `LoginForgeScene` (rebar SVG, furnace, FD watermark)
+- FD monogram badge (not above Sign in title)
+- Marketing copy: gate→weighbridge headline, heroSupport, ambient module strip
+- No FD kicker above the form "Sign in" heading
+
+## Restore steps
+
+1. Copy `page.tsx` → `src/app/(auth)/login/page.tsx`
+2. Copy `login-forge-scene.tsx` → `src/components/auth/login-forge-scene.tsx`
+3. In `src/app/globals.css`:
+   - Replace the `:root` Auth/Login token block with `login-tokens.css`
+   - Replace the Auth/Login component+keyframes block (Flagship Mill Gate through before ERP Utility Classes) with `login-styles.css`
+4. Merge keys from `i18n-login-keys.json` into `messages/en.json` and `messages/ar.json` (`brand.tagline`, `brand.heroSupport`, `brand.monogram`, `auth.subtitle`, `auth.ambient`)
+
+Do not invent a different design when restoring Option 3 — use the snapshot files.

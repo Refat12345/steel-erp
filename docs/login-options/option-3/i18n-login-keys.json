@@ -1,0 +1,28 @@
+{
+  "en": {
+    "brand": {
+      "tagline": "From gate to weighbridge — one live record.",
+      "heroSupport": "Sign in with your plant account. Permissions follow your role.",
+      "monogram": "FD",
+      "footer": "steelTech"
+    },
+    "auth": {
+      "title": "Sign in",
+      "subtitle": "Enter your username and password to continue.",
+      "ambient": "Contracts · Weighbridge · Stock yards"
+    }
+  },
+  "ar": {
+    "brand": {
+      "tagline": "من البوابة للقبان — سجل واحد حيّ.",
+      "heroSupport": "ادخل بحسابك في المصنع. الصلاحيات تتبع دورك.",
+      "monogram": "FD",
+      "footer": "steelTech"
+    },
+    "auth": {
+      "title": "تسجيل الدخول",
+      "subtitle": "أدخل اسم المستخدم وكلمة المرور للمتابعة.",
+      "ambient": "عقود · قبان · ساحات"
+    }
+  }
+}
