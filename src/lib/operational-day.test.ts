@@ -6,6 +6,7 @@ import {
   defaultOperationalDateInput,
   getOperationalDayWindow,
   parseOperationalDateInput,
+  resolveOperationalListDate,
   resolveReportTonnageStatus,
 } from "./operational-day";
 
@@ -102,5 +103,70 @@ describe("defaultOperationalDateInput", () => {
   it("returns same calendar day at or after cutoff hour", () => {
     const now = new Date(2026, 4, 24, 9, 0, 0, 0);
     expect(defaultOperationalDateInput(now)).toBe("2026-05-24");
+  });
+});
+
+describe("resolveOperationalListDate", () => {
+  const now = new Date(2026, 4, 24, 10, 0, 0, 0); // today = 2026-05-24
+
+  it("forces today when history is not allowed and date is omitted", () => {
+    expect(resolveOperationalListDate(null, false, now)).toEqual({
+      ok: true,
+      date: "2026-05-24",
+    });
+  });
+
+  it("allows today when history is not allowed", () => {
+    expect(resolveOperationalListDate("2026-05-24", false, now)).toEqual({
+      ok: true,
+      date: "2026-05-24",
+    });
+  });
+
+  it("rejects a past date when history is not allowed", () => {
+    expect(resolveOperationalListDate("2026-05-20", false, now)).toEqual({
+      ok: false,
+      reason: "historyForbidden",
+    });
+  });
+
+  it("allows any valid date when history is allowed", () => {
+    expect(resolveOperationalListDate("2026-05-20", true, now)).toEqual({
+      ok: true,
+      date: "2026-05-20",
+    });
+  });
+
+  it("returns null date (no filter) when history is allowed and date omitted", () => {
+    expect(resolveOperationalListDate(null, true, now)).toEqual({
+      ok: true,
+      date: null,
+    });
+  });
+
+  it("rejects invalid dates", () => {
+    expect(resolveOperationalListDate("not-a-date", false, now)).toEqual({
+      ok: false,
+      reason: "invalidOperationalDate",
+    });
+  });
+
+  it("uses previous calendar day as today before the 08:00 cutoff", () => {
+    const beforeCutoff = new Date(2026, 4, 24, 7, 0, 0, 0); // today = 2026-05-23
+    expect(resolveOperationalListDate("2026-05-23", false, beforeCutoff)).toEqual({
+      ok: true,
+      date: "2026-05-23",
+    });
+    expect(resolveOperationalListDate("2026-05-24", false, beforeCutoff)).toEqual({
+      ok: false,
+      reason: "historyForbidden",
+    });
+  });
+
+  it("rejects a future operational date without history permission", () => {
+    expect(resolveOperationalListDate("2026-05-25", false, now)).toEqual({
+      ok: false,
+      reason: "historyForbidden",
+    });
   });
 });

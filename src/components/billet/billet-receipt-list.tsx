@@ -78,6 +78,10 @@ export function BilletReceiptList() {
   const isRtl = dir === "rtl";
   const { data: session } = useSession();
   const canRegister = sessionHasPermission(session, "billet.receipt.register");
+  const canViewHistory = sessionHasPermission(
+    session,
+    "billet.receipt.view_history",
+  );
   const router = useRouter();
   const [receipts, setReceipts] = useState<ReceiptItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -175,38 +179,40 @@ export function BilletReceiptList() {
             </Select>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-2">
-              <label
-                htmlFor="billet-operational-date"
-                className="text-xs font-medium text-muted-foreground"
-              >
-                {t("receipts.operationalDay")}
-              </label>
-              <span className="text-[11px] text-muted-foreground">
-                {t("receipts.operationalDayHint")}
-              </span>
+          {canViewHistory && (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-2">
+                <label
+                  htmlFor="billet-operational-date"
+                  className="text-xs font-medium text-muted-foreground"
+                >
+                  {t("receipts.operationalDay")}
+                </label>
+                <span className="text-[11px] text-muted-foreground">
+                  {t("receipts.operationalDayHint")}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="billet-operational-date"
+                  type="date"
+                  className="w-[10.5rem] shrink-0"
+                  value={operationalDate}
+                  min={analyticsStartDate ?? undefined}
+                  onChange={(e) => setOperationalDate(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant={isTodaySelected ? "default" : "outline"}
+                  className="shrink-0"
+                  onClick={() => setOperationalDate(defaultOperationalDateInput())}
+                >
+                  <CalendarDays className="h-4 w-4 me-1" />
+                  {t("receipts.today")}
+                </Button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Input
-                id="billet-operational-date"
-                type="date"
-                className="w-[10.5rem] shrink-0"
-                value={operationalDate}
-                min={analyticsStartDate ?? undefined}
-                onChange={(e) => setOperationalDate(e.target.value)}
-              />
-              <Button
-                type="button"
-                variant={isTodaySelected ? "default" : "outline"}
-                className="shrink-0"
-                onClick={() => setOperationalDate(defaultOperationalDateInput())}
-              >
-                <CalendarDays className="h-4 w-4 me-1" />
-                {t("receipts.today")}
-              </Button>
-            </div>
-          </div>
+          )}
 
           {operationalDate && (
             <Badge

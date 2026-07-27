@@ -12,6 +12,7 @@ import {
 import { withIdempotency, readJsonBody } from "@/lib/idempotency";
 import {
   getOperationalDayWindow,
+  resolveOperationalListDate,
   type OperationalDayWindow,
 } from "@/lib/operational-day";
 import { truckRegisterSchema } from "@/lib/validators/truck";
@@ -35,15 +36,18 @@ export async function GET(req: NextRequest) {
   const status = searchParams.get("status") as TruckStatus | null;
   const plateNumber = searchParams.get("plateNumber");
   const operationalDate = searchParams.get("operationalDate");
+  const canViewHistory = hasPermission(session, "truck.view_history");
 
   try {
+    const resolved = resolveOperationalListDate(operationalDate, canViewHistory);
+    if (!resolved.ok) {
+      if (resolved.reason === "historyForbidden") return forbidden();
+      return badRequest("invalidOperationalDate");
+    }
+
     let window: OperationalDayWindow | null = null;
-    if (operationalDate) {
-      try {
-        window = getOperationalDayWindow(operationalDate);
-      } catch {
-        return badRequest("invalidOperationalDate");
-      }
+    if (resolved.date) {
+      window = getOperationalDayWindow(resolved.date);
     }
 
     const locale = await getRequestLocale();
