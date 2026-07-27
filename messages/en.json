@@ -11,14 +11,16 @@
     "retry": "Try again"
   },
   "brand": {
-    "tagline": "Factory management system — ERP",
-    "metadataTitle": "steelTech | ERP",
-    "metadataDescription": "Steel factory ERP system",
-    "header": "steelTech · ERP",
+    "tagline": "One live record for the whole mill.",
+    "heroSupport": "Sign in with your plant account. Access follows your role.",
+    "metadataTitle": "steelTech",
+    "metadataDescription": "Steel factory management system",
+    "header": "steelTech",
     "welcome": "Welcome to the steelTech system",
-    "footer": "steelTech · ERP",
-    "sidebarSubtitle": "ERP System",
-    "helloName": "Hello, <highlight>{name}</highlight>"
+    "footer": "steelTech",
+    "sidebarSubtitle": "Factory system",
+    "helloName": "Hello, <highlight>{name}</highlight>",
+    "monogram": "FD"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -42,7 +44,8 @@
   },
   "auth": {
     "title": "Sign in",
-    "subtitle": "Enter your account credentials to continue",
+    "subtitle": "Enter your username and password to continue.",
+    "ambient": "Contracts · Weighbridge · Stock yards",
     "username": "Username",
     "usernamePlaceholder": "Username",
     "password": "Password",
