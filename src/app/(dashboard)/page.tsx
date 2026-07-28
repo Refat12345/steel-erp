@@ -95,28 +95,17 @@ export default async function DashboardPage() {
     <div className="space-y-8">
 
       {/* ── Greeting Banner ─────────────────────────────────────────── */}
-      <div className="animate-in fade-in-0 slide-in-from-bottom-2 duration-500 flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+      <div className="dash-greeting animate-in fade-in-0 slide-in-from-bottom-2 duration-500 flex flex-col gap-4 rounded-xl border p-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
-          <div
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"
-            style={{
-              background: "oklch(0.390 0.130 232 / 12%)",
-              boxShadow: "inset 0 0 0 1px oklch(0.390 0.130 232 / 22%)",
-            }}
-          >
-            <Factory
-              className="h-6 w-6"
-              style={{ color: "oklch(0.390 0.130 232)" }}
-            />
+          <div className="dash-greeting-mark flex h-12 w-12 shrink-0 items-center justify-center rounded-xl">
+            <Factory className="h-6 w-6" />
           </div>
           <div>
             <h2 className="text-xl font-bold tracking-tight">
               {tBrand.rich("helloName", {
                 name: userName,
                 highlight: (chunks) => (
-                  <span style={{ color: "oklch(0.390 0.130 232)" }}>
-                    {chunks}
-                  </span>
+                  <span className="text-sidebar-primary">{chunks}</span>
                 ),
               })}
             </h2>
@@ -127,14 +116,7 @@ export default async function DashboardPage() {
         </div>
 
         <div className="flex items-center gap-3 sm:flex-col sm:items-end sm:gap-2">
-          <span
-            className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold"
-            style={{
-              background: "oklch(0.390 0.130 232 / 10%)",
-              color: "oklch(0.390 0.130 232)",
-              boxShadow: "inset 0 0 0 1px oklch(0.390 0.130 232 / 22%)",
-            }}
-          >
+          <span className="dash-role-pill inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold">
             {roleLabel}
           </span>
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -146,11 +128,11 @@ export default async function DashboardPage() {
 
       {/* ── Section Label ────────────────────────────────────────────── */}
       <div className="animate-in fade-in-0 duration-500 delay-75 flex items-center gap-3">
-        <LayoutDashboard className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+        <LayoutDashboard className="h-3.5 w-3.5 shrink-0 text-sidebar-primary/70" />
+        <span className="dash-section-label text-xs font-semibold uppercase tracking-widest">
           {tDashboard("title")}
         </span>
-        <div className="h-px flex-1 bg-border" />
+        <div className="dash-section-rule h-px flex-1" />
       </div>
 
       {/* ── Charts + KPIs (client component) ────────────────────────── */}
