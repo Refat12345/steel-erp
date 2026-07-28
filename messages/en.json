@@ -449,6 +449,8 @@
       "topCustomers": "Top 5 customers ({period})",
       "topDestinations": "Top 5 destinations ({period})",
       "totalTonsDelivered": "Total tons delivered",
+      "rankTooltipTons": "Tons delivered: {tons}",
+      "rankTooltipPlace": "Rank: {rank}",
       "tonsByKind": "Tons by material kind",
       "tonsByKindSub": "Session weight totals by size",
       "fleetByStatus": "Trucks by status",
@@ -481,7 +483,8 @@
       "noTrucks": "No trucks registered yet",
       "noPayments30d": "No payments in the last 30 days",
       "noPaymentData": "No payment data",
-      "noPayments": "No payments"
+      "noPayments": "No payments",
+      "hint": "Data will appear here once there is activity in the selected period"
     },
     "table": {
       "plateNumber": "Plate number",

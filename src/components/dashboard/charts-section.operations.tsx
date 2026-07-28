@@ -43,6 +43,7 @@ import {
 import {
   Activity,
   AlertTriangle,
+  BarChart3,
   CheckCircle2,
   Gauge,
   MapPin,
@@ -248,24 +249,27 @@ const timeFormatter = new Intl.DateTimeFormat("en-GB-u-nu-latn", {
   hour12: false,
 });
 
+/** SteelTech chart palette — cyan / steel / slate (no purple-pink SaaS set). */
 const KIND_COLORS: Record<string, string> = {
-  REBAR: "#3b82f6",
-  SHORTBAR_1_4M: "#8b5cf6",
-  SHORTBAR_4_12M: "#a855f7",
-  SCRAP: "#f97316",
-  BILLET_WIRE: "#14b8a6",
-  REBAR_UNDER_70CM: "#a855f7",
-  BILLET_SCRAP_10M: "#f97316",
-  SCRAP_50CM_1M: "#84cc16",
+  REBAR: "oklch(0.520 0.140 222)",
+  SHORTBAR_1_4M: "oklch(0.450 0.100 232)",
+  SHORTBAR_4_12M: "oklch(0.580 0.110 210)",
+  SCRAP: "oklch(0.620 0.120 70)",
+  BILLET_WIRE: "oklch(0.550 0.090 195)",
+  REBAR_UNDER_70CM: "oklch(0.480 0.080 240)",
+  BILLET_SCRAP_10M: "oklch(0.600 0.100 55)",
+  SCRAP_50CM_1M: "oklch(0.560 0.070 160)",
 };
 
 const TOP_BAR_COLORS = [
-  "#3b82f6",
-  "#6366f1",
-  "#8b5cf6",
-  "#a855f7",
-  "#ec4899",
+  "oklch(0.620 0.130 222)",
+  "oklch(0.580 0.110 232)",
+  "oklch(0.650 0.100 210)",
+  "oklch(0.560 0.070 240)",
+  "oklch(0.600 0.090 200)",
 ];
+
+type KpiTone = "brand" | "success" | "warning" | "danger";
 
 // ─── Reusable bits ─────────────────────────────────────────────────────
 
@@ -278,11 +282,11 @@ function SectionLabel({
 }) {
   return (
     <div className="flex items-center gap-3">
-      <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-      <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+      <Icon className="h-3.5 w-3.5 shrink-0 text-sidebar-primary/70" />
+      <span className="dash-section-label text-xs font-semibold uppercase tracking-widest">
         {label}
       </span>
-      <div className="h-px flex-1 bg-border" />
+      <div className="dash-section-rule h-px flex-1" />
     </div>
   );
 }
@@ -508,9 +512,7 @@ function KpiCard({
   trendCompareLabel,
   sub,
   icon: Icon,
-  color,
-  colorBg,
-  colorRing,
+  tone = "brand",
 }: {
   title: string;
   value: string;
@@ -520,9 +522,7 @@ function KpiCard({
   trendCompareLabel?: string;
   sub: string;
   icon: React.ElementType;
-  color: string;
-  colorBg: string;
-  colorRing: string;
+  tone?: KpiTone;
 }) {
   const t = useTranslations("dashboard");
   const animated = useCountUp(numericValue ?? null);
@@ -532,30 +532,25 @@ function KpiCard({
       : value;
 
   return (
-    <Card className="group gap-0 overflow-hidden pt-0 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
+    <Card className="dash-kpi group relative gap-0 overflow-hidden border shadow-none">
       <div
-        className="h-[3px] w-full shrink-0 transition-all duration-300 group-hover:h-1"
-        style={{ background: color }}
+        aria-hidden
+        className="dash-kpi-accent absolute inset-y-3 start-0 w-[3px] rounded-full"
+        data-tone={tone === "brand" ? undefined : tone}
       />
-      <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2 pt-5">
+      <CardHeader className="flex flex-row items-start justify-between gap-2 ps-4 pb-2 pt-5">
         <CardTitle className="text-sm font-medium leading-snug text-muted-foreground">
           {title}
         </CardTitle>
         <div
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-transform duration-300 group-hover:scale-110"
-          style={{
-            background: colorBg,
-            boxShadow: `inset 0 0 0 1px ${colorRing}`,
-          }}
+          className="dash-kpi-icon flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+          data-tone={tone === "brand" ? undefined : tone}
         >
-          <Icon className="h-4 w-4" style={{ color }} />
+          <Icon className="h-4 w-4" />
         </div>
       </CardHeader>
-      <CardContent className="pb-5">
-        <div
-          className="financial-value text-3xl font-bold tracking-tight tabular-nums"
-          style={{ color }}
-        >
+      <CardContent className="ps-4 pb-5">
+        <div className="financial-value text-3xl font-bold tracking-tight tabular-nums text-foreground">
           {display}
         </div>
         <TrendBadge
@@ -578,9 +573,16 @@ function ChartSkeleton({ h = 240 }: { h?: number }) {
 }
 
 function EmptyState({ label }: { label: string }) {
+  const t = useTranslations("dashboard");
   return (
-    <div className="flex h-52 items-center justify-center text-xs text-muted-foreground">
-      {label}
+    <div className="dash-empty flex h-52 flex-col items-center justify-center gap-2 rounded-xl px-4 text-center">
+      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sidebar-primary/10 text-sidebar-primary">
+        <BarChart3 className="h-5 w-5" />
+      </div>
+      <p className="text-sm font-medium text-foreground/80">{label}</p>
+      <p className="max-w-[16rem] text-[11px] leading-relaxed text-muted-foreground">
+        {t("empty.hint")}
+      </p>
     </div>
   );
 }
@@ -613,7 +615,7 @@ function PeriodToggle({
                   className={[
                     "px-3 py-1.5 text-xs font-semibold rounded-md transition-all",
                     active
-                      ? "bg-primary text-primary-foreground shadow-sm"
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground",
                     disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
                   ].join(" ")}
@@ -677,32 +679,74 @@ function TonsBarTooltip({
   );
 }
 
-function TruncatedYTick({
-  x,
-  y,
-  payload,
-  maxChars = 10,
+/**
+ * Ranked bars built with CSS (not Recharts). Recharts horizontal BarCharts
+ * mis-place category labels under `dir=rtl` on the page — names end up on
+ * top of the bars in Arabic. Flex + logical properties mirror correctly
+ * in both locales and keep full names readable via truncate + title.
+ */
+function RankBarList({
+  data,
+  colorOffset = 0,
 }: {
-  x?: number;
-  y?: number;
-  payload?: { value: string };
-  maxChars?: number;
+  data: { name: string; tons: number }[];
+  colorOffset?: number;
 }) {
-  const raw = payload?.value ?? "";
-  const text = raw.length > maxChars ? raw.slice(0, maxChars) + "…" : raw;
+  const t = useTranslations("dashboard");
+  const tonsUnit = t("units.tons");
+  const maxTons = Math.max(...data.map((d) => d.tons), 1);
+
   return (
-    <g transform={`translate(${x},${y})`}>
-      <text
-        x={0}
-        y={0}
-        dy={4}
-        textAnchor="end"
-        fill="hsl(var(--muted-foreground))"
-        fontSize={10}
-      >
-        {text}
-      </text>
-    </g>
+    <ul className="flex min-h-[220px] flex-col justify-center gap-3.5 py-1">
+      {data.map((row, i) => {
+        const pct = Math.max(4, (row.tons / maxTons) * 100);
+        const color =
+          TOP_BAR_COLORS[(i + colorOffset) % TOP_BAR_COLORS.length];
+        const tonsLabel = formatTons(row.tons, tonsUnit);
+        return (
+          <li key={`${row.name}-${i}`}>
+            <UiTooltip>
+              <TooltipTrigger
+                render={
+                  <div
+                    className="grid w-full cursor-help grid-cols-[minmax(0,9.5rem)_1fr_auto] items-center gap-3 rounded-md px-1 py-0.5 transition-colors hover:bg-muted/50 sm:grid-cols-[minmax(0,11rem)_1fr_auto]"
+                  />
+                }
+              >
+                <span className="truncate text-start text-xs font-semibold text-foreground">
+                  {row.name}
+                </span>
+                <div
+                  className="h-2.5 overflow-hidden rounded-full bg-muted"
+                  aria-hidden
+                >
+                  <div
+                    className="h-full rounded-full transition-[width] duration-500 ease-out"
+                    style={{ width: `${pct}%`, background: color }}
+                  />
+                </div>
+                <span className="financial-value w-11 text-end text-xs font-semibold tabular-nums text-muted-foreground">
+                  {formatTonsCompact(row.tons)}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent
+                side="top"
+                sideOffset={8}
+                className="max-w-xs text-center leading-relaxed"
+              >
+                <p className="font-semibold">{row.name}</p>
+                <p className="opacity-80">
+                  {t("charts.rankTooltipTons", { tons: tonsLabel })}
+                </p>
+                <p className="opacity-70">
+                  {t("charts.rankTooltipPlace", { rank: i + 1 })}
+                </p>
+              </TooltipContent>
+            </UiTooltip>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -791,7 +835,16 @@ export function ChartsSection() {
     })) ?? [];
 
   // ── Owner KPI cards (4) ──────────────────────────────────────────────
-  const ownerKpis = [
+  const ownerKpis: {
+    title: string;
+    value: string;
+    numericValue: number | null;
+    formatValue: (v: number) => string;
+    trend?: KpiTrend;
+    sub: string;
+    icon: typeof Truck;
+    tone?: KpiTone;
+  }[] = [
     {
       title: t("kpis.completedTrucks", { period: periodLabel }),
       value: "—",
@@ -800,9 +853,6 @@ export function ChartsSection() {
       trend: owner?.trends.completedTrucks,
       sub: t("kpis.completedTrucksSub"),
       icon: Truck,
-      color: "oklch(0.390 0.130 232)",
-      colorBg: "oklch(0.390 0.130 232 / 12%)",
-      colorRing: "oklch(0.390 0.130 232 / 25%)",
     },
     {
       title: t("kpis.totalTons", { period: periodLabel }),
@@ -816,9 +866,7 @@ export function ChartsSection() {
           })
         : "—",
       icon: Weight,
-      color: "oklch(0.630 0.155 152)",
-      colorBg: "oklch(0.630 0.155 152 / 12%)",
-      colorRing: "oklch(0.630 0.155 152 / 25%)",
+      tone: "success",
     },
     {
       title: t("kpis.servedCustomers"),
@@ -828,9 +876,6 @@ export function ChartsSection() {
       trend: owner?.trends.servedCustomers,
       sub: t("kpis.duringPeriod", { period: periodLabel }),
       icon: Users,
-      color: "oklch(0.720 0.150 65)",
-      colorBg: "oklch(0.720 0.150 65 / 14%)",
-      colorRing: "oklch(0.720 0.150 65 / 28%)",
     },
     {
       title: t("kpis.servedDestinations"),
@@ -840,9 +885,6 @@ export function ChartsSection() {
       trend: owner?.trends.servedDestinations,
       sub: t("kpis.duringPeriod", { period: periodLabel }),
       icon: MapPin,
-      color: "oklch(0.610 0.210 0)",
-      colorBg: "oklch(0.610 0.210 0 / 12%)",
-      colorRing: "oklch(0.610 0.210 0 / 25%)",
     },
   ];
 
@@ -855,10 +897,10 @@ export function ChartsSection() {
       {/* ── Header: live badge + period toggle ───────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <span className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-600">
+          <span className="dash-live-badge inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-semibold">
             <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--status-active)] opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--status-active)]" />
             </span>
             {t("live")}
             {lastUpdated && (
@@ -908,9 +950,6 @@ export function ChartsSection() {
               formatValue={(v) => String(Math.round(v))}
               sub={t("kpis.activeNowSub")}
               icon={Activity}
-              color="oklch(0.620 0.175 222)"
-              colorBg="oklch(0.620 0.175 222 / 12%)"
-              colorRing="oklch(0.620 0.175 222 / 25%)"
             />
             <KpiCard
               title={t("kpis.onScaleNow")}
@@ -919,9 +958,6 @@ export function ChartsSection() {
               formatValue={(v) => String(Math.round(v))}
               sub={t("kpis.onScaleNowSub")}
               icon={Weight}
-              color="oklch(0.650 0.190 290)"
-              colorBg="oklch(0.650 0.190 290 / 12%)"
-              colorRing="oklch(0.650 0.190 290 / 25%)"
             />
             <KpiCard
               title={t("kpis.stuckTrucks")}
@@ -930,9 +966,7 @@ export function ChartsSection() {
               formatValue={(v) => String(Math.round(v))}
               sub={t("kpis.stuckTrucksSub")}
               icon={AlertTriangle}
-              color="oklch(0.700 0.180 50)"
-              colorBg="oklch(0.700 0.180 50 / 12%)"
-              colorRing="oklch(0.700 0.180 50 / 25%)"
+              tone="warning"
             />
             <KpiCard
               title={t("kpis.cancellationPct")}
@@ -945,9 +979,7 @@ export function ChartsSection() {
               }
               sub={t("kpis.cancellationPctSub")}
               icon={AlertTriangle}
-              color="oklch(0.610 0.210 0)"
-              colorBg="oklch(0.610 0.210 0 / 12%)"
-              colorRing="oklch(0.610 0.210 0 / 25%)"
+              tone="danger"
             />
           </div>
         </>
@@ -957,7 +989,7 @@ export function ChartsSection() {
       <SectionLabel icon={Users} label={t("sections.customersDestinations")} />
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="shadow-sm">
+        <Card className="dash-panel shadow-none">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold">
               {t("charts.topCustomers", { period: periodLabel })}
@@ -972,55 +1004,12 @@ export function ChartsSection() {
             ) : !owner?.topCustomers.length ? (
               <EmptyState label={t("empty.deliveries")} />
             ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart
-                  data={owner.topCustomers}
-                  layout="vertical"
-                  margin={{ top: 4, right: 52, left: 0, bottom: 4 }}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="hsl(var(--border))"
-                    horizontal={false}
-                  />
-                  <XAxis
-                    type="number"
-                    tickFormatter={formatTonsCompact}
-                    tick={{
-                      fontSize: 10,
-                      fill: "hsl(var(--muted-foreground))",
-                    }}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    tick={<TruncatedYTick maxChars={10} />}
-                    tickLine={false}
-                    axisLine={false}
-                    width={90}
-                  />
-                  <Tooltip content={<TonsBarTooltip />} />
-                  <Bar
-                    dataKey="tons"
-                    radius={[0, 6, 6, 0]}
-                    maxBarSize={28}
-                  >
-                    {owner.topCustomers.map((_, i) => (
-                      <Cell
-                        key={i}
-                        fill={TOP_BAR_COLORS[i % TOP_BAR_COLORS.length]}
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <RankBarList data={owner.topCustomers} />
             )}
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm">
+        <Card className="dash-panel shadow-none">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold">
               {t("charts.topDestinations", { period: periodLabel })}
@@ -1035,50 +1024,7 @@ export function ChartsSection() {
             ) : !owner?.topDestinations.length ? (
               <EmptyState label={t("empty.destinations")} />
             ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart
-                  data={owner.topDestinations}
-                  layout="vertical"
-                  margin={{ top: 4, right: 52, left: 0, bottom: 4 }}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="hsl(var(--border))"
-                    horizontal={false}
-                  />
-                  <XAxis
-                    type="number"
-                    tickFormatter={formatTonsCompact}
-                    tick={{
-                      fontSize: 10,
-                      fill: "hsl(var(--muted-foreground))",
-                    }}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    tick={<TruncatedYTick maxChars={10} />}
-                    tickLine={false}
-                    axisLine={false}
-                    width={90}
-                  />
-                  <Tooltip content={<TonsBarTooltip />} />
-                  <Bar
-                    dataKey="tons"
-                    radius={[0, 6, 6, 0]}
-                    maxBarSize={28}
-                  >
-                    {owner.topDestinations.map((_, i) => (
-                      <Cell
-                        key={i}
-                        fill={TOP_BAR_COLORS[(i + 2) % TOP_BAR_COLORS.length]}
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <RankBarList data={owner.topDestinations} colorOffset={2} />
             )}
           </CardContent>
         </Card>
@@ -1090,7 +1036,7 @@ export function ChartsSection() {
         label={t("sections.productionMix", { period: periodLabel })}
       />
 
-      <Card className="shadow-sm">
+      <Card className="dash-panel shadow-none">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-semibold">
             {t("charts.tonsByKind")}
@@ -1112,14 +1058,14 @@ export function ChartsSection() {
               >
                 <CartesianGrid
                   strokeDasharray="3 3"
-                  stroke="hsl(var(--border))"
+                  stroke="var(--border)"
                   vertical={false}
                 />
                 <XAxis
                   dataKey="label"
                   tick={{
                     fontSize: 11,
-                    fill: "hsl(var(--muted-foreground))",
+                    fill: "var(--muted-foreground)",
                   }}
                   tickLine={false}
                   axisLine={false}
@@ -1128,7 +1074,7 @@ export function ChartsSection() {
                   tickFormatter={formatTonsCompact}
                   tick={{
                     fontSize: 10,
-                    fill: "hsl(var(--muted-foreground))",
+                    fill: "var(--muted-foreground)",
                   }}
                   tickLine={false}
                   axisLine={false}
@@ -1143,7 +1089,7 @@ export function ChartsSection() {
                   {tonsByKindLocalized.map((entry) => (
                     <Cell
                       key={entry.kind}
-                      fill={KIND_COLORS[entry.kind] ?? "#94a3b8"}
+                      fill={KIND_COLORS[entry.kind] ?? "oklch(0.55 0.04 240)"}
                     />
                   ))}
                 </Bar>
@@ -1159,7 +1105,7 @@ export function ChartsSection() {
           <SectionLabel icon={PieIcon} label={t("sections.fleetStatus")} />
 
           <div className="grid gap-6 lg:grid-cols-5">
-            <Card className="lg:col-span-3 shadow-sm">
+            <Card className="dash-panel lg:col-span-3 shadow-none">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold">
                   {t("charts.fleetByStatus")}
@@ -1217,7 +1163,7 @@ export function ChartsSection() {
               </CardContent>
             </Card>
 
-            <Card className="lg:col-span-2 shadow-sm">
+            <Card className="dash-panel lg:col-span-2 shadow-none">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold">
                   {t("charts.onScaleNow")}
@@ -1273,27 +1219,19 @@ export function ChartsSection() {
               value={formatMinutes(ops.averages30d.avgCycleMin, t)}
               sub={t("kpis.avgCycleSub")}
               icon={Timer}
-              color="oklch(0.620 0.175 222)"
-              colorBg="oklch(0.620 0.175 222 / 12%)"
-              colorRing="oklch(0.620 0.175 222 / 25%)"
             />
             <KpiCard
               title={t("kpis.avgWaitBeforeTare")}
               value={formatMinutes(ops.averages30d.avgWaitBeforeTareMin, t)}
               sub={t("kpis.avgWaitBeforeTareSub")}
               icon={Timer}
-              color="oklch(0.720 0.150 65)"
-              colorBg="oklch(0.720 0.150 65 / 14%)"
-              colorRing="oklch(0.720 0.150 65 / 28%)"
+              tone="warning"
             />
             <KpiCard
               title={t("kpis.avgLoadingConfirm")}
               value={formatMinutes(ops.averages30d.avgLoadingMin, t)}
               sub={t("kpis.avgLoadingConfirmSub")}
               icon={Timer}
-              color="oklch(0.650 0.190 290)"
-              colorBg="oklch(0.650 0.190 290 / 12%)"
-              colorRing="oklch(0.650 0.190 290 / 25%)"
             />
           </div>
         </>
@@ -1304,7 +1242,7 @@ export function ChartsSection() {
         <>
           <SectionLabel icon={AlertTriangle} label={t("sections.stuckAlerts")} />
 
-          <Card className="shadow-sm">
+          <Card className="dash-panel shadow-none">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold">
                 {t("charts.stuckTitle")}

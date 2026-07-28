@@ -449,6 +449,8 @@
       "topCustomers": "أكبر 5 زبائن ({period})",
       "topDestinations": "أكبر 5 وجهات ({period})",
       "totalTonsDelivered": "إجمالي الأطنان المسلَّمة",
+      "rankTooltipTons": "الأطنان المسلَّمة: {tons}",
+      "rankTooltipPlace": "الترتيب: {rank}",
       "tonsByKind": "الأطنان حسب نوع المادة",
       "tonsByKindSub": "مجموع وزن الجلسات حسب القياس",
       "fleetByStatus": "توزيع الشاحنات حسب الحالة",
@@ -481,7 +483,8 @@
       "noTrucks": "لا توجد شاحنات مسجَّلة بعد",
       "noPayments30d": "لا توجد دفعات في آخر 30 يوم",
       "noPaymentData": "لا توجد بيانات دفعات",
-      "noPayments": "لا توجد دفعات"
+      "noPayments": "لا توجد دفعات",
+      "hint": "ستظهر البيانات هنا عند توفر نشاط في الفترة المحددة"
     },
     "table": {
       "plateNumber": "رقم اللوحة",
