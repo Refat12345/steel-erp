@@ -852,6 +852,221 @@ html, body {
   50% { background-position: 100% 50%; }
 }
 
+/* ─── App Sidebar — Premium Control Panel ─────────────────────────────────── */
+
+@layer components {
+  [data-slot="sidebar-inner"],
+  [data-sidebar="sidebar"][data-mobile="true"] {
+    background:
+      radial-gradient(
+        ellipse 130% 55% at 50% -8%,
+        color-mix(in oklch, var(--sidebar-primary) 22%, transparent) 0%,
+        transparent 58%
+      ),
+      linear-gradient(
+        180deg,
+        oklch(0.235 0.032 238) 0%,
+        oklch(0.175 0.028 240) 42%,
+        oklch(0.145 0.024 242) 100%
+      );
+    border-color: color-mix(in oklch, var(--sidebar-primary) 18%, var(--sidebar-border));
+  }
+
+  .app-sidebar-brand-mark {
+    background: linear-gradient(
+      145deg,
+      color-mix(in oklch, var(--sidebar-primary) 32%, transparent) 0%,
+      color-mix(in oklch, var(--sidebar-primary) 12%, transparent) 100%
+    );
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklch, var(--sidebar-primary) 40%, transparent),
+      inset 0 1px 0 oklch(1 0 0 / 14%),
+      0 0 28px color-mix(in oklch, var(--sidebar-primary) 22%, transparent);
+  }
+
+  .app-sidebar-header-line {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in oklch, var(--sidebar-primary) 55%, transparent) 35%,
+      color-mix(in oklch, var(--sidebar-primary) 20%, transparent) 70%,
+      transparent 100%
+    );
+  }
+
+  .app-sidebar-nav-item {
+    transition:
+      background-color 0.18s ease,
+      box-shadow 0.18s ease,
+      color 0.18s ease;
+  }
+
+  .app-sidebar-nav-item:hover {
+    background: oklch(1 0 0 / 5%);
+  }
+
+  .app-sidebar-nav-item[data-active],
+  .app-sidebar-nav-item[data-active="true"] {
+    background:
+      radial-gradient(
+        ellipse 90% 140% at var(--app-sidebar-active-origin, 100%) 50%,
+        color-mix(in oklch, var(--sidebar-primary) 28%, transparent) 0%,
+        color-mix(in oklch, var(--sidebar-primary) 8%, transparent) 55%,
+        transparent 100%
+      ),
+      color-mix(in oklch, var(--sidebar-primary) 12%, transparent);
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklch, var(--sidebar-primary) 28%, transparent),
+      0 0 20px color-mix(in oklch, var(--sidebar-primary) 12%, transparent);
+  }
+
+  .app-sidebar-nav-item[data-active]:hover,
+  .app-sidebar-nav-item[data-active="true"]:hover {
+    background:
+      radial-gradient(
+        ellipse 90% 140% at var(--app-sidebar-active-origin, 100%) 50%,
+        color-mix(in oklch, var(--sidebar-primary) 34%, transparent) 0%,
+        color-mix(in oklch, var(--sidebar-primary) 12%, transparent) 55%,
+        transparent 100%
+      ),
+      color-mix(in oklch, var(--sidebar-primary) 16%, transparent);
+  }
+
+  /* Active glow originates from the reading-start edge */
+  [dir="rtl"] .app-sidebar-nav-item {
+    --app-sidebar-active-origin: 100%;
+  }
+
+  [dir="ltr"] .app-sidebar-nav-item {
+    --app-sidebar-active-origin: 0%;
+  }
+
+  .app-sidebar-active-bar {
+    background: var(--sidebar-primary);
+    box-shadow:
+      0 0 8px color-mix(in oklch, var(--sidebar-primary) 80%, transparent),
+      0 0 18px color-mix(in oklch, var(--sidebar-primary) 40%, transparent);
+  }
+
+  .app-sidebar-icon-chip {
+    background: oklch(1 0 0 / 4%);
+    box-shadow: inset 0 0 0 1px oklch(1 0 0 / 6%);
+    transition:
+      background-color 0.18s ease,
+      box-shadow 0.18s ease,
+      color 0.18s ease;
+  }
+
+  .app-sidebar-nav-item:hover .app-sidebar-icon-chip {
+    background: oklch(1 0 0 / 7%);
+  }
+
+  .app-sidebar-icon-chip[data-active="true"] {
+    background: color-mix(in oklch, var(--sidebar-primary) 22%, transparent);
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklch, var(--sidebar-primary) 40%, transparent),
+      0 0 14px color-mix(in oklch, var(--sidebar-primary) 25%, transparent);
+    color: var(--sidebar-primary);
+  }
+
+  .app-sidebar-user-card {
+    background: linear-gradient(
+      160deg,
+      oklch(1 0 0 / 7%) 0%,
+      oklch(1 0 0 / 3%) 100%
+    );
+    box-shadow:
+      inset 0 0 0 1px oklch(1 0 0 / 8%),
+      0 8px 24px oklch(0 0 0 / 18%);
+  }
+
+  .app-sidebar-online-dot {
+    background: var(--status-active);
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--status-active) 55%, transparent);
+    animation: app-sidebar-online-pulse 2.4s ease-out infinite;
+  }
+
+  @keyframes app-sidebar-online-pulse {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in oklch, var(--status-active) 50%, transparent);
+    }
+    70% {
+      box-shadow: 0 0 0 6px transparent;
+    }
+    100% {
+      box-shadow: 0 0 0 0 transparent;
+    }
+  }
+
+  /* Collapsed (icon-only) — centered rail with clear active tile */
+  .group[data-collapsible="icon"] .app-sidebar-brand-mark {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.65rem;
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklch, var(--sidebar-primary) 40%, transparent),
+      0 0 16px color-mix(in oklch, var(--sidebar-primary) 20%, transparent);
+  }
+
+  .group[data-collapsible="icon"] .app-sidebar-brand-mark svg {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  .group[data-collapsible="icon"] .app-sidebar-nav-item {
+    justify-content: center;
+    border-radius: 0.7rem;
+  }
+
+  .group[data-collapsible="icon"] .app-sidebar-nav-item[data-active],
+  .group[data-collapsible="icon"] .app-sidebar-nav-item[data-active="true"] {
+    background: color-mix(in oklch, var(--sidebar-primary) 22%, transparent);
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklch, var(--sidebar-primary) 40%, transparent),
+      0 0 14px color-mix(in oklch, var(--sidebar-primary) 22%, transparent);
+  }
+
+  .group[data-collapsible="icon"] .app-sidebar-icon-chip {
+    width: auto;
+    height: auto;
+    background: transparent;
+    box-shadow: none;
+    border-radius: 0;
+  }
+
+  .group[data-collapsible="icon"] .app-sidebar-icon-chip[data-active="true"] {
+    background: transparent;
+    box-shadow: none;
+    color: var(--sidebar-primary);
+  }
+
+  .group[data-collapsible="icon"] .app-sidebar-section-rule {
+    display: block;
+    width: 1.25rem;
+    height: 1px;
+    margin-inline: auto;
+    margin-block: 0.35rem;
+    background: color-mix(in oklch, var(--sidebar-primary) 28%, transparent);
+  }
+
+  .group[data-collapsible="icon"] .app-sidebar-user-card {
+    padding: 0.3rem;
+    justify-content: center;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .app-sidebar-online-dot {
+      animation: none;
+    }
+
+    .app-sidebar-nav-item {
+      transition: none;
+    }
+  }
+}
+
 /* ─── ERP Utility Classes ─────────────────────────────────────────────────── */
 
 @layer utilities {
