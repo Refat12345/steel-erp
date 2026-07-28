@@ -5,6 +5,8 @@
     "languageEnglish": "English",
     "languageChangeError": "Could not change the language, please try again",
     "navigation": "Navigation",
+    "collapseSidebar": "Hide sidebar",
+    "expandSidebar": "Show sidebar",
     "signOut": "Sign out",
     "goBack": "Go back",
     "home": "Home",
@@ -23,6 +25,12 @@
     "monogram": "FD"
   },
   "nav": {
+    "sectionOverview": "Overview",
+    "sectionSales": "Sales & operations",
+    "sectionBillets": "Billets",
+    "sectionStock": "Stock",
+    "sectionFinance": "Finance & reports",
+    "sectionSystem": "System",
     "dashboard": "Dashboard",
     "contracts": "Contracts",
     "salesOrders": "Sales orders",

@@ -5,6 +5,8 @@
     "languageEnglish": "English",
     "languageChangeError": "تعذر تغيير اللغة، حاول مرة أخرى",
     "navigation": "التنقل",
+    "collapseSidebar": "إخفاء القائمة",
+    "expandSidebar": "إظهار القائمة",
     "signOut": "تسجيل الخروج",
     "goBack": "العودة",
     "home": "الصفحة الرئيسية",
@@ -23,6 +25,12 @@
     "monogram": "FD"
   },
   "nav": {
+    "sectionOverview": "نظرة عامة",
+    "sectionSales": "المبيعات والعمليات",
+    "sectionBillets": "البيلت",
+    "sectionStock": "المخزون",
+    "sectionFinance": "المالية والتقارير",
+    "sectionSystem": "النظام",
     "dashboard": "لوحة المؤشرات",
     "contracts": "العقود",
     "salesOrders": "أوامر البيع",

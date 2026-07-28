@@ -2,8 +2,9 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { getTranslations } from "next-intl/server";
 import { authOptions } from "@/lib/auth";
-import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/app-sidebar";
+import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -31,7 +32,7 @@ export default async function DashboardLayout({
         <AppSidebar stockModuleEnabled={isStockModuleEnabled()} />
         <main className="flex-1 flex flex-col min-h-screen min-w-0 max-w-full overflow-x-hidden">
           <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
-            <SidebarTrigger />
+            <SidebarToggle />
             <Separator orientation="vertical" className="h-6" />
             <h1 className="text-sm font-medium text-muted-foreground truncate">
               {tBrand("header")}
