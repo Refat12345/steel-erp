@@ -45,6 +45,7 @@ const SIZE_EN_BY_CODE: Record<string, string> = {
   "20mm": "20mm",
   "22mm": "22mm",
   "25mm": "25mm",
+  "32mm": "32mm",
   shortbar_1_4m: "Short bars 1–4 m",
   shortbar_4_12m: "Short bars 4–12 m",
   scrap: "Scrap",
