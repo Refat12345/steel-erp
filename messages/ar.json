@@ -32,6 +32,7 @@
     "sectionFinance": "المالية والتقارير",
     "sectionSystem": "النظام",
     "dashboard": "لوحة المؤشرات",
+    "millLive": "الإنتاج الحي",
     "contracts": "العقود",
     "salesOrders": "أوامر البيع",
     "trucks": "الشاحنات",
@@ -359,6 +360,29 @@
       "BANK_TRANSFER": "تحويل بنكي",
       "CHECK": "شيك"
     }
+  },
+  "millLive": {
+    "eyebrow": "خط الدرفلة",
+    "title": "الإنتاج الحي",
+    "subtitle": "عدادات البلِت والتعبئة الحية من الخط.",
+    "loading": "جارٍ تحميل البيانات الحية…",
+    "loadError": "تعذّر تحميل بيانات الإنتاج الحي.",
+    "empty": "لا توجد قراءات بعد. بانتظار أول مزامنة من السكادا.",
+    "statusLive": "مباشر",
+    "statusDelayed": "متأخر",
+    "statusError": "مشكلة اتصال",
+    "lastUpdate": "آخر تحديث {time}",
+    "productSize": "مقاس المنتج",
+    "mm": "مم",
+    "totalBillets": "إجمالي البلِت",
+    "frontPack": "تعبئة أمامية",
+    "backPack": "تعبئة خلفية",
+    "dayShift": "الوردية النهارية (08:00 – 20:00)",
+    "nightShift": "الوردية الليلية (20:00 – 08:00)",
+    "shiftTotal": "المجموع",
+    "hour": "الساعة",
+    "count": "العدد",
+    "hourRange": "{start} – {end}"
   },
   "dashboard": {
     "title": "لوحة المؤشرات",
