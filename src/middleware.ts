@@ -244,6 +244,11 @@ export const config = {
     //       the endpoint remains protected even though middleware is skipped.
     //       Without this exemption, the bearer-only cron path is rejected
     //       at Layer 1 with 401 before the handler ever runs.
-    "/((?!_next/static|_next/image|favicon.ico|apple-icon.png|steeltech-logo.png|images/|.*\\.(?:webp|png|jpg|jpeg|gif|svg|ico|woff2?)(?:\\?.*)?$|api/auth|api/locale|api/health|api/maintenance/cleanup-idempotency).*)",
+    //   - /api/telemetry/sync
+    //       Machine collector (`service_plc.py`) authenticates with
+    //       `x-api-key: <PLC_API_KEY>` only. The route handler enforces a
+    //       constant-time key match; without this exemption JWT middleware
+    //       would reject the POST with 401 before the handler runs.
+    "/((?!_next/static|_next/image|favicon.ico|apple-icon.png|steeltech-logo.png|images/|.*\\.(?:webp|png|jpg|jpeg|gif|svg|ico|woff2?)(?:\\?.*)?$|api/auth|api/locale|api/health|api/maintenance/cleanup-idempotency|api/telemetry/sync).*)",
   ],
 };
