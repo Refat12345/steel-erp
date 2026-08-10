@@ -1016,3 +1016,19 @@ model SystemSetting {
 
   @@map("system_settings")
 }
+
+/// Append-only time-series snapshots from the rolling-mill SCADA/PLC collector
+/// (`service_plc.py` → POST /api/telemetry/sync). One row per poll (~60s).
+model PlcTelemetry {
+  id              String   @id @default(cuid())
+  productSize     Float    @map("product_size")
+  totalBillets    Int      @map("total_billets")
+  frontPackCount  Int      @map("front_pack_count")
+  backPackCount   Int      @map("back_pack_count")
+  /// 24 hourly production counts for the current operational day.
+  hourlyBreakdown Json     @map("hourly_breakdown")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("plc_telemetry")
+}
