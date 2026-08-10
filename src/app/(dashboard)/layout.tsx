@@ -11,6 +11,7 @@ import {
   isStockModuleEnabled,
   isLanguageSwitcherEnabled,
 } from "@/config/feature-flags";
+import { canAccessMillLiveDashboard } from "@/lib/mill-live-access";
 import { LocaleSwitcher } from "@/components/layout/locale-switcher";
 
 export default async function DashboardLayout({
@@ -25,11 +26,17 @@ export default async function DashboardLayout({
   }
 
   const tBrand = await getTranslations("brand");
+  const millLiveDashboardEnabled = canAccessMillLiveDashboard(
+    session.user.username,
+  );
 
   return (
     <TooltipProvider>
       <SidebarProvider>
-        <AppSidebar stockModuleEnabled={isStockModuleEnabled()} />
+        <AppSidebar
+          stockModuleEnabled={isStockModuleEnabled()}
+          millLiveDashboardEnabled={millLiveDashboardEnabled}
+        />
         <main className="flex-1 flex flex-col min-h-screen min-w-0 max-w-full overflow-x-hidden">
           <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
             <SidebarToggle />

@@ -16,6 +16,7 @@ import {
   LogOut,
   Factory,
   LayoutDashboard,
+  Activity,
   Boxes,
   PackageCheck,
   Warehouse,
@@ -48,6 +49,7 @@ import { pickLocalizedName } from "@/lib/localized-name";
 
 type NavTitleKey =
   | "dashboard"
+  | "millLive"
   | "contracts"
   | "salesOrders"
   | "trucks"
@@ -95,6 +97,13 @@ const navSections: NavSection[] = [
         url: "/",
         icon: LayoutDashboard,
         permission: "dashboard.view",
+      },
+      {
+        titleKey: "millLive",
+        url: "/mill-live",
+        icon: Activity,
+        // Temporary env allowlist — not an RBAC permission code.
+        permission: null,
       },
     ],
   },
@@ -235,8 +244,10 @@ const navSections: NavSection[] = [
 
 export function AppSidebar({
   stockModuleEnabled = false,
+  millLiveDashboardEnabled = false,
 }: {
   stockModuleEnabled?: boolean;
+  millLiveDashboardEnabled?: boolean;
 }) {
   const { data: session } = useSession();
   const pathname = usePathname();
@@ -279,6 +290,10 @@ export function AppSidebar({
     // Dark-launch: hide every stock entry until the module is released.
     // Server-driven prop (runtime env), so no rebuild needed to flip it.
     if (!stockModuleEnabled && item.url.startsWith("/stock")) return false;
+
+    // Temporary mill-live allowlist (env usernames). Server layout/API enforce
+    // the real gate; this only hides the nav entry for everyone else.
+    if (item.url === "/mill-live" && !millLiveDashboardEnabled) return false;
 
     // Hardcoded denylist — analytics-restricted roles never see the
     // dashboard or reports entries, even if a permission override has

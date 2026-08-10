@@ -32,6 +32,7 @@
     "sectionFinance": "Finance & reports",
     "sectionSystem": "System",
     "dashboard": "Dashboard",
+    "millLive": "Live mill",
     "contracts": "Contracts",
     "salesOrders": "Sales orders",
     "trucks": "Trucks",
@@ -359,6 +360,29 @@
       "BANK_TRANSFER": "Bank transfer",
       "CHECK": "Check"
     }
+  },
+  "millLive": {
+    "eyebrow": "Rolling mill",
+    "title": "Live production",
+    "subtitle": "Live billet and packing counters from the line.",
+    "loading": "Loading live data…",
+    "loadError": "Could not load live mill data.",
+    "empty": "No mill snapshots yet. Waiting for the first SCADA sync.",
+    "statusLive": "Live",
+    "statusDelayed": "Delayed",
+    "statusError": "Connection issue",
+    "lastUpdate": "Last update {time}",
+    "productSize": "Product size",
+    "mm": "mm",
+    "totalBillets": "Total billet count",
+    "frontPack": "Front packing",
+    "backPack": "Back packing",
+    "dayShift": "Day shift (08:00 – 20:00)",
+    "nightShift": "Night shift (20:00 – 08:00)",
+    "shiftTotal": "Total",
+    "hour": "Hour",
+    "count": "Count",
+    "hourRange": "{start} – {end}"
   },
   "dashboard": {
     "title": "Dashboard",
