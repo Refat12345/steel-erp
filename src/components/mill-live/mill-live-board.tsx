@@ -9,7 +9,6 @@ import {
   Signal,
   SignalZero,
   Boxes,
-  TriangleAlert,
 } from "lucide-react";
 import { formatDateTime } from "@/lib/date-format";
 import { formatInteger } from "@/lib/number-format";
@@ -18,7 +17,7 @@ import type { MillLiveSnapshot } from "@/lib/services/mill-live.service";
 
 const REFRESH_MS = 20_000;
 
-/** Operational day 08:00–08:00, split into day and night shifts. */
+/** SCADA hourly registers: day 08:00–20:00, night 20:00–08:00. */
 const DAY_SLOTS = Array.from({ length: 12 }, (_, i) => {
   const start = 8 + i;
   const end = start + 1;
@@ -75,13 +74,6 @@ export function MillLiveBoard() {
   const nightHours = data?.hourlyBreakdown.slice(12, 24) ?? [];
   const dayTotal = dayHours.reduce((a, b) => a + b, 0);
   const nightTotal = nightHours.reduce((a, b) => a + b, 0);
-  const incomplete = new Set(data?.incompleteHours ?? []);
-  const dayIncomplete = new Set(
-    [...incomplete].filter((slot) => slot < 12),
-  );
-  const nightIncomplete = new Set(
-    [...incomplete].filter((slot) => slot >= 12).map((slot) => slot - 12),
-  );
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 min-w-0">
@@ -153,7 +145,6 @@ export function MillLiveBoard() {
               total={dayTotal}
               slots={DAY_SLOTS}
               counts={dayHours}
-              incomplete={dayIncomplete}
               hourRangeLabel={t}
             />
             <ShiftCard
@@ -162,17 +153,9 @@ export function MillLiveBoard() {
               total={nightTotal}
               slots={NIGHT_SLOTS}
               counts={nightHours}
-              incomplete={nightIncomplete}
               hourRangeLabel={t}
             />
           </div>
-
-          {incomplete.size > 0 ? (
-            <p className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
-              <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              {t("incompleteNote")}
-            </p>
-          ) : null}
         </>
       )}
     </div>
@@ -288,7 +271,6 @@ function ShiftCard({
   total,
   slots,
   counts,
-  incomplete,
   hourRangeLabel,
 }: {
   title: string;
@@ -296,7 +278,6 @@ function ShiftCard({
   total: number;
   slots: Array<{ start: number; end: number }>;
   counts: number[];
-  incomplete: Set<number>;
   hourRangeLabel: ReturnType<typeof useTranslations<"millLive">>;
 }) {
   return (
@@ -325,7 +306,6 @@ function ShiftCard({
           <tbody>
             {slots.map((slot, idx) => {
               const count = counts[idx] ?? 0;
-              const isIncomplete = incomplete.has(idx);
               return (
                 <tr key={`${slot.start}-${slot.end}`} className="border-b last:border-0">
                   <td className="px-4 py-2 text-start tabular-nums weight-value">
@@ -335,15 +315,7 @@ function ShiftCard({
                     })}
                   </td>
                   <td className="px-4 py-2 text-end font-medium tabular-nums weight-value">
-                    <span className="inline-flex items-center gap-1.5">
-                      {isIncomplete ? (
-                        <TriangleAlert
-                          className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400"
-                          aria-label={hourRangeLabel("incompleteHour")}
-                        />
-                      ) : null}
-                      {formatInteger(count)}
-                    </span>
+                    {formatInteger(count)}
                   </td>
                 </tr>
               );
