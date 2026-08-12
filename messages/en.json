@@ -382,9 +382,7 @@
     "shiftTotal": "Total",
     "hour": "Hour",
     "count": "Count",
-    "hourRange": "{start} – {end}",
-    "incompleteHour": "Incomplete data for this hour",
-    "incompleteNote": "The marked hours are missing part of their readings, so their counts may be lower than actual. The total billet count above is always accurate."
+    "hourRange": "{start} – {end}"
   },
   "dashboard": {
     "title": "Dashboard",
