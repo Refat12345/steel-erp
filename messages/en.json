@@ -377,12 +377,16 @@
     "totalBillets": "Total billet count",
     "frontPack": "Front packing",
     "backPack": "Back packing",
-    "dayShift": "Day shift (08:00 – 20:00)",
-    "nightShift": "Night shift (20:00 – 08:00)",
+    "dayShift": "Day shift",
+    "nightShift": "Night shift",
+    "dayWindow": "08:00 – 20:00",
+    "nightWindow": "20:00 – 08:00",
     "shiftTotal": "Total",
+    "hourlyTitle": "Hourly production",
     "hour": "Hour",
     "count": "Count",
-    "hourRange": "{start} – {end}"
+    "hourRange": "{start} – {end}",
+    "totalCount": "Total count"
   },
   "dashboard": {
     "title": "Dashboard",
