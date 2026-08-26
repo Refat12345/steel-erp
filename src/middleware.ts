@@ -108,6 +108,7 @@ const ROUTE_PERMISSIONS: RouteRule[] = [
   // System settings — stricter than the /admin wildcard (specific first).
   { pattern: /^\/admin\/settings$/, permissions: ["settings.edit"] },
   { pattern: /^\/api\/admin\/settings$/, permissions: ["settings.edit"] },
+  { pattern: /^\/api\/mill-live\/product-size$/, permissions: ["settings.edit"] },
   { pattern: /^\/admin(\/.*)?$/, permissions: ["user.manage"] },
 
   { pattern: /^\/trucks$/, permissions: ["truck.view_queue", "truck.view_approved"] },

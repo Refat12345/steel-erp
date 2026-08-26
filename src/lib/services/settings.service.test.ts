@@ -9,7 +9,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockPrisma = vi.hoisted(() => ({
-  systemSetting: { findUnique: vi.fn() },
+  systemSetting: { findUnique: vi.fn(), upsert: vi.fn() },
+  sizeLookup: { findFirst: vi.fn() },
+  $transaction: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({ prisma: mockPrisma }));
@@ -17,8 +19,17 @@ vi.mock("next/cache", () => ({
   unstable_cache: (fn: () => unknown) => fn,
   revalidateTag: vi.fn(),
 }));
+vi.mock("@/lib/services/audit.service", () => ({
+  logAudit: vi.fn(),
+}));
 
-import { clampEventWindow, getAnalyticsStartInstant } from "./settings.service";
+import {
+  clampEventWindow,
+  getAnalyticsStartInstant,
+  getMillLiveProductSizeId,
+  setMillLiveProductSizeId,
+} from "./settings.service";
+import { logAudit } from "@/lib/services/audit.service";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -142,5 +153,71 @@ describe("clampEventWindow", () => {
       clamped: false,
       analyticsStartDate: null,
     });
+  });
+});
+
+describe("getMillLiveProductSizeId", () => {
+  it("returns the parsed positive integer", async () => {
+    mockPrisma.systemSetting.findUnique.mockResolvedValue({ value: "12" });
+
+    expect(await getMillLiveProductSizeId()).toBe(12);
+  });
+
+  it("returns null when the setting is unset", async () => {
+    mockPrisma.systemSetting.findUnique.mockResolvedValue(null);
+
+    expect(await getMillLiveProductSizeId()).toBeNull();
+  });
+
+  it("returns null for a malformed stored value", async () => {
+    mockPrisma.systemSetting.findUnique.mockResolvedValue({ value: "12mm" });
+
+    expect(await getMillLiveProductSizeId()).toBeNull();
+  });
+});
+
+describe("setMillLiveProductSizeId", () => {
+  it("rejects sizes that are missing, inactive, or not bundle type", async () => {
+    mockPrisma.sizeLookup.findFirst.mockResolvedValue(null);
+
+    await expect(setMillLiveProductSizeId(99, 1)).rejects.toMatchObject({
+      messageKey: "sizeNotFound",
+    });
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("upserts the setting and writes an audit entry", async () => {
+    mockPrisma.sizeLookup.findFirst.mockResolvedValue({
+      id: 5,
+      displayName: "12 مم",
+      displayNameEn: "12mm",
+    });
+    mockPrisma.systemSetting.findUnique.mockResolvedValue({ value: "3" });
+    mockPrisma.$transaction.mockImplementation(async (fn: (tx: typeof mockPrisma) => Promise<void>) => {
+      await fn(mockPrisma);
+    });
+
+    const result = await setMillLiveProductSizeId(5, 7);
+
+    expect(result).toEqual({
+      id: 5,
+      displayName: "12 مم",
+      displayNameEn: "12mm",
+    });
+    expect(mockPrisma.systemSetting.upsert).toHaveBeenCalledWith({
+      where: { key: "mill_live_product_size_id" },
+      create: { key: "mill_live_product_size_id", value: "5" },
+      update: { value: "5" },
+    });
+    expect(logAudit).toHaveBeenCalledWith(
+      mockPrisma,
+      expect.objectContaining({
+        userId: 7,
+        action: "update",
+        entityType: "SystemSetting",
+        entityId: "mill_live_product_size_id",
+        details: { previous: 3, next: 5 },
+      }),
+    );
   });
 });

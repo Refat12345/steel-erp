@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { canAccessMillLiveDashboard } from "@/lib/mill-live-access";
+import { canOpenMillLiveDashboard } from "@/lib/mill-live-access";
 
 export default async function MillLiveLayout({
   children,
@@ -9,7 +9,13 @@ export default async function MillLiveLayout({
   children: React.ReactNode;
 }) {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.username || !canAccessMillLiveDashboard(session.user.username)) {
+  if (
+    !session?.user?.username ||
+    !canOpenMillLiveDashboard({
+      username: session.user.username,
+      permissions: session.user.permissions,
+    })
+  ) {
     redirect("/forbidden");
   }
 

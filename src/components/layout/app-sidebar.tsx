@@ -291,8 +291,8 @@ export function AppSidebar({
     // Server-driven prop (runtime env), so no rebuild needed to flip it.
     if (!stockModuleEnabled && item.url.startsWith("/stock")) return false;
 
-    // Temporary mill-live allowlist (env usernames). Server layout/API enforce
-    // the real gate; this only hides the nav entry for everyone else.
+    // Mill-live: env username allowlist, or settings.edit (admin size picker).
+    // Server layout/API enforce the real gate; this only hides the nav entry.
     if (item.url === "/mill-live" && !millLiveDashboardEnabled) return false;
 
     // Hardcoded denylist — analytics-restricted roles never see the

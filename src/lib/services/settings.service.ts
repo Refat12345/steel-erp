@@ -4,7 +4,7 @@
  * Reads and writes admin-tunable operational settings stored in the
  * `system_settings` key-value table.
  *
- * Currently owns one key:
+ * Currently owns these keys:
  *
  *   `analytics_start_date` (YYYY-MM-DD, operational date)
  *      The date from which operational data is considered valid. Events
@@ -14,6 +14,11 @@
  *      Cumulative entities (contracts, customer balances, billet contract
  *      balances) and the audit log are intentionally NOT filtered, and
  *      the underlying rows remain untouched in the database.
+ *
+ *   `mill_live_product_size_id` (SizeLookup.id as a decimal string)
+ *      The rolling-mill product size shown on /mill-live. Chosen by an
+ *      admin (`settings.edit`); the PLC `productSize` register is not
+ *      used for display.
  *
  * Reads are cached for 60 s and tagged so a successful write invalidates
  * the cache immediately (`revalidateTag`) — the admin sees the effect on
@@ -31,6 +36,7 @@ import {
 } from "@/lib/operational-day";
 
 export const ANALYTICS_START_DATE_KEY = "analytics_start_date";
+export const MILL_LIVE_PRODUCT_SIZE_ID_KEY = "mill_live_product_size_id";
 
 const SETTINGS_CACHE_TAG = "system-settings";
 /** Dashboard stat caches carry this tag so a settings write flushes them. */
@@ -161,4 +167,62 @@ export async function setAnalyticsStartDate(
 
   revalidateTag(SETTINGS_CACHE_TAG, "max");
   revalidateTag(DASHBOARD_STATS_CACHE_TAG, "max");
+}
+
+async function readMillLiveProductSizeIdRaw(): Promise<number | null> {
+  const row = await prisma.systemSetting.findUnique({
+    where: { key: MILL_LIVE_PRODUCT_SIZE_ID_KEY },
+    select: { value: true },
+  });
+  if (!row?.value || !/^\d+$/.test(row.value)) return null;
+  const id = Number.parseInt(row.value, 10);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+/** Admin-selected mill-live size id, or null when unset / malformed. */
+export async function getMillLiveProductSizeId(): Promise<number | null> {
+  return unstable_cache(
+    readMillLiveProductSizeIdRaw,
+    ["system-setting", MILL_LIVE_PRODUCT_SIZE_ID_KEY],
+    { revalidate: SETTINGS_CACHE_TTL_SECONDS, tags: [SETTINGS_CACHE_TAG] },
+  )();
+}
+
+/**
+ * Persist the mill-live display size. Only active bundle (rebar) catalog
+ * rows are accepted — scrap / shortbar / inactive sizes are rejected.
+ */
+export async function setMillLiveProductSizeId(
+  sizeId: number,
+  userId: number,
+): Promise<{ id: number; displayName: string; displayNameEn: string | null }> {
+  const size = await prisma.sizeLookup.findFirst({
+    where: { id: sizeId, isActive: true, isBundleType: true },
+    select: { id: true, displayName: true, displayNameEn: true },
+  });
+  if (!size) {
+    throw new ServiceError("sizeNotFound", "BAD_REQUEST");
+  }
+
+  const previous = await readMillLiveProductSizeIdRaw();
+  const next = String(size.id);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.systemSetting.upsert({
+      where: { key: MILL_LIVE_PRODUCT_SIZE_ID_KEY },
+      create: { key: MILL_LIVE_PRODUCT_SIZE_ID_KEY, value: next },
+      update: { value: next },
+    });
+
+    await logAudit(tx, {
+      userId,
+      action: "update",
+      entityType: "SystemSetting",
+      entityId: MILL_LIVE_PRODUCT_SIZE_ID_KEY,
+      details: { previous, next: size.id },
+    });
+  });
+
+  revalidateTag(SETTINGS_CACHE_TAG, "max");
+  return size;
 }
