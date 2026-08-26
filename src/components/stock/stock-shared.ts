@@ -21,6 +21,7 @@ export interface StockLocation {
   unit: "BUNDLE" | "TON";
   allowedGrade: "FIRST" | "SECOND" | null;
   expectedSize: { id: number; code: string; displayName: string } | null;
+  expectedClassification: LocationClassificationRef | null;
   isActive: boolean;
   sortOrder: number;
   gridRow: number;
@@ -96,6 +97,17 @@ export function isDualUnitSegment(segment: Segment): boolean {
  */
 export function segmentEnforcesOneSize(segment: Segment): boolean {
   return segment === "GENERAL" || segment === "GOVERNORATES";
+}
+
+/** First-grade rebar bays may be dedicated to B500B (or left ordinary). */
+export function segmentHoldsSteelClassification(segment: Segment): boolean {
+  return segment === "GENERAL" || segment === "GOVERNORATES";
+}
+
+export interface LocationClassificationRef {
+  id: number;
+  code: string;
+  displayName: string;
 }
 
 // ── Work shifts (client mirror of stock.service.ts — keep in sync) ──────────

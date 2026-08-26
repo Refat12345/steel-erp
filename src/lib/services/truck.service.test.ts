@@ -457,7 +457,36 @@ describe("updateTruckBeforeWeigh", () => {
     );
   });
 
-  it("rejects FirstWeigh edits once internal sessions exist", async () => {
+  it("allows request-item edits at FirstWeigh after internal sessions exist", async () => {
+    const firstWeighTruck = {
+      ...queuedTruck,
+      status: "FirstWeigh",
+    };
+    mockPrisma.weighSession.count.mockResolvedValueOnce(1);
+    mockPrisma.truckOperation.findUnique
+      .mockResolvedValueOnce(firstWeighTruck)
+      .mockResolvedValueOnce({ ...firstWeighTruck, version: 1 });
+    mockPrisma.truckOperation.update.mockResolvedValue({
+      ...firstWeighTruck,
+      version: 1,
+    });
+
+    await updateTruckBeforeWeigh(
+      1,
+      { requestItems: [{ sizeId: 1, bundleCount: 12 }] },
+      0,
+      7,
+    );
+
+    expect(mockPrisma.truckRequestItem.deleteMany).toHaveBeenCalledWith({
+      where: { truckOperationId: 1 },
+    });
+    expect(mockPrisma.auditLog.create.mock.calls[0][0].data.details.event).toBe(
+      "truck_updated_during_loading",
+    );
+  });
+
+  it("rejects registration-field edits at FirstWeigh after internal sessions exist", async () => {
     mockPrisma.truckOperation.findUnique.mockResolvedValueOnce({
       ...queuedTruck,
       status: "FirstWeigh",
@@ -465,8 +494,8 @@ describe("updateTruckBeforeWeigh", () => {
     mockPrisma.weighSession.count.mockResolvedValueOnce(1);
 
     await expect(
-      updateTruckBeforeWeigh(1, { requestItems: [{ sizeId: 1, bundleCount: 12 }] }, 0, 7),
-    ).rejects.toThrow("cannotEditTruckAfterInternalWeighs");
+      updateTruckBeforeWeigh(1, { driverName: "Someone Else" }, 0, 7),
+    ).rejects.toThrow("afterApprovalOnlyRequestItemsEditable");
     expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
   });
 
@@ -544,15 +573,53 @@ describe("updateTruckBeforeWeigh", () => {
     expect(updateArg.data).toMatchObject({ driverName: "New Driver" });
   });
 
-  it("rejects edits once truck is OnScale", async () => {
+  it("allows request-item edits while the truck is OnScale", async () => {
+    const onScaleTruck = {
+      ...queuedTruck,
+      status: "OnScale",
+    };
+    mockPrisma.truckOperation.findUnique
+      .mockResolvedValueOnce(onScaleTruck)
+      .mockResolvedValueOnce({ ...onScaleTruck, version: 1 });
+    mockPrisma.truckOperation.update.mockResolvedValue({
+      ...onScaleTruck,
+      version: 1,
+    });
+
+    await updateTruckBeforeWeigh(
+      1,
+      { requestItems: [{ sizeId: 1, bundleCount: 12 }] },
+      0,
+      7,
+    );
+
+    expect(mockPrisma.truckRequestItem.deleteMany).toHaveBeenCalled();
+    expect(mockPrisma.auditLog.create.mock.calls[0][0].data.details.event).toBe(
+      "truck_updated_during_loading",
+    );
+  });
+
+  it("rejects registration-field edits once the truck is OnScale", async () => {
     mockPrisma.truckOperation.findUnique.mockResolvedValueOnce({
       ...queuedTruck,
       status: "OnScale",
     });
 
     await expect(
+      updateTruckBeforeWeigh(1, { driverName: "Someone Else" }, 0, 7),
+    ).rejects.toThrow("afterApprovalOnlyRequestItemsEditable");
+    expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects request-item edits after the truck is closed", async () => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValueOnce({
+      ...queuedTruck,
+      status: "Completed",
+    });
+
+    await expect(
       updateTruckBeforeWeigh(1, { requestItems: [{ sizeId: 1, bundleCount: 12 }] }, 0, 7),
-    ).rejects.toThrow("cannotEditTruckAfterInternalWeighs");
+    ).rejects.toThrow("cannotEditClosedTruck");
     expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
   });
 
@@ -585,7 +652,7 @@ describe("updateTruckNotes", () => {
     notes: "قديمة",
   };
 
-  it.each(["OnScale", "LoadingComplete", "SecondWeigh"] as const)(
+  it.each(["OnScale", "Loading", "LoadingComplete", "SecondWeigh"] as const)(
     "updates notes and writes an audit log for %s",
     async (status) => {
       const truck = { ...onScaleTruck, status };
@@ -822,6 +889,7 @@ describe("confirmLoadingComplete", () => {
       { weightTons: 4 },
     ]);
     mockPrisma.truckPhoto.count.mockResolvedValue(1);
+    mockPrisma.truckRequestItem.findMany.mockResolvedValue([]);
     mockPrisma.truckOperation.update.mockResolvedValue({
       id: 1,
       status: "LoadingComplete",
@@ -900,6 +968,119 @@ describe("confirmLoadingComplete", () => {
   it("refuses when no open round exists", async () => {
     mockRounds({ open: null });
     await expect(confirmLoadingComplete(1, 99)).rejects.toThrow("noOpenScaleRound");
+  });
+
+  it("allows a partial first-grade confirm when loaded is under the request", async () => {
+    mockRounds({ open: { id: 11, roundNumber: 1, grade: "FIRST" } });
+    mockPrisma.truckRequestItem.findMany.mockResolvedValue([
+      {
+        sizeId: 1,
+        grade: "FIRST",
+        classificationId: null,
+        bundleCount: 20,
+        requestedTons: null,
+        size: { displayName: "20مم", isBundleType: true, code: "20" },
+        classification: null,
+      },
+    ]);
+    mockPrisma.weighSession.findMany.mockResolvedValue([
+      {
+        weightTons: 5,
+        sizeId: 1,
+        classificationId: null,
+        bundleCount: 10,
+        size: { displayName: "20مم", isBundleType: true, code: "20" },
+        classification: null,
+      },
+    ]);
+
+    await confirmLoadingComplete(1, 99, "FIRST");
+    expect(mockPrisma.truckOperation.update).toHaveBeenCalled();
+  });
+
+  it("blocks first-grade confirmation when loaded bundles exceed the request", async () => {
+    mockRounds({ open: { id: 11, roundNumber: 1, grade: "FIRST" } });
+    mockPrisma.truckRequestItem.findMany.mockResolvedValue([
+      {
+        sizeId: 1,
+        grade: "FIRST",
+        classificationId: null,
+        bundleCount: 10,
+        requestedTons: null,
+        size: { displayName: "12مم", isBundleType: true, code: "12" },
+        classification: null,
+      },
+    ]);
+    mockPrisma.weighSession.findMany.mockResolvedValue([
+      {
+        weightTons: 8,
+        sizeId: 1,
+        classificationId: null,
+        bundleCount: 12,
+        size: { displayName: "12مم", isBundleType: true, code: "12" },
+        classification: null,
+      },
+    ]);
+
+    await expect(confirmLoadingComplete(1, 99)).rejects.toThrow(
+      "firstGradeRequestQtyMismatch",
+    );
+    expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
+  });
+
+  it("still confirms a first-grade truck when the load matches the request", async () => {
+    mockRounds({ open: { id: 11, roundNumber: 1, grade: "FIRST" } });
+    mockPrisma.truckRequestItem.findMany.mockResolvedValue([
+      {
+        sizeId: 1,
+        grade: "FIRST",
+        classificationId: 10,
+        bundleCount: 10,
+        requestedTons: null,
+        size: { displayName: "12مم", isBundleType: true, code: "12" },
+        classification: { displayName: "B500B" },
+      },
+    ]);
+    mockPrisma.weighSession.findMany.mockResolvedValue([
+      {
+        weightTons: 8,
+        sizeId: 1,
+        classificationId: 10,
+        bundleCount: 10,
+        size: { displayName: "12مم", isBundleType: true, code: "12" },
+        classification: { displayName: "B500B" },
+      },
+    ]);
+
+    await confirmLoadingComplete(1, 99, "FIRST");
+    expect(mockPrisma.truckOperation.update).toHaveBeenCalled();
+  });
+
+  it("does not enforce request match on a second-grade confirmation", async () => {
+    mockPrisma.truckRequestItem.findMany.mockResolvedValue([
+      {
+        sizeId: 1,
+        grade: "SECOND",
+        classificationId: null,
+        bundleCount: 20,
+        requestedTons: null,
+        size: { displayName: "12مم", isBundleType: true, code: "12" },
+        classification: null,
+      },
+    ]);
+    mockPrisma.weighSession.findMany.mockResolvedValue([
+      {
+        weightTons: 4,
+        sizeId: 1,
+        classificationId: null,
+        bundleCount: 3,
+        size: { displayName: "12مم", isBundleType: true, code: "12" },
+        classification: null,
+      },
+    ]);
+
+    await confirmLoadingComplete(1, 99, "SECOND");
+    expect(mockPrisma.truckOperation.update).toHaveBeenCalled();
   });
 });
 
@@ -1558,6 +1739,8 @@ describe("closeOperation", () => {
       externalCardNumber: "WB-1001",
       closedById: 7,
     });
+    mockPrisma.truckRequestItem.findMany.mockResolvedValue([]);
+    mockPrisma.weighSession.findMany.mockResolvedValue([]);
   });
 
   it("refuses to close without a card number (empty / whitespace)", async () => {
@@ -1627,6 +1810,35 @@ describe("closeOperation", () => {
     await expect(closeOperation(1, 7, "WB-1001")).rejects.toThrow(
       "tareAndGrossRequiredBeforeClose",
     );
+  });
+
+  it("refuses close when the first-grade request is still incomplete", async () => {
+    mockPrisma.truckRequestItem.findMany.mockResolvedValue([
+      {
+        sizeId: 1,
+        grade: "FIRST",
+        classificationId: null,
+        bundleCount: 20,
+        requestedTons: null,
+        size: { displayName: "20مم", isBundleType: true, code: "20" },
+        classification: null,
+      },
+    ]);
+    mockPrisma.weighSession.findMany.mockResolvedValue([
+      {
+        weightTons: 5,
+        sizeId: 1,
+        classificationId: null,
+        bundleCount: 10,
+        size: { displayName: "20مم", isBundleType: true, code: "20" },
+        classification: null,
+      },
+    ]);
+
+    await expect(closeOperation(1, 7, "WB-1001")).rejects.toThrow(
+      "firstGradeRequestIncomplete",
+    );
+    expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
   });
 });
 

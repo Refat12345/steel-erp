@@ -30,6 +30,12 @@ export async function GET(req: NextRequest) {
   const sizeId = parseInt(searchParams.get("sizeId") || "", 10);
   if (!isNaN(sizeId)) filters.sizeId = sizeId;
 
+  const classificationId = parseInt(
+    searchParams.get("classificationId") || "",
+    10,
+  );
+  if (!isNaN(classificationId)) filters.classificationId = classificationId;
+
   const segment = searchParams.get("segment");
   if (segment && segment in StockLocationSegment) {
     filters.segment = segment as StockLocationSegment;

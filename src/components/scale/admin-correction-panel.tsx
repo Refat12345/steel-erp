@@ -43,6 +43,13 @@ interface SizeOption {
   isBundleType: boolean;
 }
 
+interface ClassificationOption {
+  id: number;
+  code: string;
+  displayName: string;
+  grade: SalesOrderGrade;
+}
+
 interface RoundLite {
   id: number;
   roundNumber: number;
@@ -58,10 +65,12 @@ interface SessionLite {
   bridgeRoundId: number | null;
   sessionNumber: number;
   sizeId: number | null;
+  classificationId: number | null;
   bundleCount: number | null;
   weightTons: string;
   version: number;
   size: { id: number; displayName: string } | null;
+  classification: { id: number; displayName: string } | null;
 }
 
 interface TruckLite {
@@ -90,10 +99,12 @@ const GRADE_NONE = "__none__";
 export function AdminCorrectionPanel({
   truck,
   sizes,
+  classifications,
   onChanged,
 }: {
   truck: TruckLite;
   sizes: SizeOption[];
+  classifications: ClassificationOption[];
   onChanged: () => void | Promise<void>;
 }) {
   const t = useTranslations("scale");
@@ -107,6 +118,7 @@ export function AdminCorrectionPanel({
   const [cardNumber, setCardNumber] = useState("");
   const [grade, setGrade] = useState<string>(GRADE_NONE);
   const [sizeId, setSizeId] = useState<string>(GRADE_NONE);
+  const [classificationId, setClassificationId] = useState<string>(GRADE_NONE);
   const [bundleCount, setBundleCount] = useState("");
   const [tons, setTons] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -120,6 +132,7 @@ export function AdminCorrectionPanel({
     setCardNumber("");
     setGrade(GRADE_NONE);
     setSizeId(GRADE_NONE);
+    setClassificationId(GRADE_NONE);
     setBundleCount("");
     setTons("");
   };
@@ -151,6 +164,9 @@ export function AdminCorrectionPanel({
   const openEditSession = (session: SessionLite) => {
     close();
     setSizeId(session.sizeId ? String(session.sizeId) : GRADE_NONE);
+    setClassificationId(
+      session.classificationId ? String(session.classificationId) : GRADE_NONE,
+    );
     setBundleCount(session.bundleCount != null ? String(session.bundleCount) : "");
     setTons(session.weightTons);
     setDialog({ kind: "editSession", session });
@@ -224,6 +240,8 @@ export function AdminCorrectionPanel({
         return submit(`${base}/sessions`, "POST", {
           roundId: dialog.round.id,
           sizeId: sizeId === GRADE_NONE ? null : Number(sizeId),
+          classificationId:
+            classificationId === GRADE_NONE ? null : Number(classificationId),
           bundleCount: bundleCount ? Number(bundleCount) : null,
           weightTons: Number(tons),
           reason: r,
@@ -231,6 +249,8 @@ export function AdminCorrectionPanel({
       case "editSession":
         return submit(`${base}/sessions/${dialog.session.id}`, "PATCH", {
           sizeId: sizeId === GRADE_NONE ? null : Number(sizeId),
+          classificationId:
+            classificationId === GRADE_NONE ? null : Number(classificationId),
           bundleCount: bundleCount ? Number(bundleCount) : null,
           weightTons: Number(tons),
           reason: r,
@@ -384,7 +404,14 @@ export function AdminCorrectionPanel({
                       {roundSessions.map((s) => (
                         <TableRow key={s.id}>
                           <TableCell className="font-mono">{s.sessionNumber}</TableCell>
-                          <TableCell>{s.size?.displayName ?? t("emDash")}</TableCell>
+                          <TableCell>
+                            {s.size?.displayName ?? t("emDash")}
+                            {s.classification && (
+                              <span className="ms-1 text-xs text-muted-foreground">
+                                {s.classification.displayName}
+                              </span>
+                            )}
+                          </TableCell>
                           <TableCell>{s.bundleCount ?? t("emDash")}</TableCell>
                           <TableCell className="font-mono tabular-nums text-start">
                             {formatDecimal(s.weightTons, 3)}
@@ -491,6 +518,29 @@ export function AdminCorrectionPanel({
                     </SelectContent>
                   </Select>
                 </div>
+                {classifications.length > 0 && (
+                  <div className="space-y-1.5">
+                    <Label>{t("classification")}</Label>
+                    <Select
+                      value={classificationId}
+                      onValueChange={(v) => setClassificationId(v ?? GRADE_NONE)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder={t("noClassification")} />
+                      </SelectTrigger>
+                      <SelectContent dir={dir}>
+                        <SelectItem value={GRADE_NONE}>
+                          {t("noClassification")}
+                        </SelectItem>
+                        {classifications.map((c) => (
+                          <SelectItem key={c.id} value={String(c.id)}>
+                            {c.displayName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <div className="space-y-1.5">
                   <Label>{t("bundleCountOptional")}</Label>
                   <Input

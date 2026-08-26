@@ -26,11 +26,18 @@ import {
 import { Loader2 } from "lucide-react";
 import { getTextDirection, type Locale } from "@/i18n/config";
 import {
+  classificationIdFromSelect,
+  classificationSelectValue,
+  NO_CLASSIFICATION_SELECT_VALUE,
+} from "@/lib/steel-classification-default";
+import {
   SEGMENT_ORDER,
+  segmentHoldsSteelClassification,
   type Segment,
   type YardOption,
   type SizeOption,
   type StockLocation,
+  type LocationClassificationRef,
 } from "./stock-shared";
 
 interface FormState {
@@ -39,6 +46,7 @@ interface FormState {
   nameAr: string;
   segment: Segment;
   expectedSizeId: string;
+  expectedClassificationId: string;
   gridRow: string;
   gridCol: string;
   gridSpan: string;
@@ -53,6 +61,7 @@ const EMPTY_FORM: FormState = {
   nameAr: "",
   segment: "GENERAL",
   expectedSizeId: "",
+  expectedClassificationId: "",
   gridRow: "1",
   gridCol: "1",
   gridSpan: "1",
@@ -67,6 +76,7 @@ interface Props {
   onSuccess: () => void;
   yards: YardOption[];
   sizes: SizeOption[];
+  classifications: LocationClassificationRef[];
   editData?: StockLocation | null;
   defaultYardId?: number;
 }
@@ -81,6 +91,7 @@ export function StockLocationFormDialog({
   onSuccess,
   yards,
   sizes,
+  classifications,
   editData,
   defaultYardId,
 }: Props) {
@@ -103,6 +114,9 @@ export function StockLocationFormDialog({
         nameAr: editData.nameAr,
         segment: editData.segment,
         expectedSizeId: editData.expectedSize ? String(editData.expectedSize.id) : "",
+        expectedClassificationId: editData.expectedClassification
+          ? String(editData.expectedClassification.id)
+          : "",
         gridRow: String(editData.gridRow),
         gridCol: String(editData.gridCol),
         gridSpan: String(editData.gridSpan),
@@ -148,6 +162,14 @@ export function StockLocationFormDialog({
     ],
     [sizes, t],
   );
+  const classificationItems = useMemo(
+    () => [
+      { value: NO_CLASSIFICATION_SELECT_VALUE, label: t("noClassification") },
+      ...classifications.map((c) => ({ value: String(c.id), label: c.displayName })),
+    ],
+    [classifications, t],
+  );
+  const showClassification = segmentHoldsSteelClassification(form.segment);
   const statusItems = useMemo(
     () => [
       { value: "active", label: t("statusActive") },
@@ -162,6 +184,11 @@ export function StockLocationFormDialog({
     try {
       const expectedSizeId =
         form.expectedSizeId === "" ? null : Number(form.expectedSizeId);
+      const expectedClassificationId = showClassification
+        ? form.expectedClassificationId
+          ? Number(form.expectedClassificationId)
+          : null
+        : null;
 
       let url: string;
       let method: string;
@@ -174,6 +201,7 @@ export function StockLocationFormDialog({
           nameAr: form.nameAr,
           segment: form.segment,
           expectedSizeId,
+          expectedClassificationId,
           gridRow: Number(form.gridRow),
           gridCol: Number(form.gridCol),
           gridSpan: Number(form.gridSpan),
@@ -192,6 +220,7 @@ export function StockLocationFormDialog({
           nameAr: form.nameAr,
           segment: form.segment,
           expectedSizeId,
+          expectedClassificationId,
           gridRow: Number(form.gridRow),
           gridCol: Number(form.gridCol),
           gridSpan: Number(form.gridSpan),
@@ -287,7 +316,16 @@ export function StockLocationFormDialog({
               <Select
                 items={segmentItems}
                 value={form.segment}
-                onValueChange={(v) => set("segment", (v ?? "GENERAL") as Segment)}
+                onValueChange={(v) => {
+                  const next = (v ?? "GENERAL") as Segment;
+                  setForm((prev) => ({
+                    ...prev,
+                    segment: next,
+                    expectedClassificationId: segmentHoldsSteelClassification(next)
+                      ? prev.expectedClassificationId
+                      : "",
+                  }));
+                }}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue />
@@ -332,6 +370,36 @@ export function StockLocationFormDialog({
               <p className="text-xs text-muted-foreground">{t("indicativeSizeHint")}</p>
             </div>
           </div>
+
+          {showClassification && (
+            <div className="space-y-1.5">
+              <Label>{t("expectedClassification")}</Label>
+              <Select
+                items={classificationItems}
+                value={classificationSelectValue(form.expectedClassificationId)}
+                onValueChange={(v) =>
+                  set("expectedClassificationId", classificationIdFromSelect(v))
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder={t("noClassification")} />
+                </SelectTrigger>
+                <SelectContent dir={dir}>
+                  <SelectItem value={NO_CLASSIFICATION_SELECT_VALUE}>
+                    {t("noClassification")}
+                  </SelectItem>
+                  {classifications.map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)}>
+                      {c.displayName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {t("expectedClassificationHint")}
+              </p>
+            </div>
+          )}
 
           <div className="grid gap-4 grid-cols-3">
             <div className="space-y-1.5">

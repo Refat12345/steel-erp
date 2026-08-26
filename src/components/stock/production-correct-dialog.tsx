@@ -36,6 +36,8 @@ export interface CorrectableEntry {
   locationId: number;
   locationNameAr: string;
   sizeName: string | null;
+  /** Technical classification of the original entry (kept by the correction). */
+  classificationName?: string | null;
   quantity: number;
   unit: StockUnit;
   segment: Segment;
@@ -161,7 +163,9 @@ export function ProductionCorrectDialog({
               {t("correctEntryOriginal", {
                 qty: `${originalQtyLabel} ${tEnums(`stockUnit.${entry.unit}`)}`,
                 location: entry.sizeName
-                  ? `${entry.locationNameAr} · ${entry.sizeName}`
+                  ? `${entry.locationNameAr} · ${entry.sizeName}${
+                      entry.classificationName ? ` ${entry.classificationName}` : ""
+                    }`
                   : entry.locationNameAr,
               })}
             </p>

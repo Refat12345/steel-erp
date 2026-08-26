@@ -1,10 +1,18 @@
 import { prisma } from "@/lib/db";
-import { Prisma, type StockLocationSegment } from "@prisma/client";
+import { Prisma, SalesOrderGrade, type StockLocationSegment } from "@prisma/client";
 import type {
   StockLocationCreateInput,
   StockLocationUpdateInput,
 } from "@/lib/validators/stock-location";
-import { deriveUnitAndGrade } from "@/lib/validators/stock-location";
+import {
+  deriveUnitAndGrade,
+  segmentAllowsExpectedClassification,
+} from "@/lib/validators/stock-location";
+import { isOfferedSteelClassificationCode } from "@/lib/steel-classification-default";
+import {
+  dedicateLocationToClassificationInTx,
+  retagStockClassificationInTx,
+} from "./stock-classification-retag";
 import { ServiceError } from "./errors";
 import { logAudit } from "./audit.service";
 import { withRetry } from "./tx-retry";
@@ -14,6 +22,9 @@ type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
 const locationInclude = {
   expectedSize: { select: { id: true, code: true, displayName: true } },
+  expectedClassification: {
+    select: { id: true, code: true, displayName: true, displayNameEn: true },
+  },
   _count: { select: { movements: true } },
 } satisfies Prisma.StockLocationInclude;
 
@@ -66,6 +77,32 @@ async function assertExpectedSizeExists(
   if (!size) throw new ServiceError("sizeNotFound", "BAD_REQUEST");
 }
 
+/**
+ * B500B dedication is only offered on first-grade bays. Retired codes
+ * (B400DWR) cannot be assigned as a location dedication.
+ */
+async function resolveExpectedClassificationId(
+  tx: TxClient,
+  segment: StockLocationSegment,
+  expectedClassificationId: number | null | undefined,
+): Promise<number | null> {
+  if (!segmentAllowsExpectedClassification(segment)) return null;
+  if (expectedClassificationId == null) return null;
+  const classification = await tx.steelClassification.findUnique({
+    where: { id: expectedClassificationId },
+    select: { id: true, code: true, grade: true, isActive: true },
+  });
+  if (
+    !classification ||
+    !classification.isActive ||
+    classification.grade !== SalesOrderGrade.FIRST ||
+    !isOfferedSteelClassificationCode(classification.code)
+  ) {
+    throw new ServiceError("locationExpectedClassificationInvalid", "BAD_REQUEST");
+  }
+  return classification.id;
+}
+
 export async function createLocation(
   data: StockLocationCreateInput,
   userId: number,
@@ -86,6 +123,11 @@ export async function createLocation(
         if (!yard.isActive) throw new ServiceError("yardDisabled");
 
         await assertExpectedSizeExists(tx, data.expectedSizeId);
+        const expectedClassificationId = await resolveExpectedClassificationId(
+          tx,
+          data.segment as StockLocationSegment,
+          data.expectedClassificationId,
+        );
 
         const duplicate = await tx.stockLocation.findUnique({
           where: { yardId_code: { yardId: data.yardId, code } },
@@ -104,6 +146,7 @@ export async function createLocation(
             unit,
             allowedGrade,
             expectedSizeId: data.expectedSizeId ?? null,
+            expectedClassificationId,
             notes: data.notes?.trim() || null,
             sortOrder: data.sortOrder ?? 0,
             gridRow: data.gridRow,
@@ -194,6 +237,38 @@ export async function updateLocation(
           nextGrade = derived.allowedGrade;
         }
 
+        const nextExpectedClassificationId = await resolveExpectedClassificationId(
+          tx,
+          nextSegment,
+          data.expectedClassificationId !== undefined
+            ? data.expectedClassificationId
+            : existing.expectedClassificationId,
+        );
+
+        if (
+          nextExpectedClassificationId != null &&
+          nextExpectedClassificationId !== existing.expectedClassificationId
+        ) {
+          await retagStockClassificationInTx(
+            tx,
+            id,
+            null,
+            nextExpectedClassificationId,
+            userId,
+          );
+        } else if (
+          nextExpectedClassificationId == null &&
+          existing.expectedClassificationId != null
+        ) {
+          await retagStockClassificationInTx(
+            tx,
+            id,
+            existing.expectedClassificationId,
+            null,
+            userId,
+          );
+        }
+
         const location = await tx.stockLocation.update({
           where: { id },
           data: {
@@ -205,6 +280,7 @@ export async function updateLocation(
             ...(data.expectedSizeId !== undefined
               ? { expectedSizeId: data.expectedSizeId }
               : {}),
+            expectedClassificationId: nextExpectedClassificationId,
             ...(data.notes !== undefined
               ? { notes: data.notes?.trim() || null }
               : {}),
@@ -233,6 +309,34 @@ export async function updateLocation(
 
   logger.info({ locationId: id }, "stock location updated");
   return updated;
+}
+
+/**
+ * Mark a first-grade bay as B500B after the pile is already on the ground.
+ * Dedicates the location and retags unclassified balances so the existing
+ * bundles become B500B without rewriting history.
+ */
+export async function markLocationClassification(
+  id: number,
+  classificationId: number,
+  userId: number,
+) {
+  const result = await withRetry(() =>
+    prisma.$transaction(
+      async (tx) =>
+        dedicateLocationToClassificationInTx(tx, id, classificationId, userId),
+      { isolationLevel: "Serializable" },
+    ),
+  );
+  logger.info(
+    {
+      locationId: id,
+      classificationId,
+      retaggedLines: result.retaggedLines,
+    },
+    "stock location marked with steel classification",
+  );
+  return result;
 }
 
 /**

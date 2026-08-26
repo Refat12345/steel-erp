@@ -72,6 +72,21 @@ export function localizedSize(
   return pickLocalizedName(locale, size.displayName, size.displayNameEn);
 }
 
+export function localizedClassification(
+  classification:
+    | { displayName: string; displayNameEn?: string | null }
+    | null
+    | undefined,
+  locale: Locale,
+): string {
+  if (!classification) return "";
+  return pickLocalizedName(
+    locale,
+    classification.displayName,
+    classification.displayNameEn,
+  );
+}
+
 export function localizedRole(
   role: { displayName: string; displayNameEn?: string | null } | null | undefined,
   locale: Locale,
@@ -166,6 +181,21 @@ function withLocalizedSizeFields<T extends SizeFields>(size: T, locale: Locale):
   return { ...size, displayName: localizedSize(size, locale) };
 }
 
+type ClassificationFields = {
+  displayName: string;
+  displayNameEn?: string | null;
+};
+
+function withLocalizedClassificationFields<T extends ClassificationFields>(
+  classification: T,
+  locale: Locale,
+): T {
+  return {
+    ...classification,
+    displayName: localizedClassification(classification, locale),
+  };
+}
+
 function withLocalizedStockNameFields<T extends StockNameFields>(
   entity: T,
   locale: Locale,
@@ -183,12 +213,18 @@ export function withLocalizedTruckLabels<T extends Record<string, unknown>>(
 ): T {
   const dest = truck.destination as DestinationFields | null | undefined;
   const requestItems = truck.requestItems as
-    | Array<{ size: SizeFields } & Record<string, unknown>>
+    | Array<
+        {
+          size: SizeFields;
+          classification?: ClassificationFields | null;
+        } & Record<string, unknown>
+      >
     | undefined;
   const sessions = truck.sessions as
     | Array<
         {
           size: SizeFields | null;
+          classification?: ClassificationFields | null;
           sourceLocation?: SourceLocationFields | null;
         } & Record<string, unknown>
       >
@@ -213,6 +249,14 @@ export function withLocalizedTruckLabels<T extends Record<string, unknown>>(
           requestItems: requestItems.map((item) => ({
             ...item,
             size: withLocalizedSizeFields(item.size, locale),
+            ...(item.classification
+              ? {
+                  classification: withLocalizedClassificationFields(
+                    item.classification,
+                    locale,
+                  ),
+                }
+              : {}),
           })),
         }
       : {}),
@@ -235,6 +279,14 @@ export function withLocalizedTruckLabels<T extends Record<string, unknown>>(
             return {
               ...s,
               size: s.size ? withLocalizedSizeFields(s.size, locale) : s.size,
+              ...(s.classification
+                ? {
+                    classification: withLocalizedClassificationFields(
+                      s.classification,
+                      locale,
+                    ),
+                  }
+                : {}),
               sourceLocation,
             };
           }),

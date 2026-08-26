@@ -43,6 +43,8 @@ interface BalanceLine {
   sizeId: number | null;
   sizeName: string | null;
   grade: "FIRST" | "SECOND" | null;
+  classificationId: number | null;
+  classificationName: string | null;
   unit: StockUnit;
   quantity: number;
 }
@@ -69,6 +71,7 @@ interface Movement {
   locationNameAr: string;
   sizeName: string | null;
   grade: "FIRST" | "SECOND" | null;
+  classificationName: string | null;
   quantity: number;
   unit: StockUnit;
   reason: string | null;
@@ -213,7 +216,9 @@ export function StockMovementsView() {
                           : b.lines
                               .map((l) =>
                                 t("balanceLine", {
-                                  size: l.sizeName ?? t("shortbar"),
+                                  size: l.classificationName
+                                    ? `${l.sizeName ?? t("shortbar")} ${l.classificationName}`
+                                    : (l.sizeName ?? t("shortbar")),
                                   gradePart: l.grade
                                     ? t("gradePart", { grade: gradeLabel(l.grade) })
                                     : "",
@@ -335,6 +340,11 @@ export function StockMovementsView() {
                       </TableCell>
                       <TableCell className="text-start text-xs">
                         {m.sizeName ?? t("shortbar")}
+                        {m.classificationName && (
+                          <span className="ms-1 text-muted-foreground">
+                            {m.classificationName}
+                          </span>
+                        )}
                         {m.grade
                           ? t("gradeDot", { grade: gradeLabel(m.grade) })
                           : ""}

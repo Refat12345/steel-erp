@@ -156,6 +156,24 @@ async function main() {
   }
   console.log("  ✓ Sizes seeded");
 
+  // ─── Steel Classifications ────────────────────────────────────
+  // Technical sub-classifications WITHIN a commercial grade. B500B is the
+  // only active choice; B400DWR is kept inactive for historical rows.
+  // Codes are identical in Arabic and English UI.
+  const steelClassifications = [
+    { code: "B500B", displayName: "B500B", displayNameEn: "B500B", grade: "FIRST" as const, isActive: true, sortOrder: 1 },
+    { code: "B400DWR", displayName: "B400DWR", displayNameEn: "B400DWR", grade: "FIRST" as const, isActive: false, sortOrder: 2 },
+  ];
+
+  for (const classification of steelClassifications) {
+    await prisma.steelClassification.upsert({
+      where: { code: classification.code },
+      update: classification,
+      create: classification,
+    });
+  }
+  console.log("  ✓ Steel classifications seeded");
+
   // ─── Destination Lookup ────────────────────────────────────────
   const destinations = [
     { name: "دمشق", nameEn: "Damascus", details: "المدينة والمناطق المحيطة", isActive: true, sortOrder: 1 },

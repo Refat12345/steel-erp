@@ -17,7 +17,10 @@ import {
   type UpdateTruckInput,
 } from "@/lib/services/truck.service";
 import { computeTruckTimings } from "@/lib/truck-timing";
-import { NOTES_ONLY_EDITABLE_STATUSES } from "@/lib/truck-edit-ui";
+import {
+  NOTES_ONLY_EDITABLE_STATUSES,
+  isRequestItemsEditableDuringLoading,
+} from "@/lib/truck-edit-ui";
 import { getRequestLocale } from "@/lib/i18n/request-locale";
 import { withLocalizedTruckLabels } from "@/lib/localized-name";
 
@@ -66,10 +69,10 @@ export async function PATCH(
 ) {
   const session = await getApiSession();
   if (!session) return unauthorized();
-  if (
-    !hasPermission(session, "truck.edit_queued") &&
-    !hasPermission(session, "truck.edit_approved")
-  )
+  const canEditQueued = hasPermission(session, "truck.edit_queued");
+  const canEditApproved = hasPermission(session, "truck.edit_approved");
+  const canEditRequestItems = hasPermission(session, "truck.edit_request_items");
+  if (!canEditQueued && !canEditApproved && !canEditRequestItems)
     return forbidden();
 
   const { id } = await params;
@@ -89,44 +92,70 @@ export async function PATCH(
       const current = await getOperationDetail(truckId);
       const { expectedVersion, ...patch } = validated.data;
 
-      // Mid-weighing (OnScale/LoadingComplete/SecondWeigh): notes-only edits,
-      // gated by the same permission as approved-truck edits. Any other field
-      // in the payload is rejected — registration/order data is frozen here.
-      if (
-        (NOTES_ONLY_EDITABLE_STATUSES as readonly string[]).includes(current.status)
-      ) {
-        if (!hasPermission(session, "truck.edit_approved")) {
-          return forbidden();
-        }
-        const NON_NOTES_FIELDS = [
+      // Mid-weighing: registration/order data is frozen, but request items
+      // stay editable until close so clerks can align the request with what
+      // was loaded. Notes-only patches still use the dedicated notes path.
+      if (isRequestItemsEditableDuringLoading(current.status)) {
+        const FROZEN_FIELDS = [
           "customerId",
           "destinationId",
           "plateNumber",
           "driverName",
           "salesOrderNumber",
-          "requestItems",
           "operationalGrade",
         ] as const;
-        if (NON_NOTES_FIELDS.some((field) => patch[field] !== undefined)) {
-          return badRequest("notesOnlyEditableInStatus");
+        if (FROZEN_FIELDS.some((field) => patch[field] !== undefined)) {
+          return badRequest("afterApprovalOnlyRequestItemsEditable");
         }
-        const truck = await updateTruckNotes(
-          truckId,
-          patch.notes ?? null,
-          expectedVersion,
-          session.userId,
-        );
-        return ok(truck);
+        if (patch.requestItems !== undefined) {
+          if (!canEditRequestItems) return forbidden();
+          if (patch.notes !== undefined && !canEditApproved) {
+            return forbidden();
+          }
+          const truck = await updateTruckBeforeWeigh(
+            truckId,
+            {
+              requestItems: patch.requestItems,
+              ...(patch.notes !== undefined ? { notes: patch.notes || null } : {}),
+            },
+            expectedVersion,
+            session.userId,
+          );
+          return ok(truck);
+        }
+        if (
+          (NOTES_ONLY_EDITABLE_STATUSES as readonly string[]).includes(current.status)
+        ) {
+          if (!canEditApproved) return forbidden();
+          const truck = await updateTruckNotes(
+            truckId,
+            patch.notes ?? null,
+            expectedVersion,
+            session.userId,
+          );
+          return ok(truck);
+        }
+        return badRequest("afterApprovalOnlyRequestItemsEditable");
       }
 
-      if (current.status === "Queued" && !hasPermission(session, "truck.edit_queued")) {
+      if (current.status === "Queued" && !canEditQueued) {
         return forbidden();
       }
-      if (
-        (current.status === "Approved" || current.status === "FirstWeigh") &&
-        !hasPermission(session, "truck.edit_approved")
-      ) {
-        return forbidden();
+      if (current.status === "Approved") {
+        if (!canEditRequestItems) return forbidden();
+      }
+      if (current.status === "FirstWeigh") {
+        const sendingRequestItems = patch.requestItems !== undefined;
+        const sendingAfterTareFields =
+          patch.destinationId !== undefined ||
+          patch.driverName !== undefined ||
+          patch.notes !== undefined ||
+          patch.operationalGrade !== undefined;
+        if (sendingRequestItems && !canEditRequestItems) return forbidden();
+        if (sendingAfterTareFields && !canEditApproved) return forbidden();
+        if (!sendingRequestItems && !sendingAfterTareFields) {
+          return forbidden();
+        }
       }
 
       const updateInput: UpdateTruckInput = { ...patch };

@@ -100,6 +100,7 @@ const ROUTE_PERMISSIONS: RouteRule[] = [
       "stock.adjust",
       "stock.opening_balance",
       "stock.location.manage",
+      "stock.classification.mark",
     ],
   },
   { pattern: /^\/api\/stock(\/.*)?$/, permissions: ["stock.view"] },

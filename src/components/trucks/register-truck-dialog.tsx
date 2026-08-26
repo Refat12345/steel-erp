@@ -24,6 +24,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { Trash2, Plus } from "lucide-react";
 import { createClientIdempotencyKey } from "@/lib/browser-idempotency-key";
 import { sizeCodeSupportsGrade, sizeCodeToKind } from "@/lib/material-kind";
+import {
+  classificationIdFromSelect,
+  classificationSelectValue,
+  defaultClassificationId,
+  isSizeSelectableOnRequestLine,
+  NO_CLASSIFICATION_SELECT_VALUE,
+  offeredClassificationSelectIds,
+  offeredSteelClassifications,
+  resolveClassificationId,
+  unusedClassificationId,
+  usedClassificationIdsForSizeGrade,
+} from "@/lib/steel-classification-default";
 import type { SalesOrderGrade } from "@prisma/client";
 import { DestinationSelect } from "@/components/destinations/destination-select";
 import { getTextDirection, type Locale } from "@/i18n/config";
@@ -41,12 +53,25 @@ interface SizeOption {
   isBundleType: boolean;
 }
 
+interface ClassificationOption {
+  id: number;
+  code: string;
+  displayName: string;
+  grade: SalesOrderGrade;
+}
+
 interface RequestItemRow {
   key: number;
   /** Size catalog `code` (e.g. "8mm"); maps to numeric id only when submitting. */
   sizeCode: string;
   /** Grade for this line ("" = none). Same size may repeat once per grade. */
   grade: SalesOrderGrade | "";
+  /**
+   * Technical classification id as string ("" = none). Same size+grade may
+   * repeat once per classification (e.g. 16mm FIRST B500B + 16mm FIRST
+   * B400DWR). Only offered when the line's grade has classifications.
+   */
+  classificationId: string;
   bundleCount: string;
   requestedTons: string;
 }
@@ -80,19 +105,23 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [sizes, setSizes] = useState<SizeOption[]>([]);
+  const [classifications, setClassifications] = useState<ClassificationOption[]>([]);
   const [loadingRef, setLoadingRef] = useState(true);
 
   const fetchReferenceData = useCallback(async () => {
     setLoadingRef(true);
     try {
-      const [custRes, sizeRes] = await Promise.all([
+      const [custRes, sizeRes, classRes] = await Promise.all([
         fetch("/api/customers?active=true&limit=500"),
         fetch("/api/sizes"),
+        fetch("/api/steel-classifications"),
       ]);
       const custJson = await custRes.json();
       const sizeJson = await sizeRes.json();
+      const classJson = await classRes.json();
       if (custJson.success) setCustomers(custJson.data || []);
       if (sizeJson.success) setSizes(sizeJson.data || []);
+      if (classJson.success) setClassifications(offeredSteelClassifications(classJson.data || []));
     } catch {
       toast.error(t("errorRefData"));
     } finally {
@@ -116,6 +145,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
   };
 
   const addRequestItem = () => {
+    const grade = isRebarLoad ? operationalGrade : "";
     setRequestItems((prev) => [
       ...prev,
       {
@@ -123,7 +153,8 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
         sizeCode: "",
         // New rows inherit the operation-level grade so the common
         // single-grade flow never needs the per-row grade field.
-        grade: isRebarLoad ? operationalGrade : "",
+        grade,
+        classificationId: defaultClassificationId(classifications, grade),
         bundleCount: "",
         requestedTons: "",
       },
@@ -136,7 +167,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
 
   const updateRequestItem = (
     key: number,
-    field: "sizeCode" | "grade" | "bundleCount" | "requestedTons",
+    field: "sizeCode" | "grade" | "classificationId" | "bundleCount" | "requestedTons",
     value: string,
   ) => {
     setRequestItems((prev) =>
@@ -150,12 +181,55 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
               : kind === "REBAR"
                 ? r.grade || operationalGrade || ""
                 : r.grade;
+          const resolved = resolveClassificationId({
+            current: r.classificationId,
+            nextGrade: grade,
+            classifications,
+            applyDefaultIfEmpty: !r.grade && !!grade,
+          });
           return {
             ...r,
             sizeCode: value,
             bundleCount: "",
             requestedTons: "",
             grade,
+            classificationId: unusedClassificationId({
+              current: resolved,
+              usedByOthers: usedClassificationIdsForSizeGrade(
+                prev.filter((other) => other.key !== key),
+                value,
+                grade,
+              ),
+              offeredClassificationIds: offeredClassificationSelectIds(
+                classifications,
+                grade,
+              ),
+            }),
+          };
+        }
+        if (field === "grade") {
+          const grade = (value as SalesOrderGrade | "") ?? "";
+          const resolved = resolveClassificationId({
+            current: r.classificationId,
+            nextGrade: grade,
+            classifications,
+            applyDefaultIfEmpty: true,
+          });
+          return {
+            ...r,
+            grade,
+            classificationId: unusedClassificationId({
+              current: resolved,
+              usedByOthers: usedClassificationIdsForSizeGrade(
+                prev.filter((other) => other.key !== key),
+                r.sizeCode,
+                grade,
+              ),
+              offeredClassificationIds: offeredClassificationSelectIds(
+                classifications,
+                grade,
+              ),
+            }),
           };
         }
         return { ...r, [field]: value };
@@ -163,13 +237,8 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
     );
   };
 
-  // Uniqueness is per (size, grade): "12mm FIRST" and "12mm SECOND" may
-  // coexist on the same request.
-  const usedSizeGradeKeys = new Set(
-    requestItems
-      .filter((r) => r.sizeCode)
-      .map((r) => `${r.sizeCode}:${r.grade}`),
-  );
+  // Uniqueness is per (size, grade, classification): "16mm FIRST unclassified"
+  // and "16mm FIRST B500B" may coexist on the same request.
 
   /** Lets Select.Value show the customer name; Base UI renders raw `value` without `items`. */
   const customerSelectItems = useMemo(
@@ -196,6 +265,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
     const items: {
       sizeId: number;
       grade: SalesOrderGrade | null;
+      classificationId: number | null;
       bundleCount: number | null;
       requestedTons: number | null;
     }[] = [];
@@ -208,7 +278,10 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
       }
       const grade =
         isRebarLoad && r.grade && sizeCodeSupportsGrade(r.sizeCode) ? r.grade : null;
-      const dupKey = `${sz.id}:${grade ?? ""}`;
+      // Classification only travels with a graded line — never without grade.
+      const classificationId =
+        grade && r.classificationId ? Number(r.classificationId) : null;
+      const dupKey = `${sz.id}:${grade ?? ""}:${classificationId ?? ""}`;
       if (seenKeys.has(dupKey)) {
         toast.error(t("toastDuplicateSizeGrade"));
         return;
@@ -228,6 +301,7 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
       items.push({
         sizeId: sz.id,
         grade,
+        classificationId,
         bundleCount: sz.isBundleType ? bundleCount : null,
         requestedTons: sz.isBundleType ? null : requestedTons,
       });
@@ -321,10 +395,12 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                 setIsRebarLoad(rebar);
                 // Clear grades immediately when kind changes away from REBAR
                 // so no stale value survives in the payload — including the
-                // per-row grades on request items.
+                // per-row grades and classifications on request items.
                 if (!rebar) {
                   setOperationalGrade("");
-                  setRequestItems((prev) => prev.map((r) => ({ ...r, grade: "" })));
+                  setRequestItems((prev) =>
+                    prev.map((r) => ({ ...r, grade: "", classificationId: "" })),
+                  );
                 }
               }}
             >
@@ -411,6 +487,19 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
             <div className="min-w-0 space-y-2">
               {requestItems.map((row) => {
                 const selectedSize = sizes.find((s) => s.code === row.sizeCode);
+                const usedClassIds = usedClassificationIdsForSizeGrade(
+                  requestItems.filter((r) => r.key !== row.key),
+                  row.sizeCode,
+                  row.grade,
+                );
+                const classOptions = classifications.filter(
+                  (c) =>
+                    c.grade === row.grade &&
+                    (String(c.id) === row.classificationId ||
+                      !usedClassIds.has(String(c.id))),
+                );
+                const noneAvailable =
+                  row.classificationId === "" || !usedClassIds.has("");
                 return (
                   <div
                     key={row.key}
@@ -427,10 +516,17 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                       </SelectTrigger>
                       <SelectContent>
                         {sizes
-                          .filter(
-                            (s) =>
-                              s.code === row.sizeCode ||
-                              !usedSizeGradeKeys.has(`${s.code}:${row.grade}`),
+                          .filter((s) =>
+                            isSizeSelectableOnRequestLine({
+                              sizeCode: s.code,
+                              rowSizeCode: row.sizeCode,
+                              rowGrade: row.grade,
+                              otherLines: requestItems.filter((r) => r.key !== row.key),
+                              offeredClassificationIds: offeredClassificationSelectIds(
+                                classifications,
+                                row.grade,
+                              ),
+                            }),
                           )
                           .map((s) => (
                             <SelectItem key={s.id} value={s.code}>
@@ -459,6 +555,51 @@ export function RegisterTruckDialog({ open, onOpenChange, onSuccess }: Props) {
                         </SelectContent>
                       </Select>
                     )}
+                    {isRebarLoad &&
+                      sizeCodeSupportsGrade(row.sizeCode) &&
+                      row.grade &&
+                      classifications.some((c) => c.grade === row.grade) && (
+                        <Select
+                          items={[
+                            ...(noneAvailable
+                              ? [
+                                  {
+                                    value: NO_CLASSIFICATION_SELECT_VALUE,
+                                    label: t("noClassificationShort"),
+                                  },
+                                ]
+                              : []),
+                            ...classOptions.map((c) => ({
+                              value: String(c.id),
+                              label: c.displayName,
+                            })),
+                          ]}
+                          value={classificationSelectValue(row.classificationId)}
+                          onValueChange={(v) =>
+                            updateRequestItem(
+                              row.key,
+                              "classificationId",
+                              classificationIdFromSelect(v),
+                            )
+                          }
+                        >
+                          <SelectTrigger className="w-full min-w-0">
+                            <SelectValue placeholder={t("noClassificationShort")} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {noneAvailable && (
+                              <SelectItem value={NO_CLASSIFICATION_SELECT_VALUE}>
+                                {t("noClassificationShort")}
+                              </SelectItem>
+                            )}
+                            {classOptions.map((c) => (
+                              <SelectItem key={c.id} value={String(c.id)}>
+                                {c.displayName}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
                     <div className="flex min-w-0 items-center gap-2">
                       {selectedSize?.isBundleType === false ? (
                         <Input

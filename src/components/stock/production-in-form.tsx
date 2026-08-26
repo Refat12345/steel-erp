@@ -47,6 +47,7 @@ import {
   type Segment,
   type StockUnit,
   type SizeOption,
+  type LocationClassificationRef,
 } from "./stock-shared";
 
 interface TodayEntry {
@@ -57,6 +58,7 @@ interface TodayEntry {
   locationNameAr: string;
   sizeId: number | null;
   sizeName: string | null;
+  classificationName: string | null;
   segment: Segment;
   quantity: number;
   unit: StockUnit;
@@ -88,6 +90,7 @@ interface LocationOption {
   isActive: boolean;
   yardNameAr: string;
   expectedSize: { id: number; displayName: string } | null;
+  expectedClassification: LocationClassificationRef | null;
   /** Positive BUNDLE balance size when the bay is occupied — wins over expectedSize. */
   currentSize: { id: number; displayName: string } | null;
 }
@@ -103,6 +106,7 @@ interface ApiYard {
     allowedGrade: "FIRST" | "SECOND" | null;
     isActive: boolean;
     expectedSize: { id: number; displayName: string } | null;
+    expectedClassification: LocationClassificationRef | null;
   }>;
 }
 
@@ -422,7 +426,9 @@ export function ProductionInForm({
     () =>
       locations.map((l) => ({
         value: String(l.id),
-        label: `${l.nameAr} (${l.yardNameAr})`,
+        label: `${l.nameAr} (${l.yardNameAr})${
+          l.expectedClassification ? ` · ${l.expectedClassification.code}` : ""
+        }`,
       })),
     [locations],
   );
@@ -507,6 +513,7 @@ export function ProductionInForm({
           locationId: selected.id,
           unit: effectiveUnit,
           sizeId: needsSize ? Number(sizeId) : null,
+          classificationId: null,
           quantity: qty,
           shift,
           reason,
@@ -585,6 +592,11 @@ export function ProductionInForm({
                         <span className="ms-1 text-xs text-muted-foreground">
                           ({l.yardNameAr})
                         </span>
+                        {l.expectedClassification && (
+                          <span className="ms-1 font-mono text-xs">
+                            {l.expectedClassification.code}
+                          </span>
+                        )}
                       </span>
                     </SelectItem>
                   ))}
@@ -597,6 +609,11 @@ export function ProductionInForm({
                 <Badge variant="secondary" className="text-[10px]">
                   {t("gradeBadge", { grade: gradeLabel(selected.allowedGrade) })}
                 </Badge>
+                {selected.expectedClassification && (
+                  <Badge variant="outline" className="font-mono text-[10px]">
+                    {selected.expectedClassification.code}
+                  </Badge>
+                )}
                 <Badge variant="secondary" className="text-[10px]">
                   {isDualUnitSegment(selected.segment)
                     ? t("rebarDualUnit")
@@ -946,6 +963,14 @@ export function ProductionInForm({
                                       className="max-w-full truncate text-[10px] font-normal"
                                     >
                                       {e.sizeName}
+                                    </Badge>
+                                  )}
+                                  {e.classificationName && (
+                                    <Badge
+                                      variant="outline"
+                                      className="max-w-full truncate text-[10px] font-normal"
+                                    >
+                                      {e.classificationName}
                                     </Badge>
                                   )}
                                   {gap && (

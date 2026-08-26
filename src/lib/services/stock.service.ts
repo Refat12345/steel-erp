@@ -20,6 +20,7 @@ import { withRetry } from "./tx-retry";
 import { logger } from "@/lib/logger";
 import { isStockModuleEnabled } from "@/config/feature-flags";
 import { clampEventWindow } from "./settings.service";
+import { dedicateLocationToClassificationInTx } from "./stock-classification-retag";
 
 // ── Unit model (segment → tracked counting units) ───────────────────────────
 
@@ -118,6 +119,9 @@ export interface BalanceLine {
   sizeId: number | null;
   sizeName: string | null;
   grade: SalesOrderGrade | null;
+  /** Technical classification (B500B / B400DWR); null = unclassified stock. */
+  classificationId: number | null;
+  classificationName: string | null;
   unit: StockUnit;
   quantity: number;
 }
@@ -132,7 +136,11 @@ export interface LocationBalance {
   unit: "BUNDLE" | "TON";
   /** True for rebar sites that carry a parallel tonnage balance. */
   isDualUnit: boolean;
+  /** Commercial grade of everything stored here (null for short-bar). */
+  allowedGrade: SalesOrderGrade | null;
   expectedSize: { id: number; displayName: string } | null;
+  /** Hard B500B dedication; null = ordinary (unclassified) first-grade bay. */
+  expectedClassification: { id: number; code: string; displayName: string } | null;
   isActive: boolean;
   gridRow: number;
   gridCol: number;
@@ -149,14 +157,15 @@ export interface BalanceFilters {
   segment?: StockLocationSegment;
   sizeId?: number;
   grade?: SalesOrderGrade;
+  classificationId?: number;
   includeInactive?: boolean;
 }
 
 /**
  * Per-location current balances, derived as SUM(quantity) grouped by
- * (location, size, grade). Locations with no movements come back with an
- * empty `lines` array and a zero total, so the map/report can still show
- * every configured site.
+ * (location, size, grade, classification). Locations with no movements come
+ * back with an empty `lines` array and a zero total, so the map/report can
+ * still show every configured site.
  */
 export async function getLocationBalances(
   filters: BalanceFilters = {},
@@ -174,6 +183,7 @@ export async function getLocationBalances(
     include: {
       yard: { select: { nameAr: true } },
       expectedSize: { select: { id: true, displayName: true } },
+      expectedClassification: { select: { id: true, code: true, displayName: true } },
     },
   });
   if (locations.length === 0) return [];
@@ -185,16 +195,17 @@ export async function getLocationBalances(
   };
   if (filters.sizeId) movementWhere.sizeId = filters.sizeId;
   if (filters.grade) movementWhere.grade = filters.grade;
+  if (filters.classificationId) movementWhere.classificationId = filters.classificationId;
 
   // Group by unit as well: a rebar site holds parallel BUNDLE and TON balances
   // (often for the same size), so summing across units would be meaningless.
   const grouped = await prisma.stockMovement.groupBy({
-    by: ["locationId", "sizeId", "grade", "unit"],
+    by: ["locationId", "sizeId", "grade", "classificationId", "unit"],
     where: movementWhere,
     _sum: { quantity: true },
   });
 
-  // Size display names for the grouped lines.
+  // Size / classification display names for the grouped lines.
   const sizeIds = [...new Set(grouped.map((g) => g.sizeId).filter((s): s is number => s != null))];
   const sizes = sizeIds.length
     ? await prisma.sizeLookup.findMany({
@@ -203,6 +214,23 @@ export async function getLocationBalances(
       })
     : [];
   const sizeNameById = new Map(sizes.map((s) => [s.id, s.displayName]));
+  const classificationIds = [
+    ...new Set(
+      grouped
+        .map((g) => g.classificationId)
+        .filter((c): c is number => c != null),
+    ),
+  ];
+  const classificationsById = classificationIds.length
+    ? new Map(
+        (
+          await prisma.steelClassification.findMany({
+            where: { id: { in: classificationIds } },
+            select: { id: true, displayName: true },
+          })
+        ).map((c) => [c.id, c.displayName]),
+      )
+    : new Map<number, string>();
 
   const linesByLocation = new Map<number, BalanceLine[]>();
   // Per-location totals split by unit so we can expose the primary total and
@@ -217,6 +245,11 @@ export async function getLocationBalances(
       sizeId: row.sizeId,
       sizeName: row.sizeId != null ? sizeNameById.get(row.sizeId) ?? null : null,
       grade: row.grade,
+      classificationId: row.classificationId,
+      classificationName:
+        row.classificationId != null
+          ? classificationsById.get(row.classificationId) ?? null
+          : null,
       unit: row.unit,
       quantity: qty.toNumber(),
     };
@@ -248,15 +281,25 @@ export async function getLocationBalances(
       segment: l.segment,
       unit: l.unit,
       isDualUnit: dual,
+      allowedGrade: l.allowedGrade,
       expectedSize: l.expectedSize
         ? { id: l.expectedSize.id, displayName: l.expectedSize.displayName }
+        : null,
+      expectedClassification: l.expectedClassification
+        ? {
+            id: l.expectedClassification.id,
+            code: l.expectedClassification.code,
+            displayName: l.expectedClassification.displayName,
+          }
         : null,
       isActive: l.isActive,
       gridRow: l.gridRow,
       gridCol: l.gridCol,
       gridSpan: l.gridSpan,
-      lines: (linesByLocation.get(l.id) ?? []).sort((a, b) =>
-        (a.sizeName ?? "").localeCompare(b.sizeName ?? ""),
+      lines: (linesByLocation.get(l.id) ?? []).sort(
+        (a, b) =>
+          (a.sizeName ?? "").localeCompare(b.sizeName ?? "") ||
+          (a.classificationName ?? "").localeCompare(b.classificationName ?? ""),
       ),
       totalQuantity: (primaryTotalByLocation.get(l.id) ?? new Decimal(0)).toNumber(),
       totalTons: dual ? (tonTotalByLocation.get(l.id) ?? new Decimal(0)).toNumber() : null,
@@ -269,6 +312,82 @@ export async function getLocationBalances(
 export interface RecordProductionResult {
   movementId: number;
   warning: string | null;
+}
+
+/**
+ * Resolve an optional technical classification for a movement. The
+ * classification must exist and match the movement's grade — which, like
+ * the grade itself, is derived from the location. Retired catalog codes
+ * stay valid on existing rows. Movements without a grade (short-bar /
+ * ton-only paths) cannot carry one.
+ */
+async function resolveClassificationForGrade(
+  tx: Prisma.TransactionClient,
+  classificationId: number | null | undefined,
+  grade: SalesOrderGrade | null,
+): Promise<number | null> {
+  if (classificationId == null) return null;
+  const classification = await tx.steelClassification.findUnique({
+    where: { id: classificationId },
+    select: { id: true, grade: true },
+  });
+  if (!classification) {
+    throw new ServiceError("classificationInvalidOrInactive");
+  }
+  if (grade == null || classification.grade !== grade) {
+    throw new ServiceError("classificationGradeMismatch");
+  }
+  return classification.id;
+}
+
+type LocationClassDedication = {
+  nameAr: string;
+  allowedGrade: SalesOrderGrade | null;
+  expectedClassificationId: number | null;
+  expectedClassification?: { code: string; displayName: string } | null;
+};
+
+const LOCATION_CLASS_INCLUDE = {
+  expectedSize: { select: { id: true, displayName: true } },
+  expectedClassification: { select: { id: true, code: true, displayName: true } },
+} as const;
+
+/** Omit/null on a dedicated B500B bay inherits the bay's class. */
+function inheritClassificationFromLocation(
+  requested: number | null | undefined,
+  location: {
+    expectedClassificationId: number | null;
+    allowedGrade: SalesOrderGrade | null;
+  },
+): number | null {
+  if (location.allowedGrade !== "FIRST") return requested ?? null;
+  return requested ?? location.expectedClassificationId ?? null;
+}
+
+/**
+ * First-grade bays are physically split: ordinary vs B500B. The movement
+ * class must equal the bay dedication (both null, or both B500B).
+ */
+function assertMovementMatchesLocationClassification(
+  location: LocationClassDedication,
+  classificationId: number | null,
+): void {
+  if (location.allowedGrade !== "FIRST") return;
+  const expected = location.expectedClassificationId ?? null;
+  const actual = classificationId ?? null;
+  if (expected === actual) return;
+  if (expected != null) {
+    throw new ServiceError("locationMustMatchExpectedClassification", "BAD_REQUEST", {
+      locationName: location.nameAr,
+      classification:
+        location.expectedClassification?.displayName ??
+        location.expectedClassification?.code ??
+        "B500B",
+    });
+  }
+  throw new ServiceError("locationMustStayUnclassified", "BAD_REQUEST", {
+    locationName: location.nameAr,
+  });
 }
 
 /**
@@ -310,7 +429,7 @@ async function recordInbound(
       async (tx) => {
         const location = await tx.stockLocation.findUnique({
           where: { id: data.locationId },
-          include: { expectedSize: { select: { id: true, displayName: true } } },
+          include: LOCATION_CLASS_INCLUDE,
         });
         if (!location) throw new ServiceError("locationNotFound", "NOT_FOUND");
         if (!location.isActive) throw new ServiceError("locationDisabled");
@@ -393,12 +512,37 @@ async function recordInbound(
         // For short-bar TON sites the location itself identifies the material;
         // movements carry no size or grade.
 
+        // Classification refines the graded (rebar) path only; it can never be
+        // attached to grade-less short-bar stock. A dedicated B500B bay
+        // inherits its class when the clerk omits one. Picking B500B on an
+        // ordinary occupied bay marks that pile — dedicate + retag first.
+        const classificationId = await resolveClassificationForGrade(
+          tx,
+          inheritClassificationFromLocation(data.classificationId, location),
+          grade,
+        );
+        let dedicatedLocation = location;
+        if (
+          classificationId != null &&
+          (location.expectedClassificationId ?? null) !== classificationId
+        ) {
+          const marked = await dedicateLocationToClassificationInTx(
+            tx,
+            location.id,
+            classificationId,
+            userId,
+          );
+          dedicatedLocation = marked.location;
+        }
+        assertMovementMatchesLocationClassification(dedicatedLocation, classificationId);
+
         const movement = await tx.stockMovement.create({
           data: {
             locationId: location.id,
             type,
             sizeId,
             grade,
+            classificationId,
             quantity: quantity.toFixed(3),
             unit,
             shift,
@@ -418,6 +562,7 @@ async function recordInbound(
             locationCode: location.code,
             sizeId,
             grade,
+            classificationId,
             quantity: quantity.toNumber(),
             unit,
             shift,
@@ -551,10 +696,12 @@ export async function correctProductionIn(
 
         // Reverse at most what is still on the bay. Prior load-outs reduce
         // available below the original entry — clamp instead of rejecting.
+        // The reverse targets the original's own classification line.
         const sourceAgg = await tx.stockMovement.aggregate({
           where: {
             locationId: original.locationId,
             sizeId,
+            classificationId: original.classificationId,
             unit,
           },
           _sum: { quantity: true },
@@ -565,7 +712,7 @@ export async function correctProductionIn(
 
         const dest = await tx.stockLocation.findUnique({
           where: { id: data.locationId },
-          include: { expectedSize: { select: { id: true, displayName: true } } },
+          include: LOCATION_CLASS_INCLUDE,
         });
         if (!dest || dest.isVirtual) {
           throw new ServiceError("locationNotFound", "NOT_FOUND");
@@ -644,6 +791,7 @@ export async function correctProductionIn(
               type: "ADJUSTMENT" satisfies StockMovementType,
               sizeId,
               grade,
+              classificationId: original.classificationId,
               quantity: reverseQty.negated().toFixed(3),
               unit,
               reason,
@@ -653,12 +801,24 @@ export async function correctProductionIn(
           reverseId = reverse.id;
         }
 
+        // Destination dedication wins: a B500B bay tags the replacement as
+        // B500B; an ordinary first-grade bay rejects leftover B500B. A
+        // classification never crosses grades.
+        const replacementClassificationId = inheritClassificationFromLocation(
+          needsSize && original.classificationId != null && dest.allowedGrade === grade
+            ? original.classificationId
+            : null,
+          dest,
+        );
+        assertMovementMatchesLocationClassification(dest, replacementClassificationId);
+
         const replacement = await tx.stockMovement.create({
           data: {
             locationId: dest.id,
             type: "PRODUCTION_IN" satisfies StockMovementType,
             sizeId: needsSize ? sizeId : null,
             grade: needsSize ? dest.allowedGrade : null,
+            classificationId: replacementClassificationId,
             quantity: newQuantity.toFixed(3),
             unit,
             shift,
@@ -757,7 +917,7 @@ export async function recordTransfer(
           tx.stockLocation.findUnique({ where: { id: data.fromLocationId } }),
           tx.stockLocation.findUnique({
             where: { id: data.toLocationId },
-            include: { expectedSize: { select: { id: true, displayName: true } } },
+            include: LOCATION_CLASS_INCLUDE,
           }),
         ]);
         if (!from) throw new ServiceError("sourceLocationNotFound", "NOT_FOUND");
@@ -832,9 +992,26 @@ export async function recordTransfer(
           }
         }
 
-        // Available balance at source in the PRIMARY unit for the size.
+        // Which classified line is being moved. Validated against the SOURCE
+        // grade; only meaningful on the graded bundle (rebar) path.
+        const classificationId = await resolveClassificationForGrade(
+          tx,
+          data.classificationId ?? null,
+          primaryUnit === "BUNDLE" ? from.allowedGrade : null,
+        );
+        // A classification never crosses grades: a general→isolation move
+        // reclassifies the commercial grade, so the technical label is dropped
+        // on the destination row.
+        const destClassificationId =
+          classificationId != null && to.allowedGrade === from.allowedGrade
+            ? classificationId
+            : null;
+        assertMovementMatchesLocationClassification(to, destClassificationId);
+
+        // Available balance at source in the PRIMARY unit for the size and
+        // classification line being moved.
         const sourceAgg = await tx.stockMovement.aggregate({
-          where: { locationId: from.id, sizeId, unit: primaryUnit },
+          where: { locationId: from.id, sizeId, classificationId, unit: primaryUnit },
           _sum: { quantity: true },
         });
         const available = new Decimal(sourceAgg._sum.quantity ?? 0);
@@ -855,7 +1032,7 @@ export async function recordTransfer(
           }
           tonsToMove = new Decimal(data.quantityTons);
           const tonAgg = await tx.stockMovement.aggregate({
-            where: { locationId: from.id, sizeId, unit: "TON" },
+            where: { locationId: from.id, sizeId, classificationId, unit: "TON" },
             _sum: { quantity: true },
           });
           const availableTons = new Decimal(tonAgg._sum.quantity ?? 0);
@@ -882,6 +1059,7 @@ export async function recordTransfer(
                 type: "TRANSFER_OUT" satisfies StockMovementType,
                 sizeId,
                 grade: from.allowedGrade,
+                classificationId,
                 quantity: amount.negated().toFixed(3),
                 unit,
                 transferGroupId,
@@ -895,6 +1073,7 @@ export async function recordTransfer(
                 type: "TRANSFER_IN" satisfies StockMovementType,
                 sizeId,
                 grade: to.allowedGrade,
+                classificationId: destClassificationId,
                 quantity: amount.toFixed(3),
                 unit,
                 transferGroupId,
@@ -922,6 +1101,7 @@ export async function recordTransfer(
             toLocationId: to.id,
             toLocationCode: to.code,
             sizeId,
+            classificationId,
             quantity: quantity.toNumber(),
             unit: primaryUnit,
             tonsMoved: dual ? tonsToMove.toNumber() : null,
@@ -980,6 +1160,7 @@ export async function recordAdjustment(
       async (tx) => {
         const location = await tx.stockLocation.findUnique({
           where: { id: data.locationId },
+          include: LOCATION_CLASS_INCLUDE,
         });
         if (!location) throw new ServiceError("locationNotFound", "NOT_FOUND");
         if (!location.isActive) throw new ServiceError("locationDisabled");
@@ -1008,8 +1189,17 @@ export async function recordAdjustment(
           grade = location.allowedGrade;
         }
 
+        // The physical count targets the bay's dedicated line (ordinary vs
+        // B500B). A dedicated bay inherits its class when the clerk omits one.
+        const classificationId = await resolveClassificationForGrade(
+          tx,
+          inheritClassificationFromLocation(data.classificationId, location),
+          grade,
+        );
+        assertMovementMatchesLocationClassification(location, classificationId);
+
         const agg = await tx.stockMovement.aggregate({
-          where: { locationId: location.id, sizeId, unit },
+          where: { locationId: location.id, sizeId, classificationId, unit },
           _sum: { quantity: true },
         });
         const current = new Decimal(agg._sum.quantity ?? 0);
@@ -1070,6 +1260,7 @@ export async function recordAdjustment(
             type: "ADJUSTMENT" satisfies StockMovementType,
             sizeId,
             grade,
+            classificationId,
             quantity: delta.toFixed(3),
             unit,
             reason: data.reason.trim(),
@@ -1087,6 +1278,7 @@ export async function recordAdjustment(
             locationId: location.id,
             locationCode: location.code,
             sizeId,
+            classificationId,
             previousQuantity: current.toNumber(),
             actualQuantity: actual.toNumber(),
             delta: delta.toNumber(),
@@ -1200,13 +1392,15 @@ export async function applyLoadOutForClose(
         continue;
       }
       for (const p of passes) {
-        // Receipt from the production line.
+        // Receipt from the production line. Classification comes from the
+        // weigh session — production knows what it just rolled.
         await tx.stockMovement.create({
           data: {
             locationId: vloc.id,
             type: "PRODUCTION_IN" satisfies StockMovementType,
             sizeId: p.sizeId,
             grade: null,
+            classificationId: s.classificationId,
             quantity: p.quantity.toFixed(3),
             unit: p.unit,
             weighSessionId: s.id,
@@ -1222,6 +1416,7 @@ export async function applyLoadOutForClose(
             type: "LOAD_OUT" satisfies StockMovementType,
             sizeId: p.sizeId,
             grade: null,
+            classificationId: s.classificationId,
             quantity: p.quantity.negated().toFixed(3),
             unit: p.unit,
             weighSessionId: s.id,
@@ -1249,13 +1444,23 @@ export async function applyLoadOutForClose(
     const units = trackedUnits(loc.segment);
     const dual = isDualUnit(loc.segment);
     // A session yields up to two deductions on a rebar site: bundles + tons.
-    const toCreate: Array<{ unit: StockUnit; quantity: Decimal; sizeId: number | null }> = [];
+    const toCreate: Array<{
+      unit: StockUnit;
+      quantity: Decimal;
+      sizeId: number | null;
+      classificationId: number | null;
+    }> = [];
 
     if (units.includes("BUNDLE")) {
       // Rebar bundle deduction needs both a count and a size; skip (warn) if
       // either is missing rather than corrupting per-size balances.
       if (s.bundleCount != null && s.bundleCount > 0 && s.sizeId != null) {
-        toCreate.push({ unit: "BUNDLE", quantity: new Decimal(s.bundleCount), sizeId: s.sizeId });
+        toCreate.push({
+          unit: "BUNDLE",
+          quantity: new Decimal(s.bundleCount),
+          sizeId: s.sizeId,
+          classificationId: s.classificationId,
+        });
       } else {
         logger.warn(
           { truckId, weighSessionId: s.id, locationId: loc.id },
@@ -1266,8 +1471,14 @@ export async function applyLoadOutForClose(
     if (units.includes("TON")) {
       const tons = new Decimal(s.weightTons);
       if (tons.greaterThan(0)) {
-        // Rebar tonnage mirrors the bundle size; short-bar carries no size.
-        toCreate.push({ unit: "TON", quantity: tons, sizeId: dual ? s.sizeId : null });
+        // Rebar tonnage mirrors the bundle size (and classification);
+        // short-bar carries neither.
+        toCreate.push({
+          unit: "TON",
+          quantity: tons,
+          sizeId: dual ? s.sizeId : null,
+          classificationId: dual ? s.classificationId : null,
+        });
       }
     }
 
@@ -1283,6 +1494,7 @@ export async function applyLoadOutForClose(
           type: "LOAD_OUT" satisfies StockMovementType,
           sizeId: m.sizeId,
           grade: loc.allowedGrade,
+          classificationId: m.classificationId,
           quantity: m.quantity.negated().toFixed(3),
           unit: m.unit,
           weighSessionId: s.id,
@@ -1327,6 +1539,8 @@ export interface MovementListItem {
   locationNameAr: string;
   sizeName: string | null;
   grade: SalesOrderGrade | null;
+  /** Technical classification (B500B / B400DWR); null = unclassified. */
+  classificationName: string | null;
   quantity: number;
   unit: "BUNDLE" | "TON";
   /** Work shift (production entries only) — stored, may differ from clock. */
@@ -1368,6 +1582,7 @@ export async function listMovements(
       include: {
         location: { select: { code: true, nameAr: true } },
         size: { select: { displayName: true } },
+        classification: { select: { displayName: true } },
         creator: { select: { username: true, fullName: true } },
       },
     }),
@@ -1383,6 +1598,7 @@ export async function listMovements(
     locationNameAr: r.location.nameAr,
     sizeName: r.size?.displayName ?? null,
     grade: r.grade,
+    classificationName: r.classification?.displayName ?? null,
     quantity: new Decimal(r.quantity).toNumber(),
     unit: r.unit,
     shift: r.shift,
@@ -1428,6 +1644,7 @@ export async function listTodayProduction(): Promise<TodayProductionItem[]> {
     include: {
       location: { select: { code: true, nameAr: true, segment: true } },
       size: { select: { displayName: true } },
+      classification: { select: { displayName: true } },
       creator: { select: { username: true, fullName: true } },
     },
   });
@@ -1445,6 +1662,7 @@ export async function listTodayProduction(): Promise<TodayProductionItem[]> {
       sizeName: r.size?.displayName ?? null,
       segment: r.location.segment,
       grade: r.grade,
+      classificationName: r.classification?.displayName ?? null,
       quantity: new Decimal(r.quantity).toNumber(),
       unit: r.unit,
       // Effective shift: stored value for production rows (always set on new
@@ -1469,6 +1687,7 @@ export async function listActiveLocationOptions() {
       segment: true,
       yardId: true,
       expectedSizeId: true,
+      expectedClassificationId: true,
     },
   });
 }

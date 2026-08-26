@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Printer, ArrowLeft, ArrowRight } from "lucide-react";
 import Link from "next/link";
-import { aggregateWeighSessionsBySize } from "@/lib/weigh-session-aggregate";
+import { aggregateWeighSessionsBySizeAndClassification } from "@/lib/weigh-session-aggregate";
 import { formatDurationLocalized } from "@/lib/format-duration";
 import { formatDate, formatDateTime } from "@/lib/date-format";
 import type { TruckTimings } from "@/lib/truck-timing";
@@ -24,9 +24,11 @@ interface WeighSessionItem {
   bridgeRoundId: number | null;
   sessionNumber: number;
   sizeId: number | null;
+  classificationId?: number | null;
   bundleCount: number | null;
   weightTons: string;
   size: { displayName: string } | null;
+  classification?: { id: number; displayName: string } | null;
 }
 
 interface TruckRequestItemPrint {
@@ -35,6 +37,7 @@ interface TruckRequestItemPrint {
   bundleCount: number | null;
   requestedTons: string | null;
   size: { displayName: string; isBundleType: boolean };
+  classification?: { id: number; displayName: string } | null;
 }
 
 interface BridgeRoundPrint {
@@ -208,7 +211,9 @@ export function ScaleCardPrint({
   const isMultiRound = rounds.length > 1;
   const displayGrade = getDisplayGrade(truck);
 
-  const sessionsBySize = aggregateWeighSessionsBySize(truck.sessions);
+  const sessionsBySize = aggregateWeighSessionsBySizeAndClassification(
+    truck.sessions,
+  );
   const totalAggregateBundles =
     sessionsBySize.length > 0 &&
     sessionsBySize.every((row) => row.totalBundles != null)
@@ -378,6 +383,11 @@ export function ScaleCardPrint({
                     {truck.requestItems.some((i) => i.grade) && (
                       <th className="py-1.5 px-2 text-start border-b border-black">{t("grade")}</th>
                     )}
+                    {truck.requestItems.some((i) => i.classification) && (
+                      <th className="py-1.5 px-2 text-start border-b border-black">
+                        {t("classification")}
+                      </th>
+                    )}
                     <th className="py-1.5 px-2 text-start border-b border-black">{t("requestedQty")}</th>
                   </tr>
                 </thead>
@@ -388,6 +398,13 @@ export function ScaleCardPrint({
                       {truck.requestItems.some((i) => i.grade) && (
                         <td className="py-1 px-2">
                           {item.grade ? tEnums(`grade.${item.grade}`) : t("emDash")}
+                        </td>
+                      )}
+                      {truck.requestItems.some((i) => i.classification) && (
+                        <td className="py-1 px-2">
+                          {item.classification
+                            ? item.classification.displayName
+                            : t("emDash")}
                         </td>
                       )}
                       <td className="py-1 px-2 font-mono">
@@ -604,8 +621,18 @@ export function ScaleCardPrint({
                   </thead>
                   <tbody>
                     {sessionsBySize.map((row) => (
-                      <tr key={row.sizeId ?? "none"} className="border-b border-gray-200">
-                        <td className="py-1 px-2">{row.displayName}</td>
+                      <tr
+                        key={`${row.sizeId ?? "none"}:${row.classificationId ?? "none"}`}
+                        className="border-b border-gray-200"
+                      >
+                        <td className="py-1 px-2">
+                          {row.displayName}
+                          {row.classificationName && (
+                            <span className="ms-1 text-xs text-gray-600">
+                              {row.classificationName}
+                            </span>
+                          )}
+                        </td>
                         <td className="py-1 px-2 font-mono">
                           {row.totalBundles != null
                             ? formatInteger(row.totalBundles)

@@ -23,6 +23,8 @@ export async function GET(req: NextRequest) {
     customerId: req.nextUrl.searchParams.get("customerId") ?? undefined,
     destinationId: req.nextUrl.searchParams.get("destinationId") ?? undefined,
     sizeId: req.nextUrl.searchParams.get("sizeId") ?? undefined,
+    classificationId:
+      req.nextUrl.searchParams.get("classificationId") ?? undefined,
   });
 
   if (!parsed.success) {
@@ -36,6 +38,7 @@ export async function GET(req: NextRequest) {
       customerId: parsed.data.customerId,
       destinationId: parsed.data.destinationId,
       sizeId: parsed.data.sizeId,
+      classificationId: parsed.data.classificationId,
     });
     return ok(data);
   } catch (err) {
