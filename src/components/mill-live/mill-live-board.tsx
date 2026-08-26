@@ -1,11 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
+import { toast } from "sonner";
 import { formatDateTime } from "@/lib/date-format";
 import { formatInteger } from "@/lib/number-format";
 import { cn } from "@/lib/utils";
-import type { MillLiveSnapshot } from "@/lib/services/mill-live.service";
+import { getTextDirection, type Locale } from "@/i18n/config";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { MillLiveCurrentResponse } from "@/lib/services/mill-live.service";
 
 const REFRESH_MS = 20_000;
 
@@ -31,13 +40,18 @@ function currentClockHour(): number {
 export function MillLiveBoard() {
   const t = useTranslations("millLive");
   const tBrand = useTranslations("brand");
-  const [data, setData] = useState<MillLiveSnapshot | null>(null);
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+  const [data, setData] = useState<MillLiveCurrentResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [savingSize, setSavingSize] = useState(false);
   const [clockHour, setClockHour] = useState(currentClockHour);
   const [now, setNow] = useState(() => new Date());
+  const savingSizeRef = useRef(false);
 
   const load = useCallback(async () => {
+    if (savingSizeRef.current) return;
     try {
       const res = await fetch("/api/mill-live/current", { cache: "no-store" });
       if (!res.ok) {
@@ -46,9 +60,9 @@ export function MillLiveBoard() {
       }
       const json = (await res.json()) as {
         success: boolean;
-        data: MillLiveSnapshot | null;
+        data: MillLiveCurrentResponse;
       };
-      if (!json.success) {
+      if (!json.success || !json.data) {
         setError(true);
         return;
       }
@@ -74,6 +88,58 @@ export function MillLiveBoard() {
     }, 1_000);
     return () => window.clearInterval(id);
   }, []);
+
+  const sizeItems = useMemo(
+    () =>
+      (data?.sizes ?? []).map((s) => ({
+        value: String(s.id),
+        label: s.displayName,
+      })),
+    [data?.sizes],
+  );
+
+  async function persistProductSize(sizeId: number) {
+    if (!data || sizeId === data.productSizeId) return;
+    const previous = data;
+    const label =
+      data.sizes.find((s) => s.id === sizeId)?.displayName ?? data.productSizeLabel;
+    savingSizeRef.current = true;
+    setSavingSize(true);
+    setData({ ...data, productSizeId: sizeId, productSizeLabel: label });
+    try {
+      const res = await fetch("/api/mill-live/product-size", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sizeId }),
+      });
+      const json = (await res.json()) as {
+        success: boolean;
+        error?: string;
+        data?: { productSizeId: number; productSizeLabel: string | null };
+      };
+      if (!res.ok || !json.success || !json.data) {
+        setData(previous);
+        toast.error(json.error || t("toastSizeError"));
+        return;
+      }
+      setData((current) =>
+        current
+          ? {
+              ...current,
+              productSizeId: json.data!.productSizeId,
+              productSizeLabel: json.data!.productSizeLabel,
+            }
+          : current,
+      );
+      toast.success(t("toastSizeSaved"));
+    } catch {
+      setData(previous);
+      toast.error(t("toastSizeError"));
+    } finally {
+      savingSizeRef.current = false;
+      setSavingSize(false);
+    }
+  }
 
   const dayHours = data?.hourlyBreakdown.slice(0, 12) ?? [];
   const nightHours = data?.hourlyBreakdown.slice(12, 24) ?? [];
@@ -124,7 +190,7 @@ export function MillLiveBoard() {
               loading={loading}
               error={error}
               isLive={data.isLive}
-              lastAt={data.createdAt}
+              lastAt={data.createdAt ?? undefined}
               t={t}
             />
           </header>
@@ -145,7 +211,7 @@ export function MillLiveBoard() {
             <CenterPanel
               className="order-1 border-b border-white/8 lg:order-2 lg:border-b-0"
               sizeLabel={t("productSize")}
-              sizeValue={`${formatInteger(data.productSize)} ${t("mm")}`}
+              sizeValue={data.productSizeLabel ?? t("sizeNotSet")}
               clock={formatDateTime(now)}
               totalLabel={t("totalBillets")}
               totalValue={formatInteger(data.totalBillets)}
@@ -153,6 +219,21 @@ export function MillLiveBoard() {
               frontValue={formatInteger(data.frontPackCount)}
               backLabel={t("backPack")}
               backValue={formatInteger(data.backPackCount)}
+              sizeEditor={
+                data.canEditProductSize
+                  ? {
+                      items: sizeItems,
+                      value:
+                        data.productSizeId != null
+                          ? String(data.productSizeId)
+                          : null,
+                      placeholder: t("selectSize"),
+                      saving: savingSize,
+                      dir,
+                      onSelect: persistProductSize,
+                    }
+                  : undefined
+              }
             />
 
             <HourColumn
@@ -184,6 +265,7 @@ function CenterPanel({
   frontValue,
   backLabel,
   backValue,
+  sizeEditor,
 }: {
   className?: string;
   sizeLabel: string;
@@ -195,6 +277,14 @@ function CenterPanel({
   frontValue: string;
   backLabel: string;
   backValue: string;
+  sizeEditor?: {
+    items: Array<{ value: string; label: string }>;
+    value: string | null;
+    placeholder: string;
+    saving: boolean;
+    dir: "rtl" | "ltr";
+    onSelect: (sizeId: number) => void;
+  };
 }) {
   return (
     <section
@@ -211,9 +301,37 @@ function CenterPanel({
       <p className="relative text-sm font-semibold text-zinc-300">
         {sizeLabel}
       </p>
-      <p className="relative mt-2 font-semibold tracking-tight text-amber-400 weight-value text-6xl sm:text-7xl">
-        {sizeValue}
-      </p>
+      {sizeEditor ? (
+        <div className="relative mt-2 flex w-full max-w-[18rem] justify-center">
+          <Select
+            items={sizeEditor.items}
+            value={sizeEditor.value}
+            onValueChange={(v) => {
+              if (!v) return;
+              const id = Number.parseInt(v, 10);
+              if (Number.isInteger(id) && id > 0) sizeEditor.onSelect(id);
+            }}
+            disabled={sizeEditor.saving}
+          >
+            <SelectTrigger
+              className="weight-value h-auto min-h-0 w-full justify-center border-white/15 bg-white/[0.04] px-3 py-2 text-5xl font-semibold tracking-tight text-amber-400 shadow-none hover:bg-white/[0.07] focus-visible:border-amber-400/40 focus-visible:ring-amber-400/25 data-[size=default]:h-auto sm:text-6xl dark:bg-white/[0.04] dark:hover:bg-white/[0.07] [&_svg]:size-6 [&_svg]:text-amber-400/70 [&_[data-slot=select-value]]:justify-center"
+            >
+              <SelectValue placeholder={sizeEditor.placeholder} />
+            </SelectTrigger>
+            <SelectContent dir={sizeEditor.dir}>
+              {sizeEditor.items.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : (
+        <p className="relative mt-2 font-semibold tracking-tight text-amber-400 weight-value text-6xl sm:text-7xl">
+          {sizeValue}
+        </p>
+      )}
       <p className="relative mt-3 text-sm tabular-nums text-zinc-400 weight-value">
         {clock}
       </p>
@@ -355,6 +473,9 @@ function StatusStrip({
   } else if (error && !lastAt) {
     label = t("statusError");
     dot = "bg-red-400";
+  } else if (!lastAt) {
+    label = t("statusWaiting");
+    dot = "bg-zinc-500";
   } else if (isLive) {
     label = t("statusLive");
     dot = "bg-emerald-400";

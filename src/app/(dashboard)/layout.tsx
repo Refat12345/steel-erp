@@ -11,7 +11,7 @@ import {
   isStockModuleEnabled,
   isLanguageSwitcherEnabled,
 } from "@/config/feature-flags";
-import { canAccessMillLiveDashboard } from "@/lib/mill-live-access";
+import { canOpenMillLiveDashboard } from "@/lib/mill-live-access";
 import { LocaleSwitcher } from "@/components/layout/locale-switcher";
 
 export default async function DashboardLayout({
@@ -26,9 +26,10 @@ export default async function DashboardLayout({
   }
 
   const tBrand = await getTranslations("brand");
-  const millLiveDashboardEnabled = canAccessMillLiveDashboard(
-    session.user.username,
-  );
+  const millLiveDashboardEnabled = canOpenMillLiveDashboard({
+    username: session.user.username,
+    permissions: session.user.permissions,
+  });
 
   return (
     <TooltipProvider>
