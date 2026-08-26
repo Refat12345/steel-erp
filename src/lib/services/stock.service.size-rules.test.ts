@@ -11,8 +11,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockPrisma = vi.hoisted(() => ({
   $transaction: vi.fn(),
-  stockLocation: { findUnique: vi.fn() },
+  stockLocation: { findUnique: vi.fn(), update: vi.fn() },
   sizeLookup: { findUnique: vi.fn() },
+  steelClassification: { findUnique: vi.fn() },
   stockMovement: {
     groupBy: vi.fn(),
     aggregate: vi.fn(),
@@ -56,6 +57,13 @@ import { ServiceError } from "./errors";
 const USER_ID = 9;
 const SIZE_10 = { id: 10, displayName: "10 مم" };
 const SIZE_12 = { id: 12, displayName: "12 مم" };
+const CLASS_B500B = {
+  id: 7,
+  code: "B500B",
+  displayName: "B500B",
+  grade: "FIRST" as const,
+  isActive: true,
+};
 
 function generalLocation(overrides: Record<string, unknown> = {}) {
   return {
@@ -69,6 +77,8 @@ function generalLocation(overrides: Record<string, unknown> = {}) {
     allowedGrade: "FIRST" as const,
     expectedSizeId: SIZE_10.id,
     expectedSize: SIZE_10,
+    expectedClassificationId: null,
+    expectedClassification: null,
     ...overrides,
   };
 }
@@ -85,6 +95,8 @@ function isolationLocation(overrides: Record<string, unknown> = {}) {
     allowedGrade: "SECOND" as const,
     expectedSizeId: SIZE_10.id,
     expectedSize: SIZE_10,
+    expectedClassificationId: null,
+    expectedClassification: null,
     ...overrides,
   };
 }
@@ -453,6 +465,7 @@ describe("correctProductionIn — destination one-size", () => {
     locationId: 22,
     sizeId: SIZE_10.id,
     grade: "FIRST" as const,
+    classificationId: null,
     quantity: 4,
     unit: "BUNDLE" as const,
     shift: "MORNING" as const,
@@ -561,5 +574,232 @@ describe("correctProductionIn — destination one-size", () => {
     expect(mockPrisma.stockMovement.create).toHaveBeenCalledTimes(2);
     expect(mockPrisma.stockMovement.create.mock.calls[0][0].data.quantity).toBe("-1.000");
     expect(mockPrisma.stockMovement.create.mock.calls[1][0].data.quantity).toBe("3.000");
+  });
+});
+
+// ── Location B500B dedication ───────────────────────────────────────────────
+
+describe("recordProductionIn — location classification dedication", () => {
+  beforeEach(() => {
+    mockPrisma.steelClassification.findUnique.mockImplementation(
+      async ({ where }: { where: { id: number } }) =>
+        where.id === CLASS_B500B.id ? CLASS_B500B : null,
+    );
+  });
+
+  it("inherits B500B on a dedicated bay when inbound omits classification", async () => {
+    const loc = generalLocation({
+      expectedClassificationId: CLASS_B500B.id,
+      expectedClassification: CLASS_B500B,
+    });
+    mockPrisma.stockLocation.findUnique.mockResolvedValue(loc);
+    mockPrisma.stockMovement.groupBy
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ unit: "BUNDLE", _sum: { quantity: 2 } }]);
+
+    await recordProductionIn(
+      {
+        locationId: loc.id,
+        unit: "BUNDLE",
+        sizeId: SIZE_10.id,
+        quantity: 2,
+        reason: "b500b-bay",
+      },
+      USER_ID,
+    );
+
+    expect(mockPrisma.stockMovement.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ classificationId: CLASS_B500B.id }),
+      }),
+    );
+  });
+
+  it("marks an ordinary bay as B500B when inbound sends B500B", async () => {
+    const loc = generalLocation();
+    const dedicated = {
+      ...loc,
+      expectedClassificationId: CLASS_B500B.id,
+      expectedClassification: CLASS_B500B,
+    };
+    mockPrisma.stockLocation.findUnique.mockResolvedValue(loc);
+    mockPrisma.stockLocation.update.mockResolvedValue(dedicated);
+    mockPrisma.stockMovement.groupBy
+      .mockResolvedValueOnce([]) // one-size
+      .mockResolvedValueOnce([]) // retag unclassified
+      .mockResolvedValueOnce([{ unit: "BUNDLE", _sum: { quantity: 2 } }]);
+
+    await recordProductionIn(
+      {
+        locationId: loc.id,
+        unit: "BUNDLE",
+        sizeId: SIZE_10.id,
+        classificationId: CLASS_B500B.id,
+        quantity: 2,
+        reason: "now-known-b500b",
+      },
+      USER_ID,
+    );
+
+    expect(mockPrisma.stockLocation.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { expectedClassificationId: CLASS_B500B.id },
+      }),
+    );
+    expect(mockPrisma.stockMovement.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ classificationId: CLASS_B500B.id }),
+      }),
+    );
+  });
+
+  it("retags existing unclassified bundles when the bay is marked B500B", async () => {
+    const loc = generalLocation();
+    const dedicated = {
+      ...loc,
+      expectedClassificationId: CLASS_B500B.id,
+      expectedClassification: CLASS_B500B,
+    };
+    mockPrisma.stockLocation.findUnique.mockResolvedValue(loc);
+    mockPrisma.stockLocation.update.mockResolvedValue(dedicated);
+    mockPrisma.stockMovement.groupBy
+      .mockResolvedValueOnce([{ sizeId: SIZE_10.id, _sum: { quantity: 8 } }]) // one-size occupied
+      .mockResolvedValueOnce([
+        {
+          sizeId: SIZE_10.id,
+          grade: "FIRST",
+          unit: "BUNDLE",
+          _sum: { quantity: 8 },
+        },
+      ]) // retag
+      .mockResolvedValueOnce([{ unit: "BUNDLE", _sum: { quantity: 10 } }]);
+
+    await recordProductionIn(
+      {
+        locationId: loc.id,
+        unit: "BUNDLE",
+        sizeId: SIZE_10.id,
+        classificationId: CLASS_B500B.id,
+        quantity: 2,
+        reason: "retag-occupied",
+      },
+      USER_ID,
+    );
+
+    const created = mockPrisma.stockMovement.create.mock.calls.map(
+      (c: Array<{ data: { type: string; classificationId: number | null; quantity: string } }>) =>
+        c[0].data,
+    );
+    expect(created).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "ADJUSTMENT",
+          classificationId: null,
+          quantity: "-8.000",
+        }),
+        expect.objectContaining({
+          type: "ADJUSTMENT",
+          classificationId: CLASS_B500B.id,
+          quantity: "8.000",
+        }),
+        expect.objectContaining({
+          type: "PRODUCTION_IN",
+          classificationId: CLASS_B500B.id,
+          quantity: "2.000",
+        }),
+      ]),
+    );
+  });
+});
+
+describe("recordTransfer — destination classification dedication", () => {
+  const from = generalLocation({
+    id: 1,
+    code: "S1",
+    nameAr: "مصدر",
+    expectedSizeId: null,
+    expectedSize: null,
+  });
+
+  function mockLocations(
+    to: ReturnType<typeof generalLocation> | ReturnType<typeof isolationLocation>,
+  ) {
+    mockPrisma.stockLocation.findUnique.mockImplementation(
+      async ({ where }: { where: { id: number } }) => {
+        if (where.id === from.id) return from;
+        if (where.id === to.id) return to;
+        return null;
+      },
+    );
+  }
+
+  beforeEach(() => {
+    mockPrisma.steelClassification.findUnique.mockImplementation(
+      async ({ where }: { where: { id: number } }) =>
+        where.id === CLASS_B500B.id ? CLASS_B500B : null,
+    );
+  });
+
+  it("rejects transferring B500B into an ordinary first-grade bay", async () => {
+    const to = generalLocation({
+      id: 2,
+      code: "D1",
+      nameAr: "وجهة",
+      expectedSizeId: null,
+      expectedSize: null,
+    });
+    mockLocations(to);
+
+    await expect(
+      recordTransfer(
+        {
+          fromLocationId: from.id,
+          toLocationId: to.id,
+          sizeId: SIZE_10.id,
+          classificationId: CLASS_B500B.id,
+          quantity: 1,
+          quantityTons: 1.2,
+          reason: "class-mismatch",
+        },
+        USER_ID,
+      ),
+    ).rejects.toMatchObject({
+      messageKey: "locationMustStayUnclassified",
+      params: { locationName: to.nameAr },
+    });
+
+    expect(mockPrisma.stockMovement.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects transferring ordinary rebar into a B500B bay", async () => {
+    const to = generalLocation({
+      id: 2,
+      code: "D1",
+      nameAr: "وجهة B500B",
+      expectedSizeId: null,
+      expectedSize: null,
+      expectedClassificationId: CLASS_B500B.id,
+      expectedClassification: CLASS_B500B,
+    });
+    mockLocations(to);
+
+    await expect(
+      recordTransfer(
+        {
+          fromLocationId: from.id,
+          toLocationId: to.id,
+          sizeId: SIZE_10.id,
+          quantity: 1,
+          quantityTons: 1.2,
+          reason: "ordinary-to-b500b",
+        },
+        USER_ID,
+      ),
+    ).rejects.toMatchObject({
+      messageKey: "locationMustMatchExpectedClassification",
+      params: { locationName: to.nameAr, classification: CLASS_B500B.displayName },
+    });
+
+    expect(mockPrisma.stockMovement.create).not.toHaveBeenCalled();
   });
 });

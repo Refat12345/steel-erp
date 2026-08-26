@@ -17,8 +17,13 @@ import {
   type WeighSessionSizeAggregate,
 } from "@/lib/weigh-session-aggregate";
 import { requestSizeCodesExemptFromInternalWeighing } from "@/lib/material-kind";
+import {
+  evaluateFirstGradeRequestMatch,
+  shouldEnforceFirstGradeMatch,
+} from "@/lib/loading-complete-comparison";
 import { applyLoadOutForClose } from "./stock.service";
 import { clampEventWindow } from "./settings.service";
+import { isRequestItemsEditableDuringLoading } from "@/lib/truck-edit-ui";
 import type { Locale } from "@/i18n/config";
 import {
   localizedDestinationName,
@@ -97,6 +102,12 @@ export interface RequestItemInput {
   sizeId: number;
   /** Grade for this line — lets the same size appear once per grade. */
   grade?: SalesOrderGrade | null;
+  /**
+   * Technical classification (B500B / B400DWR) for graded rebar lines. The
+   * same size+grade may appear once per classification — e.g. 16mm FIRST
+   * B500B + 16mm FIRST B400DWR on one truck. Null = unclassified.
+   */
+  classificationId?: number | null;
   bundleCount?: number | null;
   requestedTons?: number | null;
 }
@@ -174,9 +185,12 @@ async function validateTruckReferences(
 async function validateTruckRequestItems(tx: TxClient, requestItems?: RequestItemInput[]) {
   if (!requestItems?.length) return;
 
-  // Uniqueness is per (size, grade): "12mm FIRST" and "12mm SECOND" may
-  // coexist; "12mm" without grade may appear only once.
-  const keys = requestItems.map((i) => `${i.sizeId}:${i.grade ?? ""}`);
+  // Uniqueness is per (size, grade, classification): "16mm FIRST B500B" and
+  // "16mm FIRST B400DWR" may coexist; "16mm FIRST" without classification may
+  // appear only once.
+  const keys = requestItems.map(
+    (i) => `${i.sizeId}:${i.grade ?? ""}:${i.classificationId ?? ""}`,
+  );
   if (new Set(keys).size !== keys.length) {
     throw new ServiceError("duplicateSizeGradeInOrder");
   }
@@ -186,6 +200,48 @@ async function validateTruckRequestItems(tx: TxClient, requestItems?: RequestIte
   });
   if (sizes.length !== sizeIds.length) {
     throw new ServiceError("sizeInvalidOrInactive");
+  }
+  await validateClassificationGrades(
+    tx,
+    requestItems.map((i) => ({
+      classificationId: i.classificationId ?? null,
+      grade: i.grade ?? null,
+    })),
+  );
+}
+
+/**
+ * Shared guard for rows that carry an optional technical classification:
+ * every referenced classification must exist, be active, and belong to the
+ * same grade as the row (a classification never changes the commercial
+ * grade — it only refines it).
+ */
+async function validateClassificationGrades(
+  tx: TxClient,
+  rows: Array<{ classificationId: number | null; grade: SalesOrderGrade | null }>,
+) {
+  const ids = [
+    ...new Set(
+      rows
+        .map((r) => r.classificationId)
+        .filter((id): id is number => id != null),
+    ),
+  ];
+  if (ids.length === 0) return;
+
+  const classifications = await tx.steelClassification.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, grade: true },
+  });
+  if (classifications.length !== ids.length) {
+    throw new ServiceError("classificationInvalidOrInactive");
+  }
+  const gradeById = new Map(classifications.map((c) => [c.id, c.grade]));
+  for (const row of rows) {
+    if (row.classificationId == null) continue;
+    if (gradeById.get(row.classificationId) !== row.grade) {
+      throw new ServiceError("classificationGradeMismatch");
+    }
   }
 }
 
@@ -241,6 +297,7 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
                 truckOperationId: created.id,
                 sizeId: item.sizeId,
                 grade: item.grade ?? null,
+                classificationId: item.classificationId ?? null,
                 bundleCount: item.bundleCount ?? null,
                 requestedTons: item.requestedTons ?? null,
               })),
@@ -294,7 +351,11 @@ export async function registerTruck(data: RegisterTruckInput, userId: number) {
   return truck;
 }
 
-// ─── Update Before Weigh ───────────────────────────────────────────
+// ─── Update truck (registration + request items) ──────────────────
+//
+// Queued: full form. Approved / mid-loading until close: request items
+// (and notes once loading has started). Identity stays locked after tare.
+// Closed / cancelled trucks cannot be edited.
 
 export async function updateTruckBeforeWeigh(
   truckId: number,
@@ -345,18 +406,50 @@ export async function updateTruckBeforeWeigh(
           "plateNumber",
         ];
 
+        const FROZEN_AFTER_LOADING_START: (keyof UpdateTruckInput)[] = [
+          "customerId",
+          "destinationId",
+          "plateNumber",
+          "driverName",
+          "salesOrderNumber",
+          "operationalGrade",
+        ];
+
+        if (TERMINAL_STATUSES.includes(truck.status)) {
+          throw new ServiceError("cannotEditClosedTruck");
+        }
+
+        let sessionCount = 0;
         if (truck.status === "FirstWeigh") {
-          const sessionCount = await tx.weighSession.count({
+          sessionCount = await tx.weighSession.count({
             where: { truckOperationId: truckId },
           });
-          if (sessionCount > 0) {
-            throw new ServiceError("cannotEditTruckAfterInternalWeighs");
-          }
+        }
+        const requestItemsOnlyWindow =
+          isRequestItemsEditableDuringLoading(truck.status) ||
+          (truck.status === "FirstWeigh" && sessionCount > 0);
+
+        if (truck.status === "FirstWeigh") {
           const attemptedIdentity = FIRST_WEIGH_LOCKED_IDENTITY.some(
             (field) => data[field] !== undefined,
           );
           if (attemptedIdentity) {
             throw new ServiceError("afterTareLimitedFieldsEditable");
+          }
+          if (requestItemsOnlyWindow) {
+            const attemptedFrozen = FROZEN_AFTER_LOADING_START.some(
+              (field) => data[field] !== undefined,
+            );
+            if (attemptedFrozen) {
+              throw new ServiceError("afterApprovalOnlyRequestItemsEditable");
+            }
+          }
+        } else if (requestItemsOnlyWindow) {
+          const attemptedFrozen = FROZEN_AFTER_LOADING_START.some(
+            (field) => data[field] !== undefined,
+          );
+          if (attemptedFrozen) {
+            throw new ServiceError("afterApprovalOnlyRequestItemsEditable");
           }
         } else if (truck.status !== "Queued" && truck.status !== "Approved") {
           throw new ServiceError("cannotEditTruckAfterInternalWeighs");
@@ -458,7 +551,7 @@ export async function updateTruckBeforeWeigh(
           updateData.notes = nextNotes;
           updateData.operationalGrade =
             data.operationalGrade !== undefined ? data.operationalGrade : truck.operationalGrade;
-        } else if (truck.status === "FirstWeigh") {
+        } else if (truck.status === "FirstWeigh" && !requestItemsOnlyWindow) {
           if (data.destinationId !== undefined) {
             updateData.destination = nextDestinationId
               ? { connect: { id: nextDestinationId } }
@@ -469,6 +562,8 @@ export async function updateTruckBeforeWeigh(
           if (data.operationalGrade !== undefined) {
             updateData.operationalGrade = data.operationalGrade;
           }
+        } else if (requestItemsOnlyWindow && data.notes !== undefined) {
+          updateData.notes = nextNotes;
         }
 
         const updated = await tx.truckOperation.update({
@@ -478,8 +573,13 @@ export async function updateTruckBeforeWeigh(
 
         // Keep the open (still unconfirmed) round's grade in sync with the
         // operation-level grade — round 1 inherits it at tare time, so an
-        // edit before loading starts must propagate.
-        if (truck.status === "FirstWeigh" && data.operationalGrade !== undefined) {
+        // edit before loading starts must propagate. After the first internal
+        // weigh, grade is frozen with the rest of registration.
+        if (
+          truck.status === "FirstWeigh" &&
+          !requestItemsOnlyWindow &&
+          data.operationalGrade !== undefined
+        ) {
           await tx.bridgeRound.updateMany({
             where: {
               truckOperationId: truckId,
@@ -498,6 +598,7 @@ export async function updateTruckBeforeWeigh(
                 truckOperationId: truckId,
                 sizeId: item.sizeId,
                 grade: item.grade ?? null,
+                classificationId: item.classificationId ?? null,
                 bundleCount: item.bundleCount ?? null,
                 requestedTons: item.requestedTons ?? null,
               })),
@@ -505,8 +606,9 @@ export async function updateTruckBeforeWeigh(
           }
         }
 
-        const auditEvent =
-          truck.status === "FirstWeigh"
+        const auditEvent = requestItemsOnlyWindow
+          ? "truck_updated_during_loading"
+          : truck.status === "FirstWeigh"
             ? "truck_updated_after_tare"
             : "truck_updated_before_weigh";
 
@@ -517,7 +619,8 @@ export async function updateTruckBeforeWeigh(
           entityId: String(truckId),
           details: {
             event: auditEvent,
-            editedAfterTare: truck.status === "FirstWeigh",
+            editedAfterTare: truck.status === "FirstWeigh" && !requestItemsOnlyWindow,
+            editedDuringLoading: requestItemsOnlyWindow,
             previousValue,
             newValue: {
               status: updated.status,
@@ -533,7 +636,10 @@ export async function updateTruckBeforeWeigh(
           } as unknown as Prisma.InputJsonValue,
         });
 
-        logger.info({ truckId, status: truck.status }, "truck updated before weigh");
+        logger.info(
+          { truckId, status: truck.status, requestItemsOnlyWindow },
+          requestItemsOnlyWindow ? "truck request items updated during loading" : "truck updated before weigh",
+        );
         const reloaded = await tx.truckOperation.findUnique({
           where: { id: truckId },
           include: DETAIL_INCLUDE,
@@ -548,12 +654,14 @@ export async function updateTruckBeforeWeigh(
 
 // ─── Update Notes (mid-weighing) ───────────────────────────────────
 //
-// Once a truck is on the bridge the registration and order data is frozen,
-// but operators still need to record operational notes (e.g. why a weighing
-// was retried, a plate discrepancy, …). In these statuses `notes` is the ONLY
-// mutable field — every other field stays locked exactly as before. Callers
-// (the API layer) must reject any non-notes field before reaching here.
-const NOTES_EDITABLE_STATUSES: TruckStatus[] = ["OnScale", "LoadingComplete", "SecondWeigh"];
+// Mid-weighing notes path. Request-item edits during the same window go
+// through updateTruckBeforeWeigh. Callers must not send registration fields.
+const NOTES_EDITABLE_STATUSES: TruckStatus[] = [
+  "OnScale",
+  "Loading",
+  "LoadingComplete",
+  "SecondWeigh",
+];
 
 export async function updateTruckNotes(
   truckId: number,
@@ -918,11 +1026,43 @@ export async function correctGross(
 
 export interface WeighSessionInput {
   sizeId?: number | null;
+  /**
+   * Technical classification (B500B / B400DWR) of this weighed batch. Lives
+   * on the session — not the round — because one round may mix
+   * classifications. Null = unclassified / not applicable.
+   */
+  classificationId?: number | null;
   bundleCount?: number | null;
   weightTons: number;
   sourceLocationId?: number | null;
   /** Loaded directly off the production line — no yard source. */
   fromProduction?: boolean;
+}
+
+/**
+ * Validate a session's classification: must exist, and must not contradict
+ * the round's grade when the round already has one (a SECOND-grade round
+ * can never carry a FIRST-grade classification like B500B). Retired catalog
+ * codes (e.g. B400DWR) stay valid on existing rows. Rounds with no grade
+ * yet accept any known classification — the loader's grade choice at
+ * loading-complete stays authoritative for the commercial grade.
+ */
+async function validateSessionClassification(
+  tx: TxClient,
+  classificationId: number | null | undefined,
+  roundGrade: SalesOrderGrade | null,
+) {
+  if (classificationId == null) return;
+  const classification = await tx.steelClassification.findUnique({
+    where: { id: classificationId },
+    select: { id: true, grade: true },
+  });
+  if (!classification) {
+    throw new ServiceError("classificationInvalidOrInactive");
+  }
+  if (roundGrade != null && classification.grade !== roundGrade) {
+    throw new ServiceError("classificationGradeMismatch");
+  }
 }
 
 /**
@@ -935,11 +1075,20 @@ async function resolveWeighSource(
   sourceLocationId: number | null | undefined,
   bundleCount: number | null | undefined,
   sizeId: number | null | undefined,
+  classificationId?: number | null,
 ): Promise<number | null> {
   if (sourceLocationId == null) return null;
   const loc = await tx.stockLocation.findUnique({
     where: { id: sourceLocationId },
-    select: { id: true, isActive: true, unit: true },
+    select: {
+      id: true,
+      isActive: true,
+      unit: true,
+      nameAr: true,
+      allowedGrade: true,
+      expectedClassificationId: true,
+      expectedClassification: { select: { code: true, displayName: true } },
+    },
   });
   if (!loc) throw new ServiceError("sourceStockLocationNotFound");
   if (!loc.isActive) throw new ServiceError("sourceStockLocationDisabled");
@@ -953,6 +1102,26 @@ async function resolveWeighSource(
     }
     if (sizeId == null) {
       throw new ServiceError("sizeRequiredForBundleLocation");
+    }
+  }
+  // First-grade bays are split ordinary vs B500B — the session class must
+  // match the bay dedication so load-out hits the right ledger line.
+  if (loc.allowedGrade === "FIRST") {
+    const expected = loc.expectedClassificationId ?? null;
+    const actual = classificationId ?? null;
+    if (expected !== actual) {
+      if (expected != null) {
+        throw new ServiceError("locationMustMatchExpectedClassification", "BAD_REQUEST", {
+          locationName: loc.nameAr,
+          classification:
+            loc.expectedClassification?.displayName ??
+            loc.expectedClassification?.code ??
+            "B500B",
+        });
+      }
+      throw new ServiceError("locationMustStayUnclassified", "BAD_REQUEST", {
+        locationName: loc.nameAr,
+      });
     }
   }
   return loc.id;
@@ -1008,12 +1177,20 @@ export async function enterWeighSession(
           if (!size || !size.isActive) throw new ServiceError("sizeInvalid");
         }
 
+        await validateSessionClassification(tx, data.classificationId, openRound.grade);
+
         // Direct-from-production cross-dock has no yard source; the two are
         // mutually exclusive.
         const fromProduction = data.fromProduction === true;
         const sourceLocationId = fromProduction
           ? null
-          : await resolveWeighSource(tx, data.sourceLocationId, data.bundleCount, data.sizeId);
+          : await resolveWeighSource(
+              tx,
+              data.sourceLocationId,
+              data.bundleCount,
+              data.sizeId,
+              data.classificationId,
+            );
 
         const lastSession = await tx.weighSession.findFirst({
           where: { truckOperationId: truckId },
@@ -1027,6 +1204,7 @@ export async function enterWeighSession(
             bridgeRoundId: openRound.id,
             sessionNumber: nextNumber,
             sizeId: data.sizeId || null,
+            classificationId: data.classificationId || null,
             bundleCount: data.bundleCount || null,
             weightTons: data.weightTons,
             sourceLocationId,
@@ -1052,6 +1230,7 @@ export async function enterWeighSession(
             sessionNumber: nextNumber,
             weightTons: data.weightTons,
             sizeId: data.sizeId,
+            classificationId: data.classificationId ?? null,
             sourceLocationId,
           },
         });
@@ -1117,12 +1296,18 @@ export async function editWeighSession(
         const effectiveBundle =
           data.bundleCount !== undefined ? data.bundleCount : session.bundleCount;
         const effectiveSize = data.sizeId !== undefined ? data.sizeId : session.sizeId;
+        const effectiveClassification =
+          data.classificationId !== undefined
+            ? data.classificationId
+            : session.classificationId;
         const resolvedSource = await resolveWeighSource(
           tx,
           effectiveSource,
           effectiveBundle,
           effectiveSize,
+          effectiveClassification,
         );
+        await validateSessionClassification(tx, effectiveClassification, openRound.grade);
 
         // Optimistic lock against two concurrent edits of the same weigh
         // session. Use the "unchecked" variant so we can set the FK scalar
@@ -1132,6 +1317,9 @@ export async function editWeighSession(
         };
         if (data.weightTons !== undefined) updateData.weightTons = data.weightTons;
         if (data.sizeId !== undefined) updateData.sizeId = data.sizeId ?? null;
+        if (data.classificationId !== undefined) {
+          updateData.classificationId = data.classificationId ?? null;
+        }
         if (data.bundleCount !== undefined) updateData.bundleCount = data.bundleCount;
         // Switching a session to/from production keeps source and flag in sync.
         if (data.fromProduction !== undefined) {
@@ -1723,6 +1911,7 @@ export async function addCompletedSession(
           const size = await tx.sizeLookup.findUnique({ where: { id: data.sizeId } });
           if (!size || !size.isActive) throw new ServiceError("sizeInvalid");
         }
+        await validateSessionClassification(tx, data.classificationId, round.grade);
 
         const lastSession = await tx.weighSession.findFirst({
           where: { truckOperationId: truckId },
@@ -1736,6 +1925,7 @@ export async function addCompletedSession(
             bridgeRoundId: round.id,
             sessionNumber: nextNumber,
             sizeId: data.sizeId || null,
+            classificationId: data.classificationId || null,
             bundleCount: data.bundleCount || null,
             weightTons: data.weightTons,
           },
@@ -1753,6 +1943,7 @@ export async function addCompletedSession(
             sessionNumber: nextNumber,
             weightTons: data.weightTons,
             sizeId: data.sizeId ?? null,
+            classificationId: data.classificationId ?? null,
             bundleCount: data.bundleCount ?? null,
             reason,
           },
@@ -1799,12 +1990,28 @@ export async function editCompletedSession(
           const size = await tx.sizeLookup.findUnique({ where: { id: data.sizeId } });
           if (!size || !size.isActive) throw new ServiceError("sizeInvalid");
         }
+        if (data.classificationId !== undefined) {
+          const round = session.bridgeRoundId
+            ? await tx.bridgeRound.findUnique({
+                where: { id: session.bridgeRoundId },
+                select: { grade: true },
+              })
+            : null;
+          await validateSessionClassification(
+            tx,
+            data.classificationId,
+            round?.grade ?? null,
+          );
+        }
 
         const updateData: Prisma.WeighSessionUncheckedUpdateManyInput = {
           version: { increment: 1 },
         };
         if (data.weightTons !== undefined) updateData.weightTons = data.weightTons;
         if (data.sizeId !== undefined) updateData.sizeId = data.sizeId ?? null;
+        if (data.classificationId !== undefined) {
+          updateData.classificationId = data.classificationId ?? null;
+        }
         if (data.bundleCount !== undefined) updateData.bundleCount = data.bundleCount;
 
         const result = await tx.weighSession.updateMany({
@@ -2004,12 +2211,35 @@ export async function confirmLoadingComplete(
         // Re-query after the lock so both collections are up-to-date.
         // Requirements are PER ROUND: the current round needs at least one
         // session and one photo before its external weighing.
-        const [sessions, photoCount] = await Promise.all([
+        const [sessions, photoCount, requestItems] = await Promise.all([
           tx.weighSession.findMany({
             where: { bridgeRoundId: openRound.id },
-            select: { weightTons: true },
+            select: {
+              weightTons: true,
+              sizeId: true,
+              classificationId: true,
+              bundleCount: true,
+              size: {
+                select: { displayName: true, isBundleType: true, code: true },
+              },
+              classification: { select: { displayName: true } },
+            },
           }),
           tx.truckPhoto.count({ where: { bridgeRoundId: openRound.id } }),
+          tx.truckRequestItem.findMany({
+            where: { truckOperationId: truckId },
+            select: {
+              sizeId: true,
+              grade: true,
+              classificationId: true,
+              bundleCount: true,
+              requestedTons: true,
+              size: {
+                select: { displayName: true, isBundleType: true, code: true },
+              },
+              classification: { select: { displayName: true } },
+            },
+          }),
         ]);
 
         // Exempt trucks (scrap / billet wire) carry no internal weigh sessions;
@@ -2021,16 +2251,57 @@ export async function confirmLoadingComplete(
           throw new ServiceError("atLeastOnePhotoBeforeLoadingComplete");
         }
 
+        const nextGrade = roundGrade !== undefined ? roundGrade : openRound.grade;
+        const requestItemsForMatch = requestItems.map((item) => ({
+          ...item,
+          requestedTons:
+            item.requestedTons != null ? Number(item.requestedTons) : null,
+        }));
+
+        // First-grade: over-load / extra size / extra classification block
+        // this confirm. Under-load is a later-round remainder (close gate).
+        // Sessions are cumulative across FIRST rounds so 10 + 10 can fulfill 20.
+        if (
+          !truck.skipInternalWeighing &&
+          shouldEnforceFirstGradeMatch(requestItemsForMatch, nextGrade)
+        ) {
+          const matchSessions = await tx.weighSession.findMany({
+            where: {
+              truckOperationId: truckId,
+              OR: [
+                { bridgeRoundId: openRound.id },
+                { bridgeRound: { grade: "FIRST" } },
+              ],
+            },
+            select: {
+              weightTons: true,
+              sizeId: true,
+              classificationId: true,
+              bundleCount: true,
+              size: {
+                select: { displayName: true, isBundleType: true, code: true },
+              },
+              classification: { select: { displayName: true } },
+            },
+          });
+          const { blocking } = evaluateFirstGradeRequestMatch(
+            requestItemsForMatch,
+            matchSessions.map((s) => ({
+              ...s,
+              weightTons: Number(s.weightTons),
+            })),
+          );
+          if (blocking.length > 0) {
+            throw new ServiceError(blocking[0].messageKey, "BAD_REQUEST", blocking[0].params);
+          }
+        }
+
         // Exempt trucks: resolve which material this round carried, so the
         // mirror session created at gross is attributed to the right size.
         // Single-size trucks resolve automatically; multi-size trucks require
         // the loader's explicit choice (one material per round).
         let nextRoundSizeId: number | null | undefined;
         if (truck.skipInternalWeighing) {
-          const requestItems = await tx.truckRequestItem.findMany({
-            where: { truckOperationId: truckId },
-            select: { sizeId: true },
-          });
           const distinctSizeIds = [...new Set(requestItems.map((i) => i.sizeId))];
           if (roundSizeId != null) {
             if (!distinctSizeIds.includes(roundSizeId)) {
@@ -2056,7 +2327,6 @@ export async function confirmLoadingComplete(
         // on both the operation (two-role rule enforcement for enterGross)
         // and the round (per-round audit/dispute traceability).
         const confirmedAt = new Date();
-        const nextGrade = roundGrade !== undefined ? roundGrade : openRound.grade;
         const updated = await tx.truckOperation.update({
           where: { id: truckId },
           data: {
@@ -2472,6 +2742,65 @@ export async function closeOperation(
           });
         }
 
+        if (!truck.skipInternalWeighing) {
+          const [closeRequestItems, firstGradeSessions] = await Promise.all([
+            tx.truckRequestItem.findMany({
+              where: { truckOperationId: truckId },
+              select: {
+                sizeId: true,
+                grade: true,
+                classificationId: true,
+                bundleCount: true,
+                requestedTons: true,
+                size: {
+                  select: { displayName: true, isBundleType: true, code: true },
+                },
+                classification: { select: { displayName: true } },
+              },
+            }),
+            tx.weighSession.findMany({
+              where: {
+                truckOperationId: truckId,
+                bridgeRound: { grade: "FIRST" },
+              },
+              select: {
+                weightTons: true,
+                sizeId: true,
+                classificationId: true,
+                bundleCount: true,
+                size: {
+                  select: { displayName: true, isBundleType: true, code: true },
+                },
+                classification: { select: { displayName: true } },
+              },
+            }),
+          ]);
+          const closeRequestForMatch = closeRequestItems.map((item) => ({
+            ...item,
+            requestedTons:
+              item.requestedTons != null ? Number(item.requestedTons) : null,
+          }));
+          if (shouldEnforceFirstGradeMatch(closeRequestForMatch, "FIRST")) {
+            const { blocking, remainders } = evaluateFirstGradeRequestMatch(
+              closeRequestForMatch,
+              firstGradeSessions.map((s) => ({
+                ...s,
+                weightTons: Number(s.weightTons),
+              })),
+            );
+            if (blocking.length > 0) {
+              throw new ServiceError(blocking[0].messageKey, "BAD_REQUEST", blocking[0].params);
+            }
+            if (remainders.length > 0) {
+              throw new ServiceError(
+                "firstGradeRequestIncomplete",
+                "BAD_REQUEST",
+                remainders[0].params,
+              );
+            }
+          }
+        }
+
         const bridgeNetKg = new Decimal(truck.grossWeightKg).minus(truck.tareWeightKg);
         const internalTotalTons = truck.sessions.reduce(
           (sum, s) => sum.plus(s.weightTons),
@@ -2620,6 +2949,14 @@ const DETAIL_INCLUDE = {
           isBundleType: true,
         },
       },
+      classification: {
+        select: {
+          id: true,
+          code: true,
+          displayName: true,
+          displayNameEn: true,
+        },
+      },
     },
   },
   sessions: {
@@ -2632,6 +2969,14 @@ const DETAIL_INCLUDE = {
           displayName: true,
           displayNameEn: true,
           isBundleType: true,
+        },
+      },
+      classification: {
+        select: {
+          id: true,
+          code: true,
+          displayName: true,
+          displayNameEn: true,
         },
       },
       sourceLocation: {

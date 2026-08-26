@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildRequestVsLoadedComparison } from "./loading-complete-comparison";
+import {
+  buildRequestVsLoadedComparison,
+  collectFirstGradeSessions,
+  evaluateFirstGradeRequestMatch,
+  findFirstGradeRequestMismatches,
+  shouldEnforceFirstGradeMatch,
+} from "./loading-complete-comparison";
 
 const shortsTonsRequest = [
   {
@@ -225,5 +231,378 @@ describe("buildRequestVsLoadedComparison", () => {
     expect(rows).toHaveLength(2);
     expect(warnings.filter((w) => w.includes("«ب»"))).toHaveLength(1);
     expect(warnings.filter((w) => w.includes("«أ»"))).toHaveLength(0);
+  });
+});
+
+describe("shouldEnforceFirstGradeMatch", () => {
+  const firstLine = {
+    sizeId: 1,
+    grade: "FIRST" as const,
+    bundleCount: 10,
+    requestedTons: null,
+    size: { displayName: "12مم", isBundleType: true, code: "12" },
+  };
+  const secondLine = {
+    sizeId: 1,
+    grade: "SECOND" as const,
+    bundleCount: 4,
+    requestedTons: null,
+    size: { displayName: "12مم", isBundleType: true, code: "12" },
+  };
+
+  it("does not enforce when there are no first-grade request lines", () => {
+    expect(shouldEnforceFirstGradeMatch([], "FIRST")).toBe(false);
+    expect(shouldEnforceFirstGradeMatch([secondLine], "FIRST")).toBe(false);
+  });
+
+  it("always enforces a pure first-grade truck, even if the dialog picks SECOND", () => {
+    expect(shouldEnforceFirstGradeMatch([firstLine], "FIRST")).toBe(true);
+    expect(shouldEnforceFirstGradeMatch([firstLine], "SECOND")).toBe(true);
+    expect(shouldEnforceFirstGradeMatch([firstLine], null)).toBe(true);
+  });
+
+  it("enforces a mixed truck only on the FIRST round", () => {
+    expect(shouldEnforceFirstGradeMatch([firstLine, secondLine], "FIRST")).toBe(true);
+    expect(shouldEnforceFirstGradeMatch([firstLine, secondLine], "SECOND")).toBe(false);
+    expect(shouldEnforceFirstGradeMatch([firstLine, secondLine], null)).toBe(false);
+  });
+});
+
+describe("findFirstGradeRequestMismatches", () => {
+  const b500 = { displayName: "B500B" };
+  const b400 = { displayName: "B400DWR" };
+  const size12 = { displayName: "12مم", isBundleType: true, code: "12" };
+
+  it("returns empty when loaded matches a classified request exactly", () => {
+    const issues = findFirstGradeRequestMismatches(
+      [
+        {
+          sizeId: 1,
+          grade: "FIRST",
+          classificationId: 10,
+          classification: b500,
+          bundleCount: 10,
+          requestedTons: null,
+          size: size12,
+        },
+      ],
+      [
+        {
+          sizeId: 1,
+          classificationId: 10,
+          classification: b500,
+          bundleCount: 10,
+          weightTons: "8",
+          size: size12,
+        },
+      ],
+    );
+    expect(issues).toEqual([]);
+  });
+
+  it("treats a short classified load as a remainder, not a blocking error", () => {
+    const result = evaluateFirstGradeRequestMatch(
+      [
+        {
+          sizeId: 1,
+          grade: "FIRST",
+          classificationId: 10,
+          classification: b500,
+          bundleCount: 10,
+          requestedTons: null,
+          size: size12,
+        },
+      ],
+      [
+        {
+          sizeId: 1,
+          classificationId: 10,
+          classification: b500,
+          bundleCount: 6,
+          weightTons: "5",
+          size: size12,
+        },
+      ],
+    );
+    expect(result.blocking).toEqual([]);
+    expect(result.remainders).toHaveLength(1);
+    expect(result.remainders[0].params.remaining).toContain("4");
+  });
+
+  it("blocks when cumulative load exceeds the request", () => {
+    const issues = findFirstGradeRequestMismatches(
+      [
+        {
+          sizeId: 1,
+          grade: "FIRST",
+          classificationId: 10,
+          classification: b500,
+          bundleCount: 10,
+          requestedTons: null,
+          size: size12,
+        },
+      ],
+      [
+        {
+          sizeId: 1,
+          classificationId: 10,
+          classification: b500,
+          bundleCount: 12,
+          weightTons: "9",
+          size: size12,
+        },
+      ],
+    );
+    expect(issues.map((i) => i.messageKey)).toContain("firstGradeLoadedNotInRequest");
+  });
+
+  it("treats two partial rounds that sum to the request as a match", () => {
+    const result = evaluateFirstGradeRequestMatch(
+      [
+        {
+          sizeId: 1,
+          grade: "FIRST",
+          classificationId: 10,
+          classification: b500,
+          bundleCount: 20,
+          requestedTons: null,
+          size: size12,
+        },
+      ],
+      [
+        {
+          sizeId: 1,
+          classificationId: 10,
+          classification: b500,
+          bundleCount: 10,
+          weightTons: "8",
+          size: size12,
+        },
+        {
+          sizeId: 1,
+          classificationId: 10,
+          classification: b500,
+          bundleCount: 10,
+          weightTons: "8",
+          size: size12,
+        },
+      ],
+    );
+    expect(result.blocking).toEqual([]);
+    expect(result.remainders).toEqual([]);
+  });
+
+  it("rejects swapping B500B and B400DWR even when size totals match", () => {
+    const issues = findFirstGradeRequestMismatches(
+      [
+        {
+          sizeId: 1,
+          grade: "FIRST",
+          classificationId: 10,
+          classification: b500,
+          bundleCount: 10,
+          requestedTons: null,
+          size: size12,
+        },
+        {
+          sizeId: 1,
+          grade: "FIRST",
+          classificationId: 20,
+          classification: b400,
+          bundleCount: 5,
+          requestedTons: null,
+          size: size12,
+        },
+      ],
+      [
+        {
+          sizeId: 1,
+          classificationId: 10,
+          classification: b500,
+          bundleCount: 5,
+          weightTons: "4",
+          size: size12,
+        },
+        {
+          sizeId: 1,
+          classificationId: 20,
+          classification: b400,
+          bundleCount: 10,
+          weightTons: "8",
+          size: size12,
+        },
+      ],
+    );
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues.some((i) => i.params.sizeLabel.includes("B400DWR"))).toBe(true);
+  });
+
+  it("lets leftover classified quantity cover an unclassified request remainder", () => {
+    const issues = findFirstGradeRequestMismatches(
+      [
+        {
+          sizeId: 1,
+          grade: "FIRST",
+          classificationId: 10,
+          classification: b500,
+          bundleCount: 10,
+          requestedTons: null,
+          size: size12,
+        },
+        {
+          sizeId: 1,
+          grade: "FIRST",
+          classificationId: null,
+          bundleCount: 5,
+          requestedTons: null,
+          size: size12,
+        },
+      ],
+      [
+        {
+          sizeId: 1,
+          classificationId: 10,
+          classification: b500,
+          bundleCount: 15,
+          weightTons: "12",
+          size: size12,
+        },
+      ],
+    );
+    expect(issues).toEqual([]);
+  });
+
+  it("accepts any classification when the request line is unclassified", () => {
+    const issues = findFirstGradeRequestMismatches(
+      [
+        {
+          sizeId: 1,
+          grade: "FIRST",
+          classificationId: null,
+          bundleCount: 15,
+          requestedTons: null,
+          size: size12,
+        },
+      ],
+      [
+        {
+          sizeId: 1,
+          classificationId: 10,
+          classification: b500,
+          bundleCount: 10,
+          weightTons: "8",
+          size: size12,
+        },
+        {
+          sizeId: 1,
+          classificationId: 20,
+          classification: b400,
+          bundleCount: 5,
+          weightTons: "4",
+          size: size12,
+        },
+      ],
+    );
+    expect(issues).toEqual([]);
+  });
+
+  it("rejects unclassified sessions when every request line is classified", () => {
+    const issues = findFirstGradeRequestMismatches(
+      [
+        {
+          sizeId: 1,
+          grade: "FIRST",
+          classificationId: 10,
+          classification: b500,
+          bundleCount: 10,
+          requestedTons: null,
+          size: size12,
+        },
+      ],
+      [
+        {
+          sizeId: 1,
+          classificationId: 10,
+          classification: b500,
+          bundleCount: 10,
+          weightTons: "8",
+          size: size12,
+        },
+        {
+          sizeId: 1,
+          classificationId: null,
+          bundleCount: 2,
+          weightTons: "1",
+          size: size12,
+        },
+      ],
+    );
+    expect(issues.map((i) => i.messageKey)).toContain("firstGradeLoadedNotInRequest");
+  });
+
+  it("rejects a loaded size that is not on the first-grade request", () => {
+    const issues = findFirstGradeRequestMismatches(
+      [
+        {
+          sizeId: 1,
+          grade: "FIRST",
+          classificationId: null,
+          bundleCount: 10,
+          requestedTons: null,
+          size: size12,
+        },
+      ],
+      [
+        {
+          sizeId: 1,
+          classificationId: null,
+          bundleCount: 10,
+          weightTons: "8",
+          size: size12,
+        },
+        {
+          sizeId: 2,
+          classificationId: null,
+          bundleCount: 3,
+          weightTons: "2",
+          size: { displayName: "16مم", isBundleType: true, code: "16" },
+        },
+      ],
+    );
+    expect(issues.map((i) => i.messageKey)).toContain("firstGradeLoadedNotInRequest");
+  });
+
+  it("ignores second-grade request lines", () => {
+    const issues = findFirstGradeRequestMismatches(
+      [
+        {
+          sizeId: 1,
+          grade: "SECOND",
+          bundleCount: 20,
+          requestedTons: null,
+          size: size12,
+        },
+      ],
+      [],
+    );
+    expect(issues).toEqual([]);
+  });
+});
+
+describe("collectFirstGradeSessions", () => {
+  it("includes prior FIRST rounds and the current open round", () => {
+    const sessions = [
+      { id: 1, bridgeRoundId: 10 },
+      { id: 2, bridgeRoundId: 11 },
+      { id: 3, bridgeRoundId: 12 },
+    ];
+    const rounds = [
+      { id: 10, grade: "FIRST" as const },
+      { id: 11, grade: "SECOND" as const },
+      { id: 12, grade: null },
+    ];
+    expect(collectFirstGradeSessions(sessions, rounds, 12).map((s) => s.id)).toEqual([
+      1, 3,
+    ]);
   });
 });

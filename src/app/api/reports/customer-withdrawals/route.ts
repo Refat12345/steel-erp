@@ -22,6 +22,8 @@ export async function GET(req: NextRequest) {
     to: req.nextUrl.searchParams.get("to"),
     customerId: req.nextUrl.searchParams.get("customerId") ?? undefined,
     sizeId: req.nextUrl.searchParams.get("sizeId") ?? undefined,
+    classificationId:
+      req.nextUrl.searchParams.get("classificationId") ?? undefined,
   });
 
   if (!parsed.success) {
@@ -34,6 +36,7 @@ export async function GET(req: NextRequest) {
       toDate: parsed.data.to,
       customerId: parsed.data.customerId,
       sizeId: parsed.data.sizeId,
+      classificationId: parsed.data.classificationId,
     });
     return ok(data);
   } catch (err) {

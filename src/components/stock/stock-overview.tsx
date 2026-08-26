@@ -21,21 +21,35 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { RefreshCw, MapPin, Warehouse, Layers, Ruler } from "lucide-react";
+import { useSession } from "next-auth/react";
+import { sessionHasPermission } from "@/lib/client-permissions";
+import { RefreshCw, MapPin, Warehouse, Layers, Ruler, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDecimal } from "@/lib/number-format";
 import { getTextDirection, type Locale } from "@/i18n/config";
 import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
   SEGMENT_META,
   SEGMENT_ORDER,
+  segmentHoldsSteelClassification,
   type Segment,
   type StockUnit,
+  type LocationClassificationRef,
 } from "./stock-shared";
 
 interface BalanceLine {
   sizeId: number | null;
   sizeName: string | null;
   grade: "FIRST" | "SECOND" | null;
+  classificationId: number | null;
+  classificationName: string | null;
   unit: StockUnit;
   quantity: number;
 }
@@ -49,6 +63,7 @@ interface LocationBalance {
   unit: StockUnit;
   isDualUnit: boolean;
   expectedSize: { id: number; displayName: string } | null;
+  expectedClassification?: { id: number; code: string; displayName: string } | null;
   isActive: boolean;
   gridRow: number;
   gridCol: number;
@@ -64,9 +79,44 @@ function fmt(n: number): string {
   return formatDecimal(n, 3);
 }
 
+function baySizeLabel(
+  l: LocationBalance,
+  t: (key: string, values?: Record<string, string | number | Date>) => string,
+): string {
+  const primaryLines = l.lines.filter((ln) => ln.unit === l.unit && ln.quantity !== 0);
+  const lineLabels = [
+    ...new Set(
+      primaryLines.map((ln) => {
+        const size = ln.sizeName ?? t("shortbar");
+        return ln.classificationName ? `${size} ${ln.classificationName}` : size;
+      }),
+    ),
+  ];
+  if (lineLabels.length > 2) return t("sizesCount", { count: lineLabels.length });
+  if (lineLabels.length > 0) return lineLabels.join(", ");
+  return (
+    [l.expectedSize?.displayName, l.expectedClassification?.code]
+      .filter(Boolean)
+      .join(" ") ||
+    (l.segment === "SHORTBAR" ? t("segmentUnitByTons") : t("segmentUnitByBundles"))
+  );
+}
+
+function canMarkBayB500B(l: LocationBalance): boolean {
+  if (!segmentHoldsSteelClassification(l.segment)) return false;
+  if (l.expectedClassification) return false;
+  return l.totalQuantity > 0;
+}
+
 /** One yard's live schematic map — tiles driven by grid coords, colored by
  *  segment, showing the current balance on each site. */
-function LiveYardMap({ locations }: { locations: LocationBalance[] }) {
+function LiveYardMap({
+  locations,
+  onSelect,
+}: {
+  locations: LocationBalance[];
+  onSelect: (location: LocationBalance) => void;
+}) {
   const t = useTranslations("stock");
   const tEnums = useTranslations("enums");
   const locale = useLocale() as Locale;
@@ -97,31 +147,23 @@ function LiveYardMap({ locations }: { locations: LocationBalance[] }) {
           const meta = SEGMENT_META[l.segment];
           const segmentLabel = tEnums(`stockSegment.${l.segment}`);
           const empty = l.totalQuantity === 0 && (l.totalTons ?? 0) === 0;
-          // Label from the PRIMARY-unit lines only (the parallel tonnage line
-          // mirrors the same size, so it would just duplicate the name).
-          const primaryLines = l.lines.filter((ln) => ln.unit === l.unit && ln.quantity !== 0);
-          const sizeLabel =
-            primaryLines.length > 2
-              ? t("sizesCount", { count: primaryLines.length })
-              : primaryLines.length > 0
-                ? primaryLines.map((ln) => ln.sizeName ?? t("shortbar")).join(", ")
-                : l.expectedSize?.displayName ??
-                  (l.segment === "SHORTBAR"
-                    ? t("segmentUnitByTons")
-                    : t("segmentUnitByBundles"));
+          const sizeLabel = baySizeLabel(l, t);
           return (
-            <div
+            <button
+              type="button"
               key={l.locationId}
               className={cn(
                 "flex flex-col justify-between rounded-md border p-2 text-center shadow-sm transition",
                 meta.tile,
                 empty && "opacity-45",
+                "cursor-pointer hover:ring-2 hover:ring-ring/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               )}
               style={{
                 gridColumn: `${l.gridCol} / span ${l.gridSpan}`,
                 gridRow: `${l.gridRow}`,
               }}
               title={`${l.nameAr} (${l.code}) — ${segmentLabel}`}
+              onClick={() => onSelect(l)}
             >
               <div className="flex items-start justify-between gap-1">
                 <span
@@ -161,7 +203,7 @@ function LiveYardMap({ locations }: { locations: LocationBalance[] }) {
                 </span>
                 <span className="shrink-0 font-mono tabular-nums opacity-70">{l.code}</span>
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -173,17 +215,34 @@ export function StockOverview() {
   const t = useTranslations("stock");
   const tEnums = useTranslations("enums");
   const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+  const { data: session } = useSession();
+  const canMarkClassification = sessionHasPermission(
+    session,
+    "stock.classification.mark",
+  );
   const [balances, setBalances] = useState<LocationBalance[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeYard, setActiveYard] = useState<string>("");
+  const [selectedBay, setSelectedBay] = useState<LocationBalance | null>(null);
+  const [b500b, setB500b] = useState<LocationClassificationRef | null>(null);
+  const [marking, setMarking] = useState(false);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     try {
-      const res = await fetch("/api/stock/balances");
-      const json = await res.json();
+      const [balRes, classRes] = await Promise.all([
+        fetch("/api/stock/balances"),
+        fetch("/api/steel-classifications"),
+      ]);
+      const json = await balRes.json();
       if (json.success) setBalances(json.data as LocationBalance[]);
       else toast.error(json.error || t("errorLoadBalances"));
+      const classJson = await classRes.json().catch(() => null);
+      if (classJson?.success) {
+        const rows = classJson.data as LocationClassificationRef[];
+        setB500b(rows.find((c) => c.code === "B500B") ?? rows[0] ?? null);
+      }
     } catch {
       toast.error(t("errorConnection"));
     } finally {
@@ -234,13 +293,15 @@ export function StockOverview() {
     }));
   }, [balances]);
 
-  // Size breakdown for bundle segments: size → bundles per segment + total,
-  // plus the parallel tonnage. Bundle and ton lines are counted separately.
+  // Size breakdown for bundle segments: (size, classification) → bundles per
+  // segment + total, plus the parallel tonnage. Splitting by classification
+  // keeps B500B and B400DWR of the same size on separate rows.
   const sizeBreakdown = useMemo(() => {
     const bySize = new Map<
       string,
       {
         sizeName: string;
+        classificationName: string | null;
         GENERAL: number;
         GOVERNORATES: number;
         ISOLATION: number;
@@ -252,10 +313,19 @@ export function StockOverview() {
       if (!BUNDLE_SEGMENTS.includes(b.segment)) continue;
       for (const ln of b.lines) {
         if (ln.quantity === 0) continue;
-        const key = ln.sizeName ?? "—";
+        const sizeName = ln.sizeName ?? "—";
+        const key = `${sizeName}|${ln.classificationName ?? ""}`;
         const row =
           bySize.get(key) ??
-          { sizeName: key, GENERAL: 0, GOVERNORATES: 0, ISOLATION: 0, total: 0, tons: 0 };
+          {
+            sizeName,
+            classificationName: ln.classificationName,
+            GENERAL: 0,
+            GOVERNORATES: 0,
+            ISOLATION: 0,
+            total: 0,
+            tons: 0,
+          };
         if (ln.unit === "TON") {
           row.tons += ln.quantity;
         } else {
@@ -265,7 +335,11 @@ export function StockOverview() {
         bySize.set(key, row);
       }
     }
-    return [...bySize.values()].sort((a, b) => a.sizeName.localeCompare(b.sizeName, locale));
+    return [...bySize.values()].sort(
+      (a, b) =>
+        a.sizeName.localeCompare(b.sizeName, locale) ||
+        (a.classificationName ?? "").localeCompare(b.classificationName ?? "", locale),
+    );
   }, [balances, locale]);
 
   const shortbarTotal = useMemo(
@@ -277,6 +351,47 @@ export function StockOverview() {
   );
 
   const grandOccupied = balances.filter((b) => b.totalQuantity > 0).length;
+
+  async function markSelectedBay() {
+    if (!selectedBay || !b500b) return;
+    const sizeLabel = baySizeLabel(selectedBay, t);
+    if (
+      !window.confirm(
+        t("markLocationB500BConfirm", {
+          location: selectedBay.nameAr,
+          size: sizeLabel,
+          classification: b500b.displayName,
+        }),
+      )
+    ) {
+      return;
+    }
+    setMarking(true);
+    try {
+      const res = await fetch(
+        `/api/stock/locations/${selectedBay.locationId}/mark-classification`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ classificationId: b500b.id }),
+        },
+      );
+      const json = await res.json();
+      if (!json.success) {
+        toast.error(json.error || t("errorGeneric"));
+        return;
+      }
+      toast.success(
+        t("markLocationB500BSuccess", { classification: b500b.displayName }),
+      );
+      setSelectedBay(null);
+      await fetchData({ silent: true });
+    } catch {
+      toast.error(t("errorConnection"));
+    } finally {
+      setMarking(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -340,6 +455,9 @@ export function StockOverview() {
               </div>
             ))}
           </div>
+          {canMarkClassification && (
+            <p className="text-xs text-muted-foreground">{t("mapMarkClassificationHint")}</p>
+          )}
 
           {yards.length === 0 ? (
             <div className="rounded-lg border border-dashed p-10 text-center text-muted-foreground">
@@ -360,7 +478,10 @@ export function StockOverview() {
               </TabsList>
               {yards.map((y) => (
                 <TabsContent key={y.id} value={String(y.id)} className="pt-2">
-                  <LiveYardMap locations={y.locations} />
+                  <LiveYardMap
+                    locations={y.locations}
+                    onSelect={(l) => setSelectedBay(l)}
+                  />
                 </TabsContent>
               ))}
             </Tabs>
@@ -396,8 +517,18 @@ export function StockOverview() {
                 </TableHeader>
                 <TableBody>
                   {sizeBreakdown.map((r) => (
-                    <TableRow key={r.sizeName}>
-                      <TableCell className="text-start font-medium">{r.sizeName}</TableCell>
+                    <TableRow key={`${r.sizeName}|${r.classificationName ?? ""}`}>
+                      <TableCell className="text-start font-medium">
+                        {r.sizeName}
+                        {r.classificationName && (
+                          <Badge
+                            variant="outline"
+                            className="ms-1.5 text-[10px] font-normal"
+                          >
+                            {r.classificationName}
+                          </Badge>
+                        )}
+                      </TableCell>
                       <TableCell className="text-center tabular-nums">
                         {r.GENERAL ? fmt(r.GENERAL) : t("emDash")}
                       </TableCell>
@@ -433,6 +564,69 @@ export function StockOverview() {
       <p className="text-center text-xs text-muted-foreground">
         {t("occupiedOfTotal", { occupied: grandOccupied, total: balances.length })}
       </p>
+
+      <Sheet
+        open={selectedBay != null}
+        onOpenChange={(open) => {
+          if (!open) setSelectedBay(null);
+        }}
+      >
+        <SheetContent side="bottom" dir={dir} className="max-h-[85dvh]">
+          {selectedBay && (
+            <>
+              <SheetHeader>
+                <SheetTitle>{selectedBay.nameAr}</SheetTitle>
+                <SheetDescription>
+                  {selectedBay.code} · {tEnums(`stockSegment.${selectedBay.segment}`)}
+                </SheetDescription>
+              </SheetHeader>
+              <div className="space-y-2 px-4 text-sm">
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted-foreground">{t("colSize")}</span>
+                  <span className="font-medium">{baySizeLabel(selectedBay, t)}</span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted-foreground">{t("colQuantity")}</span>
+                  <span className="tabular-nums font-medium">
+                    {fmt(selectedBay.totalQuantity)}{" "}
+                    {tEnums(`stockUnit.${selectedBay.unit}`)}
+                    {selectedBay.isDualUnit && (selectedBay.totalTons ?? 0) > 0 &&
+                      t("withTons", { tons: fmt(selectedBay.totalTons ?? 0) })}
+                  </span>
+                </div>
+                {selectedBay.expectedClassification && (
+                  <Badge variant="outline" className="font-mono">
+                    {selectedBay.expectedClassification.code}
+                  </Badge>
+                )}
+              </div>
+              <SheetFooter>
+                {selectedBay.expectedClassification ? (
+                  <p className="w-full text-xs text-muted-foreground">
+                    {t("bayAlreadyB500B", {
+                      classification: selectedBay.expectedClassification.displayName,
+                    })}
+                  </p>
+                ) : canMarkClassification && canMarkBayB500B(selectedBay) && b500b ? (
+                  <Button
+                    className="w-full"
+                    disabled={marking}
+                    onClick={() => void markSelectedBay()}
+                  >
+                    {marking && <Loader2 className="animate-spin" />}
+                    {t("markAsB500B", { classification: b500b.displayName })}
+                  </Button>
+                ) : canMarkClassification &&
+                  segmentHoldsSteelClassification(selectedBay.segment) ? (
+                  <p className="w-full text-xs text-muted-foreground">
+                    {t("reserveB500BFromLocations")}
+                  </p>
+                ) : null}
+              </SheetFooter>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

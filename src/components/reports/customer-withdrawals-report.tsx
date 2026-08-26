@@ -17,6 +17,7 @@ import { sessionHasPermission } from "@/lib/client-permissions";
 import { formatDateTime } from "@/lib/date-format";
 import { toEnglishCity, toEnglishSize } from "@/lib/en-labels";
 import { BRAND } from "@/lib/brand";
+import { offeredSteelClassifications } from "@/lib/steel-classification-default";
 import {
   computeA4LandscapePrintFitScale,
   SCALE_CARD_PRINT_HEIGHT_FUDGE,
@@ -51,6 +52,13 @@ interface CustomerOption {
 interface SizeOption {
   id: number;
   code: string;
+  displayName: string;
+}
+
+interface ClassificationOption {
+  id: number;
+  code: string;
+  /** Latin technical code (B500B / B400DWR) — identical in both languages. */
   displayName: string;
 }
 
@@ -119,11 +127,13 @@ export function CustomerWithdrawalsReportView({
   const [toDate, setToDate] = useState(() => todayInput());
   const [customerId, setCustomerId] = useState<string>("all");
   const [sizeId, setSizeId] = useState<string>("all");
+  const [classificationId, setClassificationId] = useState<string>("all");
 
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [loadingCustomers, setLoadingCustomers] = useState(true);
   const [sizes, setSizes] = useState<SizeOption[]>([]);
   const [loadingSizes, setLoadingSizes] = useState(true);
+  const [classifications, setClassifications] = useState<ClassificationOption[]>([]);
 
   const [loadingReport, setLoadingReport] = useState(false);
   const [report, setReport] = useState<CustomerWithdrawalsReport | null>(null);
@@ -170,6 +180,24 @@ export function CustomerWithdrawalsReportView({
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/steel-classifications");
+        const json = await res.json();
+        if (!cancelled && json.success && Array.isArray(json.data)) {
+          setClassifications(offeredSteelClassifications(json.data));
+        }
+      } catch {
+        // Non-critical: the filter simply stays hidden.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   /** Lets Select.Value show the label; Base UI renders raw `value` without `items`. */
   const customerSelectItems = useMemo(
     () => [
@@ -193,6 +221,17 @@ export function CustomerWithdrawalsReportView({
     [sizes],
   );
 
+  const classificationSelectItems = useMemo(
+    () => [
+      { value: "all", label: "All classifications" },
+      ...classifications.map((c) => ({
+        value: String(c.id),
+        label: c.displayName,
+      })),
+    ],
+    [classifications],
+  );
+
   const fetchReport = useCallback(async () => {
     if (!fromDate || !toDate) {
       toast.error("Select the date range");
@@ -203,6 +242,8 @@ export function CustomerWithdrawalsReportView({
       const params = new URLSearchParams({ from: fromDate, to: toDate });
       if (customerId !== "all") params.set("customerId", customerId);
       if (sizeId !== "all") params.set("sizeId", sizeId);
+      if (classificationId !== "all")
+        params.set("classificationId", classificationId);
       const res = await fetch(
         `/api/reports/customer-withdrawals?${params.toString()}`,
       );
@@ -219,7 +260,7 @@ export function CustomerWithdrawalsReportView({
     } finally {
       setLoadingReport(false);
     }
-  }, [customerId, fromDate, toDate, sizeId]);
+  }, [customerId, fromDate, toDate, sizeId, classificationId]);
 
   const handlePrint = useCallback(() => {
     if (!report) return;
@@ -246,7 +287,11 @@ export function CustomerWithdrawalsReportView({
     );
   }
 
-  const showAllSizes = report != null && report.filters.sizeId == null;
+  // Show the per-size totals when sizes vary — or when one size splits into
+  // several classification lines.
+  const showSizeTotals =
+    report != null &&
+    (report.filters.sizeId == null || report.sizeTotals.length > 1);
   const showAllCustomers = report != null && report.filters.customerId == null;
 
   return (
@@ -325,6 +370,31 @@ export function CustomerWithdrawalsReportView({
           </Select>
         </div>
 
+        {classifications.length > 0 && (
+          <div className="space-y-1.5 min-w-[10rem]">
+            <label className="text-xs font-medium text-muted-foreground">
+              Classification
+            </label>
+            <Select
+              items={classificationSelectItems}
+              value={classificationId}
+              onValueChange={(v) => setClassificationId(v ?? "all")}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="All classifications" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All classifications</SelectItem>
+                {classifications.map((c) => (
+                  <SelectItem key={c.id} value={String(c.id)}>
+                    {c.displayName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         <div className="space-y-1.5 min-w-[10rem]">
           <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
             <CalendarDays className="h-3.5 w-3.5" />
@@ -394,6 +464,14 @@ export function CustomerWithdrawalsReportView({
             ) : (
               " · All sizes"
             )}
+            {report.filters.classificationDisplayName ? (
+              <>
+                {" · "}
+                <span className="font-medium text-foreground">
+                  {report.filters.classificationDisplayName}
+                </span>
+              </>
+            ) : null}
             {" · "}
             {report.fromDate} → {report.toDate}
             <span className="text-xs">
@@ -417,7 +495,7 @@ export function CustomerWithdrawalsReportView({
             <SummaryCard label="Trucks" value={report.totals.truckCount} />
           </div>
 
-          {showAllSizes && report.sizeTotals.length > 0 ? (
+          {showSizeTotals && report.sizeTotals.length > 0 ? (
             <div className="space-y-2 min-w-0">
               <h2 className="text-sm font-semibold">Totals by size</h2>
               <div className="rounded-lg border overflow-x-auto">
@@ -432,9 +510,16 @@ export function CustomerWithdrawalsReportView({
                   </TableHeader>
                   <TableBody>
                     {report.sizeTotals.map((s) => (
-                      <TableRow key={s.sizeId ?? "none"}>
+                      <TableRow
+                        key={`${s.sizeId ?? "none"}|${s.classificationId ?? "none"}`}
+                      >
                         <TableCell className="font-medium">
                           {toEnglishSize(s.displayName, s.code)}
+                          {s.classificationName ? (
+                            <span className="ml-1.5 text-xs text-muted-foreground">
+                              {s.classificationName}
+                            </span>
+                          ) : null}
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
                           {formatBundles(s.totalBundles)}
@@ -694,6 +779,9 @@ function CustomerWithdrawalsPrintable({
         {report.filters.sizeDisplayName
           ? toEnglishSize(report.filters.sizeDisplayName)
           : "All sizes"}
+        {report.filters.classificationDisplayName
+          ? ` | Classification: ${report.filters.classificationDisplayName}`
+          : ""}
       </p>
 
       <h2 className="section-title">Totals by size</h2>
@@ -708,8 +796,11 @@ function CustomerWithdrawalsPrintable({
         </thead>
         <tbody>
           {report.sizeTotals.map((s) => (
-            <tr key={s.sizeId ?? "none"}>
-              <td>{toEnglishSize(s.displayName, s.code)}</td>
+            <tr key={`${s.sizeId ?? "none"}|${s.classificationId ?? "none"}`}>
+              <td>
+                {toEnglishSize(s.displayName, s.code)}
+                {s.classificationName ? ` ${s.classificationName}` : ""}
+              </td>
               <td className="num">{formatBundles(s.totalBundles)}</td>
               <td className="num">{formatTons(s.totalTons)}</td>
               <td className="num">{s.truckCount}</td>

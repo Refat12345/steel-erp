@@ -487,6 +487,38 @@ model SizeLookup {
   @@map("size_lookup")
 }
 
+/// Technical steel classification WITHIN a commercial grade (e.g. B500B and
+/// B400DWR — both FIRST grade). This is a refinement label, NOT a new grade:
+/// every grade-based rule (one grade per bridge round, allowedGrade on stock
+/// locations, grade report filters) is unaffected. Unlike grade, a single
+/// bridge round MAY mix classifications (management rule), so the
+/// classification lives on the fine-grained rows — request items, weigh
+/// sessions, stock movements — and intentionally NOT on BridgeRound.
+/// Null classification anywhere = "unclassified" (legacy rows and material
+/// recorded before this catalog existed).
+model SteelClassification {
+  id            Int             @id @default(autoincrement())
+  code          String          @unique
+  displayName   String          @map("display_name")
+  /// English display name. Nullable; rendered via localizedName() with an
+  /// Arabic fallback when empty. Codes like B500B are usually identical in
+  /// both languages.
+  displayNameEn String?         @map("display_name_en")
+  /// Commercial grade this classification refines. Currently always FIRST
+  /// (B500B / B400DWR); kept as a column so SECOND-grade classifications can
+  /// be introduced later without a schema change.
+  grade         SalesOrderGrade @default(FIRST)
+  isActive      Boolean         @default(true) @map("is_active")
+  sortOrder     Int             @default(0) @map("sort_order")
+
+  truckRequestItems     TruckRequestItem[]
+  weighSessions         WeighSession[]
+  stockMovements        StockMovement[]
+  expectedOnLocations   StockLocation[]
+
+  @@map("steel_classifications")
+}
+
 // ─── Finished-Goods Stock (Warehouse) ─────────────────────────────
 //
 // A ledger-based stock module for the finished-goods yard. Balances are
@@ -530,6 +562,11 @@ model StockLocation {
   /// suggestions only. The ACTUAL size is derived from current balance;
   /// this is not a hard constraint.
   expectedSizeId Int?                 @map("expected_size_id")
+  /// Hard dedication for first-grade rebar. Null = ordinary (unclassified)
+  /// stock only. Set to B500B when this bay holds B500B exclusively.
+  /// Cleared automatically when the segment is not GENERAL / GOVERNORATES.
+  /// Inbound, adjust, transfer-in, and scale source must match this value.
+  expectedClassificationId Int?       @map("expected_classification_id")
   isActive       Boolean              @default(true) @map("is_active")
   /// Virtual pass-through site for direct-from-production dispatch (cross-dock).
   /// Exactly one row is seeded with this flag. It never appears on the live map,
@@ -547,13 +584,15 @@ model StockLocation {
   createdAt      DateTime             @default(now()) @map("created_at")
   updatedAt      DateTime             @updatedAt @map("updated_at")
 
-  yard          StockYard       @relation(fields: [yardId], references: [id])
-  expectedSize  SizeLookup?     @relation(fields: [expectedSizeId], references: [id])
-  movements     StockMovement[]
-  weighSessions WeighSession[]
+  yard                   StockYard            @relation(fields: [yardId], references: [id])
+  expectedSize           SizeLookup?          @relation(fields: [expectedSizeId], references: [id])
+  expectedClassification SteelClassification? @relation(fields: [expectedClassificationId], references: [id])
+  movements              StockMovement[]
+  weighSessions          WeighSession[]
 
   @@unique([yardId, code])
   @@index([segment, isActive])
+  @@index([expectedClassificationId])
   @@map("stock_locations")
 }
 
@@ -565,6 +604,11 @@ model StockMovement {
   sizeId           Int?              @map("size_id")
   /// Commercial grade — set for rebar movements, null for shortbar.
   grade            SalesOrderGrade?
+  /// Technical classification dimension of the balance (B500B / B400DWR).
+  /// Set for FIRST-grade rebar movements; null = unclassified legacy stock,
+  /// SECOND grade, or shortbar. Balances are computed per location × size ×
+  /// grade × classification × unit.
+  classificationId Int?              @map("classification_id")
   /// Positive = inbound, negative = outbound. Bundles are whole numbers
   /// stored in this Decimal column; tons use up to 3 decimals.
   quantity         Decimal           @db.Decimal(12, 3)
@@ -587,19 +631,21 @@ model StockMovement {
   createdById      Int               @map("created_by_id")
   createdAt        DateTime          @default(now()) @map("created_at")
 
-  location       StockLocation   @relation(fields: [locationId], references: [id])
-  size           SizeLookup?     @relation(fields: [sizeId], references: [id])
-  weighSession   WeighSession?   @relation(fields: [weighSessionId], references: [id])
-  truckOperation TruckOperation? @relation(fields: [truckOperationId], references: [id])
-  creator        User            @relation("StockMovementCreator", fields: [createdById], references: [id])
-  supersededBy   StockMovement?  @relation("StockMovementSupersede", fields: [supersededById], references: [id])
-  supersedes     StockMovement[] @relation("StockMovementSupersede")
+  location       StockLocation        @relation(fields: [locationId], references: [id])
+  size           SizeLookup?          @relation(fields: [sizeId], references: [id])
+  classification SteelClassification? @relation(fields: [classificationId], references: [id])
+  weighSession   WeighSession?        @relation(fields: [weighSessionId], references: [id])
+  truckOperation TruckOperation?      @relation(fields: [truckOperationId], references: [id])
+  creator        User                 @relation("StockMovementCreator", fields: [createdById], references: [id])
+  supersededBy   StockMovement?       @relation("StockMovementSupersede", fields: [supersededById], references: [id])
+  supersedes     StockMovement[]      @relation("StockMovementSupersede")
 
   @@index([locationId, sizeId])
   @@index([truckOperationId])
   @@index([transferGroupId])
   @@index([type, createdAt])
   @@index([supersededById])
+  @@index([classificationId])
   @@map("stock_movements")
 }
 
@@ -697,14 +743,23 @@ model TruckRequestItem {
   /// below, so a partial unique index (grade IS NULL) in the migration keeps
   /// "same size, no grade" from duplicating.
   grade            SalesOrderGrade?
+  /// Technical classification for FIRST-grade rebar lines (B500B / B400DWR).
+  /// Null = unclassified or not applicable (SECOND grade / non-rebar). The
+  /// same size+grade may appear on two lines with different classifications
+  /// (e.g. 16mm FIRST B500B + 16mm FIRST B400DWR on one truck). A partial
+  /// unique index in the migration guards the "grade set, no classification"
+  /// duplicate case.
+  classificationId Int?             @map("classification_id")
   bundleCount      Int?             @map("bundle_count")
   requestedTons    Decimal?         @map("requested_tons") @db.Decimal(10, 3)
 
-  truckOperation TruckOperation @relation(fields: [truckOperationId], references: [id])
-  size           SizeLookup     @relation(fields: [sizeId], references: [id])
+  truckOperation TruckOperation       @relation(fields: [truckOperationId], references: [id])
+  size           SizeLookup           @relation(fields: [sizeId], references: [id])
+  classification SteelClassification? @relation(fields: [classificationId], references: [id])
 
-  @@unique([truckOperationId, sizeId, grade])
+  @@unique([truckOperationId, sizeId, grade, classificationId], map: "truck_request_items_op_size_grade_classification_key")
   @@index([truckOperationId])
+  @@index([classificationId])
   @@map("truck_request_items")
 }
 
@@ -763,6 +818,11 @@ model WeighSession {
   bridgeRoundId    Int?     @map("bridge_round_id")
   sessionNumber    Int      @map("session_number")
   sizeId           Int?     @map("size_id")
+  /// Technical classification of the material weighed in this session
+  /// (B500B / B400DWR). Set by the scale operator for FIRST-grade rebar
+  /// loads; null for SECOND grade, shortbar/scrap, and legacy rows. Lives
+  /// here — not on BridgeRound — because one round may mix classifications.
+  classificationId Int?     @map("classification_id")
   bundleCount      Int?     @map("bundle_count")
   weightTons       Decimal  @map("weight_tons") @db.Decimal(10, 3)
   /// Stock source location this weigh was loaded from. Nullable: historical
@@ -779,16 +839,18 @@ model WeighSession {
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
-  truckOperation TruckOperation  @relation(fields: [truckOperationId], references: [id])
-  bridgeRound    BridgeRound?    @relation(fields: [bridgeRoundId], references: [id])
-  size           SizeLookup?     @relation(fields: [sizeId], references: [id])
-  sourceLocation StockLocation?  @relation(fields: [sourceLocationId], references: [id])
+  truckOperation TruckOperation       @relation(fields: [truckOperationId], references: [id])
+  bridgeRound    BridgeRound?         @relation(fields: [bridgeRoundId], references: [id])
+  size           SizeLookup?          @relation(fields: [sizeId], references: [id])
+  sourceLocation StockLocation?       @relation(fields: [sourceLocationId], references: [id])
+  classification SteelClassification? @relation(fields: [classificationId], references: [id])
   stockMovements StockMovement[]
 
   @@unique([truckOperationId, sessionNumber])
   @@index([truckOperationId])
   @@index([bridgeRoundId])
   @@index([sourceLocationId])
+  @@index([classificationId])
   @@map("weigh_sessions")
 }
 

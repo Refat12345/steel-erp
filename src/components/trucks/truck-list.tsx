@@ -124,6 +124,10 @@ export function TruckList() {
   const canRegister = sessionHasPermission(session, "truck.register");
   const canEditQueued = sessionHasPermission(session, "truck.edit_queued");
   const canEditApproved = sessionHasPermission(session, "truck.edit_approved");
+  const canEditRequestItems = sessionHasPermission(
+    session,
+    "truck.edit_request_items",
+  );
   const canViewHistory = sessionHasPermission(session, "truck.view_history");
 
   const fetchData = useCallback(async () => {
@@ -393,6 +397,7 @@ export function TruckList() {
                               truck._count.sessions,
                               canEditQueued,
                               canEditApproved,
+                              canEditRequestItems,
                             ) && (
                               <Button
                                 variant="ghost"

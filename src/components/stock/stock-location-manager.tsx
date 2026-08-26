@@ -31,6 +31,7 @@ import {
   type Yard,
   type StockLocation,
   type SizeOption,
+  type LocationClassificationRef,
 } from "./stock-shared";
 
 interface ApiLocation extends Omit<StockLocation, "movementCount"> {
@@ -115,6 +116,9 @@ function YardMap({ yard }: { yard: Yard }) {
                 {l.expectedSize
                   ? l.expectedSize.displayName
                   : t(segmentUnitKey(l.segment))}
+                {l.expectedClassification
+                  ? ` · ${l.expectedClassification.code}`
+                  : ""}
               </div>
             </div>
           );
@@ -144,6 +148,7 @@ export function StockLocationManager() {
 
   const [yards, setYards] = useState<Yard[]>([]);
   const [sizes, setSizes] = useState<SizeOption[]>([]);
+  const [classifications, setClassifications] = useState<LocationClassificationRef[]>([]);
   const [canManage, setCanManage] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeYard, setActiveYard] = useState<string>("");
@@ -159,6 +164,9 @@ export function StockLocationManager() {
         const normalized = (json.data.yards as ApiYard[]).map(normalizeYard);
         setYards(normalized);
         setSizes(json.data.sizes as SizeOption[]);
+        setClassifications(
+          (json.data.classifications as LocationClassificationRef[]) ?? [],
+        );
         setCanManage(!!json.data.canManage);
         setActiveYard((prev) =>
           prev && normalized.some((y) => String(y.id) === prev)
@@ -273,7 +281,7 @@ export function StockLocationManager() {
               </div>
 
               <div className="rounded-lg border overflow-x-auto">
-                <Table className="min-w-[820px]">
+                <Table className="min-w-[920px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-20 text-start">{t("colCode")}</TableHead>
@@ -282,6 +290,7 @@ export function StockLocationManager() {
                       <TableHead className="w-20 text-center">{t("colCounting")}</TableHead>
                       <TableHead className="w-20 text-center">{t("colGrade")}</TableHead>
                       <TableHead className="w-28 text-start">{t("colSize")}</TableHead>
+                      <TableHead className="w-24 text-start">{t("colSteelClassification")}</TableHead>
                       <TableHead className="w-24 text-center">{t("colPosition")}</TableHead>
                       <TableHead className="w-20 text-center">{t("colStatus")}</TableHead>
                       {canManage && (
@@ -293,7 +302,7 @@ export function StockLocationManager() {
                     {y.locations.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={canManage ? 9 : 8}
+                          colSpan={canManage ? 10 : 9}
                           className="h-24 text-center text-muted-foreground"
                         >
                           {t("noLocationsInYard")}
@@ -327,6 +336,15 @@ export function StockLocationManager() {
                           </TableCell>
                           <TableCell className="text-start text-xs">
                             {l.expectedSize ? l.expectedSize.displayName : t("emDash")}
+                          </TableCell>
+                          <TableCell className="text-start text-xs">
+                            {l.expectedClassification ? (
+                              <Badge variant="outline" className="font-mono text-[10px]">
+                                {l.expectedClassification.code}
+                              </Badge>
+                            ) : (
+                              t("emDash")
+                            )}
                           </TableCell>
                           <TableCell className="text-center text-xs tabular-nums" dir="ltr">
                             r{l.gridRow}·c{l.gridCol}
@@ -380,6 +398,7 @@ export function StockLocationManager() {
           onSuccess={fetchData}
           yards={yardOptions}
           sizes={sizes}
+          classifications={classifications}
           editData={editLocation}
           defaultYardId={activeYard ? Number(activeYard) : undefined}
         />

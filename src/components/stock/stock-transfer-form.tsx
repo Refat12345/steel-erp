@@ -29,8 +29,24 @@ import {
 interface BalanceLine {
   sizeId: number | null;
   sizeName: string | null;
+  classificationId: number | null;
+  classificationName: string | null;
   unit: StockUnit;
   quantity: number;
+}
+
+/** Stable key for a (size, classification) balance line. */
+function lineKeyOf(l: Pick<BalanceLine, "sizeId" | "classificationId">): string {
+  return `${l.sizeId ?? "n"}:${l.classificationId ?? "n"}`;
+}
+
+/** Size label + classification suffix, e.g. "12 مم B500B". */
+function lineLabel(
+  l: Pick<BalanceLine, "sizeName" | "classificationName">,
+  fallback: string,
+): string {
+  const size = l.sizeName ?? fallback;
+  return l.classificationName ? `${size} ${l.classificationName}` : size;
 }
 interface LocationBalance {
   locationId: number;
@@ -42,6 +58,8 @@ interface LocationBalance {
   isDualUnit: boolean;
   isActive: boolean;
   expectedSize: { id: number; displayName: string } | null;
+  expectedClassification: { id: number; code: string; displayName: string } | null;
+  allowedGrade?: "FIRST" | "SECOND" | null;
   lines: BalanceLine[];
   totalQuantity: number;
   totalTons: number | null;
@@ -62,7 +80,8 @@ export function StockTransferForm() {
   const [submitting, setSubmitting] = useState(false);
 
   const [sourceId, setSourceId] = useState<string>("");
-  const [sizeKey, setSizeKey] = useState<string>(""); // sizeId as string, "none" for tons
+  // Selected balance line: "sizeId:classificationId" ("n" = null), "none" for tons.
+  const [sizeKey, setSizeKey] = useState<string>("");
   const [quantity, setQuantity] = useState<string>("");
   const [quantityTons, setQuantityTons] = useState<string>(""); // actual weight for rebar
   const [destId, setDestId] = useState<string>("");
@@ -118,29 +137,43 @@ export function StockTransferForm() {
       setSizeKey("none");
     } else {
       const first = source.lines.find((l) => l.unit === "BUNDLE" && l.quantity > 0);
-      setSizeKey(first?.sizeId != null ? String(first.sizeId) : "");
+      setSizeKey(first?.sizeId != null ? lineKeyOf(first) : "");
     }
     setDestId("");
     setQuantity("");
     setQuantityTons("");
   }, [source]);
 
-  const selectedSizeId: number | null =
-    sizeKey === "none" || sizeKey === "" ? null : Number(sizeKey);
+  // The selected (size, classification) line resolved from the composite key.
+  const selectedLine = useMemo(
+    () =>
+      sizeKey === "none" || sizeKey === ""
+        ? null
+        : (sourceLines.find((l) => lineKeyOf(l) === sizeKey) ?? null),
+    [sourceLines, sizeKey],
+  );
+  const selectedSizeId: number | null = selectedLine?.sizeId ?? null;
+  const selectedClassificationId: number | null =
+    selectedLine?.classificationId ?? null;
 
   const available = useMemo(() => {
     if (!source) return 0;
     if (source.unit === "TON") return source.totalQuantity;
-    const line = source.lines.find((l) => l.unit === "BUNDLE" && l.sizeId === selectedSizeId);
-    return line?.quantity ?? 0;
-  }, [source, selectedSizeId]);
+    return selectedLine?.quantity ?? 0;
+  }, [source, selectedLine]);
 
-  // Parallel tonnage available at the source for the selected rebar size.
+  // Parallel tonnage available at the source for the selected rebar line
+  // (same size AND classification — the two units mirror each other).
   const availableTons = useMemo(() => {
     if (!source || !isDual) return 0;
-    const line = source.lines.find((l) => l.unit === "TON" && l.sizeId === selectedSizeId);
+    const line = source.lines.find(
+      (l) =>
+        l.unit === "TON" &&
+        l.sizeId === selectedSizeId &&
+        l.classificationId === selectedClassificationId,
+    );
     return line?.quantity ?? 0;
-  }, [source, selectedSizeId, isDual]);
+  }, [source, selectedSizeId, selectedClassificationId, isDual]);
 
   // Destination candidates: same unit, not the source. Classify each as
   // blocked (holds a different size / empty with mismatched expectedSize),
@@ -172,8 +205,18 @@ export function StockTransferForm() {
           b.expectedSize != null &&
           selectedSizeId != null &&
           b.expectedSize.id !== selectedSizeId;
+        const destClassId = b.expectedClassification?.id ?? null;
+        const classMismatch =
+          (b.segment === "GENERAL" || b.segment === "GOVERNORATES") &&
+          destClassId !== selectedClassificationId;
         let reasonLabel = "";
-        if (sameSize) reasonLabel = t("destSameSize");
+        if (classMismatch && destClassId != null)
+          reasonLabel = t("destExpectedClassificationOnly", {
+            classification: b.expectedClassification!.displayName,
+          });
+        else if (classMismatch)
+          reasonLabel = t("destOrdinaryRebarOnly");
+        else if (sameSize) reasonLabel = t("destSameSize");
         else if (expectedMismatch)
           reasonLabel = t("destExpectedSizeOnly", { size: b.expectedSize!.displayName });
         else if (empty)
@@ -182,8 +225,8 @@ export function StockTransferForm() {
         else if (otherSize) reasonLabel = t("destOccupiedOtherSize");
         return {
           loc: b,
-          blocked: otherSize || expectedMismatch,
-          suggested: (empty || sameSize) && !expectedMismatch,
+          blocked: otherSize || expectedMismatch || classMismatch,
+          suggested: (empty || sameSize) && !expectedMismatch && !classMismatch,
           reasonLabel,
         };
       })
@@ -192,7 +235,7 @@ export function StockTransferForm() {
         if (a.suggested !== b.suggested) return a.suggested ? -1 : 1;
         return a.loc.code.localeCompare(b.loc.code);
       });
-  }, [balances, source, isBundle, selectedSizeId, t]);
+  }, [balances, source, isBundle, selectedSizeId, selectedClassificationId, t]);
 
   const dest = balances.find((b) => String(b.locationId) === destId) ?? null;
 
@@ -208,8 +251,8 @@ export function StockTransferForm() {
   const sizeLineItems = useMemo(
     () =>
       sourceLines.map((l) => ({
-        value: String(l.sizeId),
-        label: l.sizeName ?? t("emDash"),
+        value: lineKeyOf(l),
+        label: lineLabel(l, t("emDash")),
       })),
     [sourceLines, t],
   );
@@ -279,6 +322,7 @@ export function StockTransferForm() {
           fromLocationId: source.locationId,
           toLocationId: dest.locationId,
           sizeId: isBundle ? selectedSizeId : null,
+          classificationId: isBundle ? selectedClassificationId : null,
           quantity: qty,
           quantityTons: isDual ? tons : null,
           reason,
@@ -350,9 +394,9 @@ export function StockTransferForm() {
                   </SelectTrigger>
                   <SelectContent dir={dir}>
                     {sourceLines.map((l) => (
-                      <SelectItem key={l.sizeId ?? "n"} value={String(l.sizeId)}>
+                      <SelectItem key={lineKeyOf(l)} value={lineKeyOf(l)}>
                         <span className="flex w-full items-center justify-between gap-3">
-                          <span>{l.sizeName ?? t("emDash")}</span>
+                          <span>{lineLabel(l, t("emDash"))}</span>
                           <span className="text-xs tabular-nums text-muted-foreground" dir="ltr">
                             {fmt(l.quantity)}
                           </span>
@@ -376,7 +420,7 @@ export function StockTransferForm() {
                   </span>
                 )}
                 {isBundle && sourceLines.length === 1 && sourceLines[0].sizeName && (
-                  <>{t("sizeColon", { size: sourceLines[0].sizeName })}</>
+                  <>{t("sizeColon", { size: lineLabel(sourceLines[0], "") })}</>
                 )}
               </div>
             )}

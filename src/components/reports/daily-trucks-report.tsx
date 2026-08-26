@@ -454,9 +454,16 @@ export function DailyTrucksReportView() {
                       </TableRow>
                     ) : (
                       report.sizeTotals.map((sizeTotal) => (
-                        <TableRow key={sizeTotal.sizeId ?? "none"}>
+                        <TableRow
+                          key={`${sizeTotal.sizeId ?? "none"}|${sizeTotal.classificationId ?? "none"}`}
+                        >
                           <TableCell className="font-medium">
                             {toEnglishSize(sizeTotal.displayName)}
+                            {sizeTotal.classificationName ? (
+                              <span className="ml-1.5 text-xs text-muted-foreground">
+                                {sizeTotal.classificationName}
+                              </span>
+                            ) : null}
                           </TableCell>
                           <TableCell className="font-mono tabular-nums text-right">
                             {formatTons(sizeTotal.totalTons)}
@@ -707,8 +714,15 @@ function DailyTrucksPrintable({
               </tr>
             ) : (
               report.sizeTotals.map((sizeTotal) => (
-                <tr key={sizeTotal.sizeId ?? "none"}>
-                  <td>{toEnglishSize(sizeTotal.displayName)}</td>
+                <tr
+                  key={`${sizeTotal.sizeId ?? "none"}|${sizeTotal.classificationId ?? "none"}`}
+                >
+                  <td>
+                    {toEnglishSize(sizeTotal.displayName)}
+                    {sizeTotal.classificationName
+                      ? ` ${sizeTotal.classificationName}`
+                      : ""}
+                  </td>
                   <td className="num">{formatTons(sizeTotal.totalTons)}</td>
                   <td className="num">{formatBundles(sizeTotal.totalBundles)}</td>
                   <td className="num">{sizeTotal.truckCount}</td>
@@ -774,7 +788,11 @@ function DailyTrucksPrintable({
                         {row.sizeBreakdown
                           .map(
                             (item) =>
-                              `${toEnglishSize(item.displayName)}: ${formatTons(item.weightTons)} t${
+                              `${toEnglishSize(item.displayName)}${
+                                item.classificationName
+                                  ? ` ${item.classificationName}`
+                                  : ""
+                              }: ${formatTons(item.weightTons)} t${
                                 item.bundleCount != null
                                   ? ` (${item.bundleCount} bundles)`
                                   : ""

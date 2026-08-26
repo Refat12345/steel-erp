@@ -16,6 +16,10 @@ import {
   createLocation,
 } from "@/lib/services/stock-location.service";
 import { listActiveSizes } from "@/lib/services/size-lookup.service";
+import { listActiveClassifications } from "@/lib/services/steel-classification.service";
+import { offeredSteelClassifications } from "@/lib/steel-classification-default";
+import { getRequestLocale } from "@/lib/i18n/request-locale";
+import { localizedClassification } from "@/lib/localized-name";
 
 export async function GET() {
   const session = await getApiSession();
@@ -25,15 +29,23 @@ export async function GET() {
   }
 
   try {
-    const [yards, sizes] = await Promise.all([
+    const locale = await getRequestLocale();
+    const [yards, sizes, classifications] = await Promise.all([
       listYardsWithLocations(),
       listActiveSizes(),
+      listActiveClassifications(),
     ]);
     // `canManage` lets the client decide whether to render edit controls,
     // while the server still enforces the real gate on every mutation.
     return ok({
       yards,
       sizes,
+      classifications: offeredSteelClassifications(classifications).map((c) => ({
+        id: c.id,
+        code: c.code,
+        displayName: localizedClassification(c, locale),
+        grade: c.grade,
+      })),
       canManage: hasPermission(session, "stock.location.manage"),
     });
   } catch (e) {

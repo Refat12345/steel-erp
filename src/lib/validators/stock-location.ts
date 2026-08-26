@@ -28,6 +28,16 @@ export function deriveUnitAndGrade(segment: StockLocationSegment): {
   }
 }
 
+/** B500B dedication is only meaningful on first-grade rebar bays. */
+export function segmentAllowsExpectedClassification(
+  segment: StockLocationSegment | string,
+): boolean {
+  return (
+    segment === StockLocationSegment.GENERAL ||
+    segment === StockLocationSegment.GOVERNORATES
+  );
+}
+
 /** Location code: letters/digits/dash only, uppercased, frozen after movements. */
 const locationCodeSchema = z
   .string()
@@ -70,6 +80,12 @@ export const stockLocationCreateSchema = z.object({
     .positive()
     .nullable()
     .optional(),
+  expectedClassificationId: z
+    .number()
+    .int()
+    .positive()
+    .nullable()
+    .optional(),
   notes: z.string().max(1000).optional().or(z.literal("")),
   sortOrder: z.number().int().min(0).max(9999).optional(),
   ...gridSchema,
@@ -87,6 +103,7 @@ export const stockLocationUpdateSchema = z.object({
     .optional(),
   segment: z.enum(segmentValues).optional(),
   expectedSizeId: z.number().int().positive().nullable().optional(),
+  expectedClassificationId: z.number().int().positive().nullable().optional(),
   notes: z.string().max(1000).optional().or(z.literal("")),
   sortOrder: z.number().int().min(0).max(9999).optional(),
   isActive: z.boolean().optional(),

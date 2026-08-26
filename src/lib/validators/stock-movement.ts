@@ -18,6 +18,10 @@ export const productionInSchema = z.object({
   // Required for bundle movements and for rebar tonnage; omitted/null for
   // short-bar (tons). The service enforces the exact rule.
   sizeId: z.number().int().positive().nullable().optional(),
+  // Technical classification (B500B / B400DWR) of the produced batch. Optional;
+  // only valid on graded (rebar) sites — the service checks it matches the
+  // location's grade.
+  classificationId: z.number().int().positive().nullable().optional(),
   quantity: z
     .number({ message: "quantityRequired" })
     .positive("quantityMustBePositive"),
@@ -49,6 +53,8 @@ export const transferSchema = z
       .int()
       .positive("destinationLocationRequired"),
     sizeId: z.number().int().positive().nullable().optional(),
+    // Which classified line moves. Null moves from the unclassified line.
+    classificationId: z.number().int().positive().nullable().optional(),
     // Primary-unit amount: bundles for rebar, tons for short-bar.
     quantity: z
       .number({ message: "quantityRequired" })
@@ -85,6 +91,9 @@ export const adjustmentSchema = z.object({
   unit: z.enum(["BUNDLE", "TON"], { message: "correctionUnitRequired" }),
   // Required for bundle movements and rebar tonnage, null for short-bar — enforced by the service.
   sizeId: z.number().int().positive().nullable().optional(),
+  // Which classification line the physical count targets; null corrects the
+  // unclassified line.
+  classificationId: z.number().int().positive().nullable().optional(),
   actualQuantity: z
     .number({ message: "actualQuantityRequired" })
     .min(0, "actualQuantityCannotBeNegative"),

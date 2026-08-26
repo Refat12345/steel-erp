@@ -5,6 +5,12 @@ import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useSession } from "next-auth/react";
 import { sessionHasPermission } from "@/lib/client-permissions";
+import {
+  classificationIdFromSelect,
+  classificationSelectValue,
+  NO_CLASSIFICATION_SELECT_VALUE,
+  offeredSteelClassifications,
+} from "@/lib/steel-classification-default";
 import { toast } from "sonner";
 import { createClientIdempotencyKey } from "@/lib/browser-idempotency-key";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -54,10 +60,22 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { TruckNotesDialog } from "@/components/trucks/truck-notes-dialog";
-import { canShowTruckNotesButton } from "@/lib/truck-edit-ui";
+import { EditTruckDialog } from "@/components/trucks/edit-truck-dialog";
+import {
+  canShowTruckEditButton,
+  canShowTruckNotesButton,
+} from "@/lib/truck-edit-ui";
 import { buildFileViewUrl } from "@/lib/uploaded-file-url";
-import { aggregateWeighSessionsBySize } from "@/lib/weigh-session-aggregate";
-import { buildRequestVsLoadedComparison } from "@/lib/loading-complete-comparison";
+import {
+  aggregateWeighSessionsBySize,
+  aggregateWeighSessionsBySizeAndClassification,
+} from "@/lib/weigh-session-aggregate";
+import {
+  buildRequestVsLoadedComparison,
+  collectFirstGradeSessions,
+  evaluateFirstGradeRequestMatch,
+  shouldEnforceFirstGradeMatch,
+} from "@/lib/loading-complete-comparison";
 import {
   computeWeighbridgeDiscrepancy,
   isWeighbridgeDiscrepancyWarning,
@@ -84,6 +102,13 @@ interface SizeOption {
   isBundleType: boolean;
 }
 
+interface ClassificationOption {
+  id: number;
+  code: string;
+  displayName: string;
+  grade: SalesOrderGrade;
+}
+
 interface SourceLocationOption {
   locationId: number;
   code: string;
@@ -91,7 +116,13 @@ interface SourceLocationOption {
   yardNameAr: string;
   unit: "BUNDLE" | "TON";
   totalQuantity: number;
-  lines: { sizeId: number | null; unit: "BUNDLE" | "TON"; quantity: number }[];
+  expectedClassification?: { id: number; code: string; displayName: string } | null;
+  lines: {
+    sizeId: number | null;
+    classificationId: number | null;
+    unit: "BUNDLE" | "TON";
+    quantity: number;
+  }[];
 }
 
 interface WeighSessionItem {
@@ -99,6 +130,7 @@ interface WeighSessionItem {
   bridgeRoundId: number | null;
   sessionNumber: number;
   sizeId: number | null;
+  classificationId: number | null;
   bundleCount: number | null;
   weightTons: string;
   version: number;
@@ -109,6 +141,11 @@ interface WeighSessionItem {
     code: string;
     displayName: string;
     isBundleType: boolean;
+  } | null;
+  classification: {
+    id: number;
+    code: string;
+    displayName: string;
   } | null;
   sourceLocation: {
     id: number;
@@ -129,9 +166,11 @@ interface TruckRequestItemData {
   id: number;
   sizeId: number;
   grade: SalesOrderGrade | null;
+  classificationId: number | null;
   bundleCount: number | null;
   requestedTons: string | null;
   size: { id: number; code: string; displayName: string; isBundleType: boolean };
+  classification: { id: number; code: string; displayName: string } | null;
 }
 
 interface BridgeRoundItem {
@@ -223,6 +262,7 @@ export function ScaleOperationView({
   const [truck, setTruck] = useState<TruckDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [sizes, setSizes] = useState<SizeOption[]>([]);
+  const [classifications, setClassifications] = useState<ClassificationOption[]>([]);
 
   const [showTareDialog, setShowTareDialog] = useState(false);
   const [showGrossDialog, setShowGrossDialog] = useState(false);
@@ -233,6 +273,7 @@ export function ScaleOperationView({
   const [showCloseDialog, setShowCloseDialog] = useState(false);
   const [showLoadingCompleteDialog, setShowLoadingCompleteDialog] = useState(false);
   const [showNotesDialog, setShowNotesDialog] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
   const canTare = sessionHasPermission(session, "scale.enter_tare");
@@ -250,6 +291,20 @@ export function ScaleOperationView({
   const canCancel = sessionHasPermission(session, "scale.cancel");
   const canCorrectCompleted = sessionHasPermission(session, "scale.correct_completed");
   const canEditApproved = sessionHasPermission(session, "truck.edit_approved");
+  const canEditQueued = sessionHasPermission(session, "truck.edit_queued");
+  const canEditRequestItemsPerm = sessionHasPermission(
+    session,
+    "truck.edit_request_items",
+  );
+  const canEditRequestItems =
+    !!truck &&
+    canShowTruckEditButton(
+      truck.status,
+      truck.sessions.length,
+      canEditQueued,
+      canEditApproved,
+      canEditRequestItemsPerm,
+    );
 
   const fetchTruck = useCallback(async () => {
     try {
@@ -278,6 +333,14 @@ export function ScaleOperationView({
       .then((r) => r.json())
       .then((j) => {
         if (j.success) setSizes(j.data);
+      })
+      .catch(() => {});
+    // The classification catalog rides along with the size catalog — same
+    // audience (internal weighing features), same permission gate.
+    fetch("/api/steel-classifications")
+      .then((r) => r.json())
+      .then((j) => {
+        if (j.success) setClassifications(offeredSteelClassifications(j.data || []));
       })
       .catch(() => {});
   }, [fetchTruck, needsSizes]);
@@ -526,8 +589,19 @@ export function ScaleOperationView({
       {/* Request Items (what the customer ordered) */}
       {truck.requestItems && truck.requestItems.length > 0 && (
         <Card>
-          <CardHeader className="pb-2">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
             <CardTitle className="text-base">{t("requestDetails")}</CardTitle>
+            {canEditRequestItems && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowEditDialog(true)}
+                disabled={actionLoading}
+              >
+                <Pencil className="h-4 w-4 me-1" />
+                {t("editRequestDetails")}
+              </Button>
+            )}
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
@@ -537,6 +611,9 @@ export function ScaleOperationView({
                     <TableHead>{t("size")}</TableHead>
                     {truck.requestItems.some((i) => i.grade) && (
                       <TableHead>{t("grade")}</TableHead>
+                    )}
+                    {truck.requestItems.some((i) => i.classification) && (
+                      <TableHead>{t("classification")}</TableHead>
                     )}
                     <TableHead>{t("requestedQty")}</TableHead>
                   </TableRow>
@@ -548,6 +625,13 @@ export function ScaleOperationView({
                       {truck.requestItems.some((i) => i.grade) && (
                         <TableCell>
                           {item.grade ? tEnums(`grade.${item.grade}`) : t("emDash")}
+                        </TableCell>
+                      )}
+                      {truck.requestItems.some((i) => i.classification) && (
+                        <TableCell>
+                          {item.classification
+                            ? item.classification.displayName
+                            : t("emDash")}
                         </TableCell>
                       )}
                       <TableCell className="font-mono">
@@ -680,6 +764,16 @@ export function ScaleOperationView({
                 {t("closeOperation")}
               </Button>
             )}
+            {canEditRequestItems && (
+              <Button
+                variant="outline"
+                onClick={() => setShowEditDialog(true)}
+                disabled={actionLoading}
+              >
+                <Pencil className="h-4 w-4 me-1" />
+                {t("editRequestDetails")}
+              </Button>
+            )}
             {canShowTruckNotesButton(truck.status, canEditApproved) && (
               <Button
                 variant="outline"
@@ -722,7 +816,12 @@ export function ScaleOperationView({
       )}
 
       {truck.status === "Completed" && canCorrectCompleted && (
-        <AdminCorrectionPanel truck={truck} sizes={sizes} onChanged={fetchTruck} />
+        <AdminCorrectionPanel
+          truck={truck}
+          sizes={sizes}
+          classifications={classifications}
+          onChanged={fetchTruck}
+        />
       )}
 
       {/* Sessions Table */}
@@ -772,7 +871,14 @@ export function ScaleOperationView({
                           {roundNumber ?? t("emDash")}
                         </TableCell>
                       )}
-                      <TableCell>{s.size?.displayName ?? t("emDash")}</TableCell>
+                      <TableCell>
+                        {s.size?.displayName ?? t("emDash")}
+                        {s.classification && (
+                          <span className="ms-1 text-xs text-muted-foreground">
+                            {s.classification.displayName}
+                          </span>
+                        )}
+                      </TableCell>
                       {stockModuleEnabled && (
                         <TableCell className="text-sm">
                           {formatSessionSourceLabel(s, {
@@ -794,6 +900,8 @@ export function ScaleOperationView({
                                   truckId={truck.id}
                                   session={s}
                                   sizes={sizes}
+                                  classifications={classifications}
+                                  roundGrade={openRound?.grade ?? null}
                                   onEdited={fetchTruck}
                                 />
                               )}
@@ -852,9 +960,20 @@ export function ScaleOperationView({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {aggregateWeighSessionsBySize(truck.sessions).map((row) => (
-                      <TableRow key={row.sizeId ?? "none"}>
-                        <TableCell>{row.displayName}</TableCell>
+                    {aggregateWeighSessionsBySizeAndClassification(
+                      truck.sessions,
+                    ).map((row) => (
+                      <TableRow
+                        key={`${row.sizeId ?? "none"}:${row.classificationId ?? "none"}`}
+                      >
+                        <TableCell>
+                          {row.displayName}
+                          {row.classificationName && (
+                            <span className="ms-1 text-xs text-muted-foreground">
+                              {row.classificationName}
+                            </span>
+                          )}
+                        </TableCell>
                         <TableCell className="font-mono">
                           {row.totalBundles != null
                             ? formatInteger(row.totalBundles)
@@ -934,6 +1053,12 @@ export function ScaleOperationView({
         truckId={showNotesDialog ? truck.id : null}
         open={showNotesDialog}
         onOpenChange={setShowNotesDialog}
+        onSuccess={fetchTruck}
+      />
+      <EditTruckDialog
+        truckId={showEditDialog ? truck.id : null}
+        open={showEditDialog}
+        onOpenChange={setShowEditDialog}
         onSuccess={fetchTruck}
       />
       <WeightDialog
@@ -1022,6 +1147,9 @@ export function ScaleOperationView({
         onOpenChange={setShowSessionDialog}
         truckId={truck.id}
         sizes={sizes}
+        classifications={classifications}
+        requestItems={truck.requestItems ?? []}
+        roundGrade={openRound?.grade ?? null}
         currentRoundSessions={currentRoundSessions}
         roundNumber={openRound?.roundNumber ?? 1}
         onSuccess={fetchTruck}
@@ -1038,6 +1166,9 @@ export function ScaleOperationView({
             : null
         }
         sessions={currentRoundSessions}
+        allSessions={truck.sessions}
+        rounds={rounds}
+        currentRoundId={openRound?.id ?? null}
         requestItems={truck.requestItems}
         photoCount={currentRoundPhotoCount}
         skipInternalWeighing={truck.skipInternalWeighing}
@@ -1657,6 +1788,9 @@ function SessionDialog({
   onOpenChange,
   truckId,
   sizes,
+  classifications,
+  requestItems,
+  roundGrade,
   currentRoundSessions,
   roundNumber,
   onSuccess,
@@ -1666,6 +1800,12 @@ function SessionDialog({
   onOpenChange: (v: boolean) => void;
   truckId: number;
   sizes: SizeOption[];
+  /** Active technical classifications (B500B). */
+  classifications: ClassificationOption[];
+  /** Truck request lines — used to preselect the classification per size. */
+  requestItems: TruckRequestItemData[];
+  /** Grade of the open round; classifications of another grade are hidden. */
+  roundGrade: SalesOrderGrade | null;
   /** Sessions already recorded in the current bridge round. */
   currentRoundSessions: WeighSessionItem[];
   roundNumber: number;
@@ -1677,6 +1817,7 @@ function SessionDialog({
   const locale = useLocale() as Locale;
   const dir = getTextDirection(locale);
   const [sizeCode, setSizeCode] = useState<string>("");
+  const [classificationId, setClassificationId] = useState<string>("");
   const [bundleCount, setBundleCount] = useState("");
   const [weightTons, setWeightTons] = useState("");
   const [sourceId, setSourceId] = useState<string>("");
@@ -1687,6 +1828,39 @@ function SessionDialog({
   const parsedWeight = parseFloat(weightTons);
   const parsedBundles = bundleCount ? parseInt(bundleCount, 10) : null;
   const selectedSize = sizes.find((s) => s.code === sizeCode);
+
+  // Classifications offered for this weigh: never contradict the round's
+  // grade. Rounds without a grade yet accept any active classification.
+  const classificationOptions = useMemo(
+    () =>
+      roundGrade == null
+        ? classifications
+        : classifications.filter((c) => c.grade === roundGrade),
+    [classifications, roundGrade],
+  );
+  const selectedClassification =
+    classificationOptions.find((c) => String(c.id) === classificationId) ?? null;
+
+  /**
+   * Speed default: when every request line of the chosen size agrees on one
+   * classification, preselect it so the operator never opens the field.
+   */
+  const defaultClassificationForSize = useCallback(
+    (size: SizeOption | undefined): string => {
+      if (!size || classificationOptions.length === 0) return "";
+      const lineClassIds = [
+        ...new Set(
+          requestItems
+            .filter((i) => i.sizeId === size.id && i.classificationId != null)
+            .map((i) => i.classificationId as number),
+        ),
+      ];
+      if (lineClassIds.length !== 1) return "";
+      const match = classificationOptions.find((c) => c.id === lineClassIds[0]);
+      return match ? String(match.id) : "";
+    },
+    [requestItems, classificationOptions],
+  );
 
   // Load current stock balances to offer source locations. The internal loader
   // role holds stock.view, so this succeeds for whoever enters weigh sessions.
@@ -1721,21 +1895,30 @@ function SessionDialog({
   // Only locations that actually hold stock matching the chosen size (for
   // bundles) or any stock (for tons). Empty / other-size locations are hidden
   // entirely — the loader should never pick a source the system says is empty.
+  // Balances split per classification: sum the size's lines, narrowed to the
+  // chosen classification when one is selected (that's the line load-out hits).
   const sourceOptions = useMemo(() => {
     if (!neededUnit) return [];
+    const sessionClassId = selectedClassification?.id ?? null;
     return sources
       .filter((s) => s.unit === neededUnit)
+      .filter((s) => (s.expectedClassification?.id ?? null) === sessionClassId)
       .map((s) => {
-        const qty =
-          neededUnit === "BUNDLE" && selectedSize
-            ? s.lines.find((l) => l.unit === "BUNDLE" && l.sizeId === selectedSize.id)
-                ?.quantity ?? 0
-            : s.totalQuantity;
+        const qty = s.lines
+          .filter(
+            (l) =>
+              l.unit === neededUnit &&
+              (selectedSize && neededUnit === "BUNDLE"
+                ? l.sizeId === selectedSize.id
+                : true) &&
+              (l.classificationId ?? null) === sessionClassId,
+          )
+          .reduce((sum, l) => sum + l.quantity, 0);
         return { loc: s, qty };
       })
       .filter((o) => o.qty > 0)
       .sort((a, b) => b.qty - a.qty);
-  }, [sources, neededUnit, selectedSize]);
+  }, [sources, neededUnit, selectedSize, selectedClassification]);
 
   // Group the matching locations by yard (front / back) for a clearer list.
   const sourceYardGroups = useMemo(() => {
@@ -1760,7 +1943,9 @@ function SessionDialog({
       { value: PRODUCTION_SOURCE, label: t("fromProduction") },
       ...sourceOptions.map((o) => ({
         value: String(o.loc.locationId),
-        label: `${o.loc.nameAr} — ${o.loc.yardNameAr}`,
+        label: `${o.loc.nameAr} — ${o.loc.yardNameAr}${
+          o.loc.expectedClassification ? ` · ${o.loc.expectedClassification.code}` : ""
+        }`,
       })),
     ],
     [sourceOptions, t],
@@ -1799,6 +1984,7 @@ function SessionDialog({
 
   const reset = () => {
     setSizeCode("");
+    setClassificationId("");
     setBundleCount("");
     setWeightTons("");
     setSourceId("");
@@ -1835,6 +2021,7 @@ function SessionDialog({
         const sz = sizes.find((s) => s.code === sizeCode);
         if (sz) body.sizeId = sz.id;
       }
+      if (selectedClassification) body.classificationId = selectedClassification.id;
       if (parsedBundles != null) body.bundleCount = parsedBundles;
       if (selectedSource) body.sourceLocationId = selectedSource.locationId;
       // Direct-from-production cross-dock: no yard source; the server writes a
@@ -1877,8 +2064,12 @@ function SessionDialog({
                 items={sizeSelectItems}
                 value={sizeCode}
                 onValueChange={(v) => {
-                  setSizeCode(v ?? "");
+                  const code = v ?? "";
+                  setSizeCode(code);
                   setSourceId("");
+                  setClassificationId(
+                    defaultClassificationForSize(sizes.find((s) => s.code === code)),
+                  );
                 }}
               >
                 <SelectTrigger className="w-full">
@@ -1893,6 +2084,38 @@ function SessionDialog({
                 </SelectContent>
               </Select>
             </div>
+            {selectedSize?.isBundleType && classificationOptions.length > 0 && (
+              <div className="space-y-2">
+                <Label>{t("classification")}</Label>
+                <Select
+                  items={[
+                    { value: NO_CLASSIFICATION_SELECT_VALUE, label: t("noClassification") },
+                    ...classificationOptions.map((c) => ({
+                      value: String(c.id),
+                      label: c.displayName,
+                    })),
+                  ]}
+                  value={classificationSelectValue(classificationId)}
+                  onValueChange={(v) =>
+                    setClassificationId(classificationIdFromSelect(v))
+                  }
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder={t("noClassification")} />
+                  </SelectTrigger>
+                  <SelectContent dir={dir}>
+                    <SelectItem value={NO_CLASSIFICATION_SELECT_VALUE}>
+                      {t("noClassification")}
+                    </SelectItem>
+                    {classificationOptions.map((c) => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.displayName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             {stockModuleEnabled && (
             <div className="space-y-2">
               <Label>{t("source")}</Label>
@@ -1934,7 +2157,14 @@ function SessionDialog({
                             value={String(o.loc.locationId)}
                           >
                             <span className="flex w-full items-center justify-between gap-3">
-                              <span>{o.loc.nameAr}</span>
+                              <span>
+                                {o.loc.nameAr}
+                                {o.loc.expectedClassification && (
+                                  <span className="ms-1 font-mono text-xs">
+                                    {o.loc.expectedClassification.code}
+                                  </span>
+                                )}
+                              </span>
                               <span
                                 className="text-xs tabular-nums text-muted-foreground"
                                 dir="ltr"
@@ -2001,6 +2231,16 @@ function SessionDialog({
                   <span className="text-muted-foreground">{t("sizeLabel")}</span>
                   <span className="font-medium">{selectedSize?.displayName ?? t("emDash")}</span>
                 </div>
+                {selectedClassification && (
+                  <div>
+                    <span className="text-muted-foreground">
+                      {t("classificationLabel")}
+                    </span>
+                    <span className="font-medium">
+                      {selectedClassification.displayName}
+                    </span>
+                  </div>
+                )}
                 <div>
                   <span className="text-muted-foreground">{t("bundlesLabel")}</span>
                   <span className="font-medium">
@@ -2058,11 +2298,15 @@ function EditSessionButton({
   truckId,
   session: s,
   sizes,
+  classifications,
+  roundGrade,
   onEdited,
 }: {
   truckId: number;
   session: WeighSessionItem;
   sizes: SizeOption[];
+  classifications: ClassificationOption[];
+  roundGrade: SalesOrderGrade | null;
   onEdited: () => void;
 }) {
   const t = useTranslations("scale");
@@ -2070,6 +2314,9 @@ function EditSessionButton({
   const dir = getTextDirection(locale);
   const [open, setOpen] = useState(false);
   const [sizeCode, setSizeCode] = useState(s.size?.code ?? "");
+  const [classificationId, setClassificationId] = useState(
+    s.classificationId != null ? String(s.classificationId) : "",
+  );
   const [bundleCount, setBundleCount] = useState(
     s.bundleCount != null ? String(s.bundleCount) : "",
   );
@@ -2082,6 +2329,28 @@ function EditSessionButton({
   const selectedSize = sizes.find((sz) => sz.code === sizeCode);
   const originalWeight = Number(s.weightTons);
   const isValid = !isNaN(parsedWeight) && parsedWeight > 0;
+
+  // Same grade guard as the add dialog; keep the session's own (possibly
+  // stale/inactive) classification selectable so editing other fields never
+  // silently drops it.
+  const classificationOptions = useMemo(() => {
+    const base =
+      roundGrade == null
+        ? classifications
+        : classifications.filter((c) => c.grade === roundGrade);
+    if (
+      s.classification &&
+      !base.some((c) => c.id === s.classification!.id)
+    ) {
+      return [
+        { ...s.classification, grade: roundGrade ?? "FIRST" } as ClassificationOption,
+        ...base,
+      ];
+    }
+    return base;
+  }, [classifications, roundGrade, s.classification]);
+  const selectedClassification =
+    classificationOptions.find((c) => String(c.id) === classificationId) ?? null;
 
   const handleClose = (v: boolean) => {
     if (!v) setConfirming(false);
@@ -2107,6 +2376,7 @@ function EditSessionButton({
       } else {
         body.sizeId = null;
       }
+      body.classificationId = classificationId ? Number(classificationId) : null;
       body.bundleCount = parsedBundles;
       body.expectedVersion = s.version;
 
@@ -2169,6 +2439,38 @@ function EditSessionButton({
                   </SelectContent>
                 </Select>
               </div>
+              {selectedSize?.isBundleType && classificationOptions.length > 0 && (
+                <div className="space-y-2">
+                  <Label>{t("classification")}</Label>
+                  <Select
+                    items={[
+                      { value: NO_CLASSIFICATION_SELECT_VALUE, label: t("noClassification") },
+                      ...classificationOptions.map((c) => ({
+                        value: String(c.id),
+                        label: c.displayName,
+                      })),
+                    ]}
+                    value={classificationSelectValue(classificationId)}
+                    onValueChange={(v) =>
+                      setClassificationId(classificationIdFromSelect(v))
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder={t("noClassification")} />
+                    </SelectTrigger>
+                    <SelectContent dir={dir}>
+                      <SelectItem value={NO_CLASSIFICATION_SELECT_VALUE}>
+                        {t("noClassification")}
+                      </SelectItem>
+                      {classificationOptions.map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.displayName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               {selectedSize?.isBundleType && (
               <div className="space-y-2">
                 <Label>{t("bundleCount")}</Label>
@@ -2212,6 +2514,16 @@ function EditSessionButton({
                     <span className="text-muted-foreground">{t("sizeLabel")}</span>
                     <span className="font-medium">{selectedSize?.displayName ?? t("emDash")}</span>
                   </div>
+                  {selectedClassification && (
+                    <div>
+                      <span className="text-muted-foreground">
+                        {t("classificationLabel")}
+                      </span>
+                      <span className="font-medium">
+                        {selectedClassification.displayName}
+                      </span>
+                    </div>
+                  )}
                   <div>
                     <span className="text-muted-foreground">{t("bundlesLabel")}</span>
                     <span className="font-medium">
@@ -2403,6 +2715,9 @@ function LoadingCompleteDialog({
   plateNumber,
   customerLabel,
   sessions,
+  allSessions,
+  rounds,
+  currentRoundId,
   requestItems,
   photoCount,
   skipInternalWeighing,
@@ -2419,6 +2734,9 @@ function LoadingCompleteDialog({
   customerLabel: string | null;
   /** Sessions of the CURRENT round only — earlier rounds are already weighed. */
   sessions: WeighSessionItem[];
+  allSessions: WeighSessionItem[];
+  rounds: BridgeRoundItem[];
+  currentRoundId: number | null;
   requestItems: TruckRequestItemData[];
   photoCount: number;
   /** Exempt trucks (scrap / billet wire) skip internal sessions entirely. */
@@ -2466,12 +2784,27 @@ function LoadingCompleteDialog({
   }, [open, initialGrade, initialSizeId]);
 
   const bySize = aggregateWeighSessionsBySize(sessions);
+  const selectedGrade = showGradeSelect
+    ? grade === ""
+      ? null
+      : grade
+    : (initialGrade ?? null);
+  const enforceFirstGrade =
+    !skipInternalWeighing &&
+    shouldEnforceFirstGradeMatch(requestItems, selectedGrade);
+  const firstGradeSessions = enforceFirstGrade
+    ? collectFirstGradeSessions(allSessions, rounds, currentRoundId)
+    : sessions;
   const { rows: requestRows, warnings: requestWarnings } =
     buildRequestVsLoadedComparison(
       requestItems,
-      sessions,
-      showGradeSelect ? (grade === "" ? null : grade) : undefined,
+      firstGradeSessions,
+      showGradeSelect ? selectedGrade : undefined,
     );
+  const firstGradeMatch = enforceFirstGrade
+    ? evaluateFirstGradeRequestMatch(requestItems, firstGradeSessions)
+    : { blocking: [], remainders: [] };
+  const firstGradeBlocked = firstGradeMatch.blocking.length > 0;
   const totalTons = sessions.reduce((sum, s) => sum + Number(s.weightTons), 0);
   const totalBundles =
     bySize.length > 0 && bySize.every((row) => row.totalBundles != null)
@@ -2480,7 +2813,9 @@ function LoadingCompleteDialog({
 
   // Exempt trucks never carry internal sessions, so "nothing loaded yet"
   // comparison warnings are noise — the round net is recorded at gross.
-  const warnings: string[] = skipInternalWeighing ? [] : [...requestWarnings];
+  // First-grade mismatches are shown as blocking errors, not amber warnings.
+  const warnings: string[] =
+    skipInternalWeighing || enforceFirstGrade ? [] : [...requestWarnings];
   if (!skipInternalWeighing && sessions.length === 0) {
     warnings.push(t("warnNoInternalSessions"));
   }
@@ -2496,6 +2831,7 @@ function LoadingCompleteDialog({
   }
 
   const handleConfirm = async () => {
+    if (firstGradeBlocked) return;
     if (showMaterialSelect && sizeId == null) {
       toast.error(t("toastSelectRoundMaterial"));
       return;
@@ -2598,9 +2934,14 @@ function LoadingCompleteDialog({
                   </TableHeader>
                   <TableBody>
                     {requestRows.map((row) => (
-                      <TableRow key={`${row.sizeId}:${row.grade ?? ""}`}>
+                      <TableRow key={`${row.sizeId}:${row.grade ?? ""}:${row.classificationName ?? ""}`}>
                         <TableCell>
                           {row.displayName}
+                          {row.classificationName && (
+                            <span className="ms-1 text-xs text-muted-foreground">
+                              {row.classificationName}
+                            </span>
+                          )}
                           {row.grade && (
                             <span className="text-xs text-muted-foreground">
                               {" "}
@@ -2641,19 +2982,30 @@ function LoadingCompleteDialog({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {bySize.map((row) => (
-                    <TableRow key={row.sizeId ?? "none"}>
-                      <TableCell>{row.displayName}</TableCell>
-                      <TableCell className="font-mono">
-                        {row.totalBundles != null
-                          ? formatInteger(row.totalBundles)
-                          : t("emDash")}
-                      </TableCell>
-                      <TableCell className="font-mono font-semibold">
-                        {formatDecimal(row.totalTons, 3)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {aggregateWeighSessionsBySizeAndClassification(sessions).map(
+                    (row) => (
+                      <TableRow
+                        key={`${row.sizeId ?? "none"}:${row.classificationId ?? "none"}`}
+                      >
+                        <TableCell>
+                          {row.displayName}
+                          {row.classificationName && (
+                            <span className="ms-1 text-xs text-muted-foreground">
+                              {row.classificationName}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="font-mono">
+                          {row.totalBundles != null
+                            ? formatInteger(row.totalBundles)
+                            : t("emDash")}
+                        </TableCell>
+                        <TableCell className="font-mono font-semibold">
+                          {formatDecimal(row.totalTons, 3)}
+                        </TableCell>
+                      </TableRow>
+                    ),
+                  )}
                   <TableRow className="font-bold bg-muted/50">
                     <TableCell>{t("grandTotal")}</TableCell>
                     <TableCell className="font-mono">
@@ -2675,6 +3027,46 @@ function LoadingCompleteDialog({
             })}
           </p>
 
+          {firstGradeBlocked && (
+            <div
+              className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 space-y-1.5 dark:bg-red-950/30 dark:border-red-700"
+              role="alert"
+            >
+              <p className="text-xs font-medium text-red-900 dark:text-red-200">
+                {t("firstGradeMustMatchTitle")}
+              </p>
+              {firstGradeMatch.blocking.map((issue, idx) => (
+                <p
+                  key={`${issue.messageKey}:${issue.params.sizeLabel}:${idx}`}
+                  className="text-xs text-red-900 dark:text-red-200 flex gap-2"
+                >
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
+                  <span>{t(issue.messageKey, issue.params)}</span>
+                </p>
+              ))}
+            </div>
+          )}
+
+          {!firstGradeBlocked && firstGradeMatch.remainders.length > 0 && (
+            <div
+              className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 space-y-1.5 dark:bg-sky-950/30 dark:border-sky-700"
+              role="status"
+            >
+              <p className="text-xs font-medium text-sky-900 dark:text-sky-200">
+                {t("firstGradePartialTitle")}
+              </p>
+              {firstGradeMatch.remainders.map((issue, idx) => (
+                <p
+                  key={`${issue.messageKey}:${issue.params.sizeLabel}:${idx}`}
+                  className="text-xs text-sky-900 dark:text-sky-200 flex gap-2"
+                >
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
+                  <span>{t(issue.messageKey, issue.params)}</span>
+                </p>
+              ))}
+            </div>
+          )}
+
           {warnings.length > 0 && (
             <div
               className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 space-y-1.5 dark:bg-amber-950/30 dark:border-amber-700"
@@ -2690,7 +3082,11 @@ function LoadingCompleteDialog({
           )}
 
           <p className="text-xs text-muted-foreground">
-            {t("loadingCompleteFreezeHint")}
+            {firstGradeBlocked
+              ? t("firstGradeMustMatchHint")
+              : firstGradeMatch.remainders.length > 0
+                ? t("firstGradePartialHint")
+                : t("loadingCompleteFreezeHint")}
           </p>
         </div>
 
@@ -2701,7 +3097,7 @@ function LoadingCompleteDialog({
           <Button
             type="button"
             onClick={() => void handleConfirm()}
-            disabled={saving}
+            disabled={saving || firstGradeBlocked}
             className="bg-green-600 hover:bg-green-700"
           >
             {saving ? t("confirming") : t("confirmLoadingComplete")}

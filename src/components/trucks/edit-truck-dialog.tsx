@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
+import { useSession } from "next-auth/react";
+import { sessionHasPermission } from "@/lib/client-permissions";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -24,7 +26,24 @@ import { Textarea } from "@/components/ui/textarea";
 import { DestinationSelect } from "@/components/destinations/destination-select";
 import { createClientIdempotencyKey } from "@/lib/browser-idempotency-key";
 import { sizeCodeSupportsGrade, sizeCodeToKind } from "@/lib/material-kind";
-import { notesForPatch, operationalGradeIfChanged } from "@/lib/truck-edit-ui";
+import {
+  classificationIdFromSelect,
+  classificationSelectValue,
+  defaultClassificationId,
+  isSizeSelectableOnRequestLine,
+  NO_CLASSIFICATION_SELECT_VALUE,
+  offeredClassificationSelectIds,
+  offeredSteelClassifications,
+  resolveClassificationId,
+  unusedClassificationId,
+  usedClassificationIdsForSizeGrade,
+} from "@/lib/steel-classification-default";
+import {
+  isRequestItemsEditableDuringLoading,
+  isRequestItemsOnlyEdit,
+  notesForPatch,
+  operationalGradeIfChanged,
+} from "@/lib/truck-edit-ui";
 import { Plus, Trash2 } from "lucide-react";
 import type { SalesOrderGrade } from "@prisma/client";
 import { getTextDirection, type Locale } from "@/i18n/config";
@@ -42,11 +61,20 @@ interface SizeOption {
   isBundleType: boolean;
 }
 
+interface ClassificationOption {
+  id: number;
+  code: string;
+  displayName: string;
+  grade: SalesOrderGrade;
+}
+
 interface RequestItemRow {
   key: number;
   sizeCode: string;
   /** Grade for this line ("" = none). Same size may repeat once per grade. */
   grade: SalesOrderGrade | "";
+  /** Technical classification id as string ("" = none). */
+  classificationId: string;
   bundleCount: string;
   requestedTons: string;
 }
@@ -65,13 +93,22 @@ export interface EditableTruck {
   requestItems: {
     sizeId: number;
     grade: SalesOrderGrade | null;
+    classificationId: number | null;
     bundleCount: number | null;
     requestedTons: string | null;
     size: { id: number; code: string; displayName: string; isBundleType: boolean };
   }[];
 }
 
-const EDITABLE_STATUSES = ["Queued", "Approved", "FirstWeigh"] as const;
+const EDITABLE_STATUSES = [
+  "Queued",
+  "Approved",
+  "FirstWeigh",
+  "OnScale",
+  "Loading",
+  "LoadingComplete",
+  "SecondWeigh",
+] as const;
 const GRADES: SalesOrderGrade[] = ["FIRST", "SECOND"];
 
 interface Props {
@@ -108,6 +145,7 @@ function populateFormFromTruck(
       key: ++rowKeyCounter,
       sizeCode: item.size.code,
       grade: item.grade ?? "",
+      classificationId: item.classificationId ? String(item.classificationId) : "",
       bundleCount: item.bundleCount ? String(item.bundleCount) : "",
       requestedTons: item.requestedTons ? String(item.requestedTons) : "",
     })),
@@ -119,6 +157,13 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
   const tEnums = useTranslations("enums");
   const locale = useLocale() as Locale;
   const dir = getTextDirection(locale);
+  const { data: session } = useSession();
+  const canEditQueued = sessionHasPermission(session, "truck.edit_queued");
+  const canEditApproved = sessionHasPermission(session, "truck.edit_approved");
+  const canEditRequestItems = sessionHasPermission(
+    session,
+    "truck.edit_request_items",
+  );
 
   const [truck, setTruck] = useState<EditableTruck | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -134,26 +179,36 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
   const [loadingRef, setLoadingRef] = useState(true);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [sizes, setSizes] = useState<SizeOption[]>([]);
+  const [classifications, setClassifications] = useState<ClassificationOption[]>([]);
+  const [sessionCount, setSessionCount] = useState(0);
 
-  const requestItemsOnly = truck?.status === "Approved";
-  const editAfterTare = truck?.status === "FirstWeigh";
+  const requestItemsOnly = truck
+    ? isRequestItemsOnlyEdit(truck.status, sessionCount, canEditApproved)
+    : false;
+  const editAfterTare =
+    truck?.status === "FirstWeigh" && sessionCount === 0 && canEditApproved;
   const lockIdentityFields = requestItemsOnly || editAfterTare;
+  const canMutateRequestItems =
+    (truck?.status === "Queued" && canEditQueued) || canEditRequestItems;
   const canSubmit =
-    truck?.status === "Queued" ||
-    truck?.status === "Approved" ||
-    truck?.status === "FirstWeigh";
+    !!truck &&
+    EDITABLE_STATUSES.includes(truck.status as (typeof EDITABLE_STATUSES)[number]) &&
+    (requestItemsOnly ? canEditRequestItems : editAfterTare ? canEditApproved : canEditQueued);
 
   const fetchReferenceData = useCallback(async () => {
     setLoadingRef(true);
     try {
-      const [custRes, sizeRes] = await Promise.all([
+      const [custRes, sizeRes, classRes] = await Promise.all([
         fetch("/api/customers?active=true&limit=500"),
         fetch("/api/sizes"),
+        fetch("/api/steel-classifications"),
       ]);
       const custJson = await custRes.json();
       const sizeJson = await sizeRes.json();
+      const classJson = await classRes.json();
       if (custJson.success) setCustomers(custJson.data || []);
       if (sizeJson.success) setSizes(sizeJson.data || []);
+      if (classJson.success) setClassifications(offeredSteelClassifications(classJson.data || []));
     } catch {
       toast.error(t("errorRefData"));
     } finally {
@@ -166,8 +221,25 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
   }, [open, fetchReferenceData]);
 
   useEffect(() => {
+    if (classifications.length === 0) return;
+    const allowed = new Set(classifications.map((c) => String(c.id)));
+    setRequestItems((prev) => {
+      let changed = false;
+      const next = prev.map((row) => {
+        if (row.classificationId && !allowed.has(row.classificationId)) {
+          changed = true;
+          return { ...row, classificationId: "" };
+        }
+        return row;
+      });
+      return changed ? next : prev;
+    });
+  }, [classifications]);
+
+  useEffect(() => {
     if (!open || truckId == null) {
       setTruck(null);
+      setSessionCount(0);
       return;
     }
 
@@ -189,11 +261,23 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
           onOpenChange(false);
           return;
         }
-        if (data.status === "FirstWeigh" && (data.sessions?.length ?? 0) > 0) {
-          toast.error(t("errorEditAfterInternalWeigh"));
+
+        const loadedSessionCount = data.sessions?.length ?? 0;
+        const mayEditThisTruck =
+          (data.status === "Queued" && canEditQueued) ||
+          (data.status === "Approved" && canEditRequestItems) ||
+          (data.status === "FirstWeigh" &&
+            (loadedSessionCount === 0
+              ? canEditApproved || canEditRequestItems
+              : canEditRequestItems)) ||
+          (isRequestItemsEditableDuringLoading(data.status) && canEditRequestItems);
+        if (!mayEditThisTruck) {
+          toast.error(t("errorNotEditableStatus"));
           onOpenChange(false);
           return;
         }
+
+        setSessionCount(loadedSessionCount);
 
         const editable: EditableTruck = {
           id: data.id,
@@ -235,7 +319,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
       cancelled = true;
     };
     // onOpenChange omitted — parent inline callback would retrigger fetch every render
-  }, [open, truckId, t]);
+  }, [open, truckId, t, canEditQueued, canEditApproved, canEditRequestItems]);
 
   const customerSelectItems = useMemo(
     () =>
@@ -246,13 +330,11 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
     [customers],
   );
 
-  // Uniqueness is per (size, grade): "12mm FIRST" and "12mm SECOND" may
-  // coexist on the same request.
-  const usedSizeGradeKeys = new Set(
-    requestItems.filter((r) => r.sizeCode).map((r) => `${r.sizeCode}:${r.grade}`),
-  );
+  // Uniqueness is per (size, grade, classification): "16mm FIRST unclassified"
+  // and "16mm FIRST B500B" may coexist on the same request.
 
   const addRequestItem = () => {
+    const grade = isRebarLoad ? operationalGrade : "";
     setRequestItems((prev) => [
       ...prev,
       {
@@ -260,7 +342,8 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
         sizeCode: "",
         // New rows inherit the operation-level grade so the common
         // single-grade flow never needs the per-row grade field.
-        grade: isRebarLoad ? operationalGrade : "",
+        grade,
+        classificationId: defaultClassificationId(classifications, grade),
         bundleCount: "",
         requestedTons: "",
       },
@@ -273,7 +356,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
 
   const updateRequestItem = (
     key: number,
-    field: "sizeCode" | "grade" | "bundleCount" | "requestedTons",
+    field: "sizeCode" | "grade" | "classificationId" | "bundleCount" | "requestedTons",
     value: string,
   ) => {
     setRequestItems((prev) =>
@@ -287,12 +370,55 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
               : kind === "REBAR"
                 ? row.grade || operationalGrade || ""
                 : row.grade;
+          const resolved = resolveClassificationId({
+            current: row.classificationId,
+            nextGrade: grade,
+            classifications,
+            applyDefaultIfEmpty: !row.grade && !!grade,
+          });
           return {
             ...row,
             sizeCode: value,
             bundleCount: "",
             requestedTons: "",
             grade,
+            classificationId: unusedClassificationId({
+              current: resolved,
+              usedByOthers: usedClassificationIdsForSizeGrade(
+                prev.filter((other) => other.key !== key),
+                value,
+                grade,
+              ),
+              offeredClassificationIds: offeredClassificationSelectIds(
+                classifications,
+                grade,
+              ),
+            }),
+          };
+        }
+        if (field === "grade") {
+          const grade = (value as SalesOrderGrade | "") ?? "";
+          const resolved = resolveClassificationId({
+            current: row.classificationId,
+            nextGrade: grade,
+            classifications,
+            applyDefaultIfEmpty: true,
+          });
+          return {
+            ...row,
+            grade,
+            classificationId: unusedClassificationId({
+              current: resolved,
+              usedByOthers: usedClassificationIdsForSizeGrade(
+                prev.filter((other) => other.key !== key),
+                row.sizeCode,
+                grade,
+              ),
+              offeredClassificationIds: offeredClassificationSelectIds(
+                classifications,
+                grade,
+              ),
+            }),
           };
         }
         return { ...row, [field]: value };
@@ -316,43 +442,50 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
     const items: {
       sizeId: number;
       grade: SalesOrderGrade | null;
+      classificationId: number | null;
       bundleCount: number | null;
       requestedTons: number | null;
     }[] = [];
     const seenKeys = new Set<string>();
-    for (const row of requestItems.filter((x) => x.sizeCode)) {
-      const size = sizes.find((s) => s.code === row.sizeCode);
-      if (!size) {
-        toast.error(t("toastInvalidSize"));
-        return;
-      }
-      const grade =
-        isRebarLoad && row.grade && sizeCodeSupportsGrade(row.sizeCode)
-          ? row.grade
-          : null;
-      const dupKey = `${size.id}:${grade ?? ""}`;
-      if (seenKeys.has(dupKey)) {
-        toast.error(t("toastDuplicateSizeGrade"));
-        return;
-      }
-      seenKeys.add(dupKey);
-      const bundleCount = row.bundleCount ? Number(row.bundleCount) : null;
-      const requestedTons = row.requestedTons ? Number(row.requestedTons) : null;
-      if (size.isBundleType) {
-        if (bundleCount === null || bundleCount < 1) {
-          toast.error(t("toastBundlesRequired"));
+    if (canMutateRequestItems || requestItemsOnly) {
+      for (const row of requestItems.filter((x) => x.sizeCode)) {
+        const size = sizes.find((s) => s.code === row.sizeCode);
+        if (!size) {
+          toast.error(t("toastInvalidSize"));
           return;
         }
-      } else if (requestedTons === null || requestedTons <= 0) {
-        toast.error(t("toastTonsRequired"));
-        return;
+        const grade =
+          isRebarLoad && row.grade && sizeCodeSupportsGrade(row.sizeCode)
+            ? row.grade
+            : null;
+        // Classification only travels with a graded line — never without grade.
+        const classificationId =
+          grade && row.classificationId ? Number(row.classificationId) : null;
+        const dupKey = `${size.id}:${grade ?? ""}:${classificationId ?? ""}`;
+        if (seenKeys.has(dupKey)) {
+          toast.error(t("toastDuplicateSizeGrade"));
+          return;
+        }
+        seenKeys.add(dupKey);
+        const bundleCount = row.bundleCount ? Number(row.bundleCount) : null;
+        const requestedTons = row.requestedTons ? Number(row.requestedTons) : null;
+        if (size.isBundleType) {
+          if (bundleCount === null || bundleCount < 1) {
+            toast.error(t("toastBundlesRequired"));
+            return;
+          }
+        } else if (requestedTons === null || requestedTons <= 0) {
+          toast.error(t("toastTonsRequired"));
+          return;
+        }
+        items.push({
+          sizeId: size.id,
+          grade,
+          classificationId,
+          bundleCount: size.isBundleType ? bundleCount : null,
+          requestedTons: size.isBundleType ? null : requestedTons,
+        });
       }
-      items.push({
-        sizeId: size.id,
-        grade,
-        bundleCount: size.isBundleType ? bundleCount : null,
-        requestedTons: size.isBundleType ? null : requestedTons,
-      });
     }
 
     setSaving(true);
@@ -374,7 +507,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
               destinationId,
               driverName: driverName.trim(),
               notes: notesForPatch(notes),
-              requestItems: items,
+              ...(canEditRequestItems ? { requestItems: items } : {}),
               ...gradePatch,
             }
           : {
@@ -429,7 +562,11 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
         <form onSubmit={handleSubmit} className="min-w-0 space-y-4">
           {requestItemsOnly && (
             <p className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
-              {t("editApprovedOnlyItems")}
+              {truck &&
+              (isRequestItemsEditableDuringLoading(truck.status) ||
+                (truck.status === "FirstWeigh" && sessionCount > 0))
+                ? t("editDuringLoadingNote")
+                : t("editApprovedOnlyItems")}
             </p>
           )}
           {editAfterTare && (
@@ -481,7 +618,9 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
                 setIsRebarLoad(rebar);
                 if (!rebar) {
                   setOperationalGrade("");
-                  setRequestItems((prev) => prev.map((r) => ({ ...r, grade: "" })));
+                  setRequestItems((prev) =>
+                    prev.map((r) => ({ ...r, grade: "", classificationId: "" })),
+                  );
                 }
               }}
               disabled={requestItemsOnly || saving}
@@ -550,7 +689,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
                 variant="outline"
                 size="sm"
                 onClick={addRequestItem}
-                disabled={loadingRef || saving}
+                disabled={loadingRef || saving || !canMutateRequestItems}
               >
                 <Plus className="h-4 w-4 me-1" />
                 {t("addSize")}
@@ -560,6 +699,19 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
             <div className="min-w-0 space-y-2">
               {requestItems.map((row) => {
                 const selectedSize = sizes.find((s) => s.code === row.sizeCode);
+                const usedClassIds = usedClassificationIdsForSizeGrade(
+                  requestItems.filter((r) => r.key !== row.key),
+                  row.sizeCode,
+                  row.grade,
+                );
+                const classOptions = classifications.filter(
+                  (c) =>
+                    c.grade === row.grade &&
+                    (String(c.id) === row.classificationId ||
+                      !usedClassIds.has(String(c.id))),
+                );
+                const noneAvailable =
+                  row.classificationId === "" || !usedClassIds.has("");
                 return (
                   <div
                     key={row.key}
@@ -570,17 +722,24 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
                       onValueChange={(v) =>
                         updateRequestItem(row.key, "sizeCode", v ?? "")
                       }
-                      disabled={saving}
+                      disabled={saving || !canMutateRequestItems}
                     >
                       <SelectTrigger className="w-full min-w-0">
                         <SelectValue placeholder={t("size")} />
                       </SelectTrigger>
                       <SelectContent>
                         {sizes
-                          .filter(
-                            (s) =>
-                              s.code === row.sizeCode ||
-                              !usedSizeGradeKeys.has(`${s.code}:${row.grade}`),
+                          .filter((s) =>
+                            isSizeSelectableOnRequestLine({
+                              sizeCode: s.code,
+                              rowSizeCode: row.sizeCode,
+                              rowGrade: row.grade,
+                              otherLines: requestItems.filter((r) => r.key !== row.key),
+                              offeredClassificationIds: offeredClassificationSelectIds(
+                                classifications,
+                                row.grade,
+                              ),
+                            }),
                           )
                           .map((s) => (
                             <SelectItem key={s.id} value={s.code}>
@@ -595,7 +754,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
                         onValueChange={(v) =>
                           updateRequestItem(row.key, "grade", v ?? "")
                         }
-                        disabled={saving}
+                        disabled={saving || !canMutateRequestItems}
                       >
                         <SelectTrigger className="w-full min-w-0">
                           <SelectValue placeholder={t("grade")} />
@@ -610,6 +769,52 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
                         </SelectContent>
                       </Select>
                     )}
+                    {isRebarLoad &&
+                      sizeCodeSupportsGrade(row.sizeCode) &&
+                      row.grade &&
+                      classifications.some((c) => c.grade === row.grade) && (
+                        <Select
+                          items={[
+                            ...(noneAvailable
+                              ? [
+                                  {
+                                    value: NO_CLASSIFICATION_SELECT_VALUE,
+                                    label: t("noClassificationShort"),
+                                  },
+                                ]
+                              : []),
+                            ...classOptions.map((c) => ({
+                              value: String(c.id),
+                              label: c.displayName,
+                            })),
+                          ]}
+                          value={classificationSelectValue(row.classificationId)}
+                          onValueChange={(v) =>
+                            updateRequestItem(
+                              row.key,
+                              "classificationId",
+                              classificationIdFromSelect(v),
+                            )
+                          }
+                          disabled={saving || !canMutateRequestItems}
+                        >
+                          <SelectTrigger className="w-full min-w-0">
+                            <SelectValue placeholder={t("noClassificationShort")} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {noneAvailable && (
+                              <SelectItem value={NO_CLASSIFICATION_SELECT_VALUE}>
+                                {t("noClassificationShort")}
+                              </SelectItem>
+                            )}
+                            {classOptions.map((c) => (
+                              <SelectItem key={c.id} value={String(c.id)}>
+                                {c.displayName}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
                     <div className="flex min-w-0 items-center gap-2">
                       {selectedSize?.isBundleType === false ? (
                         <Input
@@ -622,7 +827,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
                             updateRequestItem(row.key, "requestedTons", e.target.value)
                           }
                           placeholder={t("tons")}
-                          disabled={saving}
+                          disabled={saving || !canMutateRequestItems}
                         />
                       ) : (
                         <Input
@@ -634,7 +839,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
                             updateRequestItem(row.key, "bundleCount", e.target.value)
                           }
                           placeholder={t("bundles")}
-                          disabled={saving}
+                          disabled={saving || !canMutateRequestItems}
                         />
                       )}
                       <Button
@@ -643,7 +848,7 @@ export function EditTruckDialog({ truckId, open, onOpenChange, onSuccess }: Prop
                         size="icon"
                         className="shrink-0 text-destructive"
                         onClick={() => removeRequestItem(row.key)}
-                        disabled={saving}
+                        disabled={saving || !canMutateRequestItems}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>

@@ -145,6 +145,9 @@ export interface DailyTruckRow {
 export interface DailyTruckSizeBreakdown {
   sizeId: number | null;
   displayName: string;
+  /** Technical classification of these sessions; null = unclassified. */
+  classificationId: number | null;
+  classificationName: string | null;
   weightTons: number;
   bundleCount: number | null;
 }
@@ -169,6 +172,9 @@ export interface DailyTrucksReportSummary {
 export interface DailyTrucksReportSizeTotal {
   sizeId: number | null;
   displayName: string;
+  /** Technical classification of these sessions; null = unclassified. */
+  classificationId: number | null;
+  classificationName: string | null;
   totalTons: number;
   totalBundles: number | null;
   truckCount: number;
@@ -289,10 +295,12 @@ export async function getDailyTrucksReport(
         select: {
           bridgeRoundId: true,
           sizeId: true,
+          classificationId: true,
           bundleCount: true,
           weightTons: true,
           createdAt: true,
           size: { select: { displayName: true, sortOrder: true, code: true } },
+          classification: { select: { displayName: true } },
         },
       },
       rounds: {
@@ -323,6 +331,8 @@ export async function getDailyTrucksReport(
   type SizeTotalAcc = {
     sizeId: number | null;
     displayName: string;
+    classificationId: number | null;
+    classificationName: string | null;
     sortOrder: number;
     totalTons: number;
     totalBundles: number;
@@ -385,12 +395,18 @@ export async function getDailyTrucksReport(
         const weightTons = Number(session.weightTons);
         if (!Number.isFinite(weightTons)) continue;
 
-        const key = session.sizeId != null ? `id:${session.sizeId}` : "none";
+        // Split totals per (size, classification) so B500B / B400DWR of the
+        // same size land on separate report lines.
+        const key = `${session.sizeId != null ? `id:${session.sizeId}` : "none"}|${
+          session.classificationId != null ? `c:${session.classificationId}` : "none"
+        }`;
         let acc = sizeTotalMap.get(key);
         if (!acc) {
           acc = {
             sizeId: session.sizeId,
             displayName: session.size?.displayName ?? "بدون قياس",
+            classificationId: session.classificationId ?? null,
+            classificationName: session.classification?.displayName ?? null,
             sortOrder: session.size?.sortOrder ?? Number.MAX_SAFE_INTEGER,
             totalTons: 0,
             totalBundles: 0,
@@ -421,12 +437,16 @@ export async function getDailyTrucksReport(
     for (const session of reportSessions) {
       const weightTons = Number(session.weightTons);
       if (!Number.isFinite(weightTons)) continue;
-      const key = session.sizeId != null ? `id:${session.sizeId}` : "none";
+      const key = `${session.sizeId != null ? `id:${session.sizeId}` : "none"}|${
+        session.classificationId != null ? `c:${session.classificationId}` : "none"
+      }`;
       let acc = breakdownMap.get(key);
       if (!acc) {
         acc = {
           sizeId: session.sizeId,
           displayName: session.size?.displayName ?? "بدون قياس",
+          classificationId: session.classificationId ?? null,
+          classificationName: session.classification?.displayName ?? null,
           weightTons: 0,
           bundleCount: 0,
           sortOrder: session.size?.sortOrder ?? Number.MAX_SAFE_INTEGER,
@@ -441,10 +461,17 @@ export async function getDailyTrucksReport(
       }
     }
     const sizeBreakdown: DailyTruckSizeBreakdown[] = Array.from(breakdownMap.values())
-      .sort((a, b) => a.sortOrder - b.sortOrder || a.displayName.localeCompare(b.displayName))
+      .sort(
+        (a, b) =>
+          a.sortOrder - b.sortOrder ||
+          a.displayName.localeCompare(b.displayName) ||
+          (a.classificationName ?? "").localeCompare(b.classificationName ?? ""),
+      )
       .map((acc) => ({
         sizeId: acc.sizeId,
         displayName: acc.displayName,
+        classificationId: acc.classificationId,
+        classificationName: acc.classificationName,
         weightTons: Math.round(acc.weightTons * 1000) / 1000,
         bundleCount: acc.bundleCount,
       }));
@@ -499,10 +526,17 @@ export async function getDailyTrucksReport(
     : null;
 
   const sizeTotals: DailyTrucksReportSizeTotal[] = Array.from(sizeTotalMap.values())
-    .sort((a, b) => a.sortOrder - b.sortOrder || a.displayName.localeCompare(b.displayName))
+    .sort(
+      (a, b) =>
+        a.sortOrder - b.sortOrder ||
+        a.displayName.localeCompare(b.displayName) ||
+        (a.classificationName ?? "").localeCompare(b.classificationName ?? ""),
+    )
     .map((acc) => ({
       sizeId: acc.sizeId,
       displayName: acc.displayName,
+      classificationId: acc.classificationId,
+      classificationName: acc.classificationName,
       totalTons: Math.round(acc.totalTons * 1000) / 1000,
       totalBundles: acc.anyMissingBundle ? null : acc.totalBundles,
       truckCount: acc.truckIds.size,
@@ -900,6 +934,8 @@ export interface CustomerWithdrawalsReportParams {
   customerId?: number;
   /** Omitted = all sizes. */
   sizeId?: number;
+  /** Omitted = all classifications (session-level filter, like sizeId). */
+  classificationId?: number;
 }
 
 export interface CustomerWithdrawalTruckRow {
@@ -919,6 +955,9 @@ export interface CustomerWithdrawalSizeTotal {
   sizeId: number | null;
   code: string | null;
   displayName: string;
+  /** Technical classification of this line; null = unclassified sessions. */
+  classificationId: number | null;
+  classificationName: string | null;
   totalBundles: number | null;
   totalTons: number;
   truckCount: number;
@@ -938,6 +977,8 @@ export interface CustomerWithdrawalsReport {
     customerName?: string;
     sizeId?: number;
     sizeDisplayName?: string;
+    classificationId?: number;
+    classificationDisplayName?: string;
   };
   totals: {
     truckCount: number;
@@ -999,14 +1040,40 @@ export async function getCustomerWithdrawalsReport(
     sizeFilterMeta = { sizeId: size.id, sizeDisplayName: size.displayName };
   }
 
+  let classificationFilterMeta: {
+    classificationId?: number;
+    classificationDisplayName?: string;
+  } = {};
+  if (params.classificationId != null) {
+    const classification = await prisma.steelClassification.findUnique({
+      where: { id: params.classificationId },
+      select: { id: true, displayName: true },
+    });
+    if (!classification) {
+      throw new ServiceError("classificationInvalidOrInactive", "NOT_FOUND");
+    }
+    classificationFilterMeta = {
+      classificationId: classification.id,
+      classificationDisplayName: classification.displayName,
+    };
+  }
+
+  // Session-level filters combine on the SAME session: a truck matches only
+  // if one session carries both the requested size and classification.
+  const sessionFilter: { sizeId?: number; classificationId?: number } = {
+    ...(params.sizeId != null ? { sizeId: params.sizeId } : {}),
+    ...(params.classificationId != null
+      ? { classificationId: params.classificationId }
+      : {}),
+  };
+  const hasSessionFilter = Object.keys(sessionFilter).length > 0;
+
   const trucks = await prisma.truckOperation.findMany({
     where: {
       ...(params.customerId != null ? { customerId: params.customerId } : {}),
       status: "Completed",
       closedAt: { gte: window.from, lt: window.to },
-      ...(params.sizeId != null
-        ? { sessions: { some: { sizeId: params.sizeId } } }
-        : {}),
+      ...(hasSessionFilter ? { sessions: { some: sessionFilter } } : {}),
     },
     orderBy: { closedAt: "asc" },
     select: {
@@ -1018,12 +1085,14 @@ export async function getCustomerWithdrawalsReport(
       customer: { select: { fullName: true } },
       destination: { select: { name: true } },
       sessions: {
-        ...(params.sizeId != null ? { where: { sizeId: params.sizeId } } : {}),
+        ...(hasSessionFilter ? { where: sessionFilter } : {}),
         select: {
           sizeId: true,
+          classificationId: true,
           bundleCount: true,
           weightTons: true,
           size: { select: { code: true, displayName: true, sortOrder: true } },
+          classification: { select: { displayName: true } },
         },
       },
     },
@@ -1033,6 +1102,8 @@ export async function getCustomerWithdrawalsReport(
     sizeId: number | null;
     code: string | null;
     displayName: string;
+    classificationId: number | null;
+    classificationName: string | null;
     sortOrder: number;
     totalBundles: number;
     anyMissingBundle: boolean;
@@ -1065,13 +1136,19 @@ export async function getCustomerWithdrawalsReport(
         truckBundles += session.bundleCount;
       }
 
-      const key = session.sizeId != null ? `id:${session.sizeId}` : "none";
+      // One line per (size, classification): B500B and B400DWR of the same
+      // size stay on separate rows in the totals.
+      const key = `${session.sizeId != null ? `id:${session.sizeId}` : "none"}|${
+        session.classificationId != null ? `c:${session.classificationId}` : "none"
+      }`;
       let acc = sizeMap.get(key);
       if (!acc) {
         acc = {
           sizeId: session.sizeId,
           code: session.size?.code ?? null,
           displayName: session.size?.displayName ?? "No size",
+          classificationId: session.classificationId ?? null,
+          classificationName: session.classification?.displayName ?? null,
           sortOrder: session.size?.sortOrder ?? Number.MAX_SAFE_INTEGER,
           totalBundles: 0,
           anyMissingBundle: false,
@@ -1115,12 +1192,16 @@ export async function getCustomerWithdrawalsReport(
   const sizeTotals: CustomerWithdrawalSizeTotal[] = Array.from(sizeMap.values())
     .sort(
       (a, b) =>
-        a.sortOrder - b.sortOrder || a.displayName.localeCompare(b.displayName),
+        a.sortOrder - b.sortOrder ||
+        a.displayName.localeCompare(b.displayName) ||
+        (a.classificationName ?? "").localeCompare(b.classificationName ?? ""),
     )
     .map((acc) => ({
       sizeId: acc.sizeId,
       code: acc.code,
       displayName: acc.displayName,
+      classificationId: acc.classificationId,
+      classificationName: acc.classificationName,
       totalBundles: acc.anyMissingBundle ? null : acc.totalBundles,
       totalTons: round3(acc.totalTons),
       truckCount: acc.truckIds.size,
@@ -1137,6 +1218,7 @@ export async function getCustomerWithdrawalsReport(
     filters: {
       ...customerFilterMeta,
       ...sizeFilterMeta,
+      ...classificationFilterMeta,
     },
     totals: {
       truckCount: rows.length,
@@ -1163,6 +1245,8 @@ export interface GovernorateWithdrawalsReportParams {
   destinationId?: number;
   /** Omitted = all sizes. */
   sizeId?: number;
+  /** Omitted = all classifications (session-level filter, like sizeId). */
+  classificationId?: number;
 }
 
 export interface GovernorateWithdrawalRow {
@@ -1179,6 +1263,9 @@ export interface GovernorateWithdrawalSizeTotal {
   sizeId: number | null;
   code: string | null;
   displayName: string;
+  /** Technical classification of this line; null = unclassified sessions. */
+  classificationId: number | null;
+  classificationName: string | null;
   totalBundles: number | null;
   totalTons: number;
   truckCount: number;
@@ -1199,6 +1286,8 @@ export interface GovernorateWithdrawalsReport {
     destinationName?: string;
     sizeId?: number;
     sizeDisplayName?: string;
+    classificationId?: number;
+    classificationDisplayName?: string;
   };
   totals: {
     truckCount: number;
@@ -1277,6 +1366,34 @@ export async function getGovernorateWithdrawalsReport(
     sizeFilterMeta = { sizeId: size.id, sizeDisplayName: size.displayName };
   }
 
+  let classificationFilterMeta: {
+    classificationId?: number;
+    classificationDisplayName?: string;
+  } = {};
+  if (params.classificationId != null) {
+    const classification = await prisma.steelClassification.findUnique({
+      where: { id: params.classificationId },
+      select: { id: true, displayName: true },
+    });
+    if (!classification) {
+      throw new ServiceError("classificationInvalidOrInactive", "NOT_FOUND");
+    }
+    classificationFilterMeta = {
+      classificationId: classification.id,
+      classificationDisplayName: classification.displayName,
+    };
+  }
+
+  // Session-level filters combine on the SAME session (like the customer
+  // withdrawals report).
+  const sessionFilter: { sizeId?: number; classificationId?: number } = {
+    ...(params.sizeId != null ? { sizeId: params.sizeId } : {}),
+    ...(params.classificationId != null
+      ? { classificationId: params.classificationId }
+      : {}),
+  };
+  const hasSessionFilter = Object.keys(sessionFilter).length > 0;
+
   const trucks = await prisma.truckOperation.findMany({
     where: {
       ...(params.customerId != null ? { customerId: params.customerId } : {}),
@@ -1285,9 +1402,7 @@ export async function getGovernorateWithdrawalsReport(
         : {}),
       status: "Completed",
       closedAt: { gte: window.from, lt: window.to },
-      ...(params.sizeId != null
-        ? { sessions: { some: { sizeId: params.sizeId } } }
-        : {}),
+      ...(hasSessionFilter ? { sessions: { some: sessionFilter } } : {}),
     },
     orderBy: { closedAt: "asc" },
     select: {
@@ -1295,12 +1410,14 @@ export async function getGovernorateWithdrawalsReport(
       destinationId: true,
       destination: { select: { id: true, name: true, sortOrder: true } },
       sessions: {
-        ...(params.sizeId != null ? { where: { sizeId: params.sizeId } } : {}),
+        ...(hasSessionFilter ? { where: sessionFilter } : {}),
         select: {
           sizeId: true,
+          classificationId: true,
           bundleCount: true,
           weightTons: true,
           size: { select: { code: true, displayName: true, sortOrder: true } },
+          classification: { select: { displayName: true } },
         },
       },
     },
@@ -1319,6 +1436,8 @@ export async function getGovernorateWithdrawalsReport(
     sizeId: number | null;
     code: string | null;
     displayName: string;
+    classificationId: number | null;
+    classificationName: string | null;
     sortOrder: number;
     totalBundles: number;
     anyMissingBundle: boolean;
@@ -1351,13 +1470,18 @@ export async function getGovernorateWithdrawalsReport(
         truckBundles += session.bundleCount;
       }
 
-      const sizeKey = session.sizeId != null ? `id:${session.sizeId}` : "none";
+      // One line per (size, classification), matching customer withdrawals.
+      const sizeKey = `${session.sizeId != null ? `id:${session.sizeId}` : "none"}|${
+        session.classificationId != null ? `c:${session.classificationId}` : "none"
+      }`;
       let sizeAcc = sizeMap.get(sizeKey);
       if (!sizeAcc) {
         sizeAcc = {
           sizeId: session.sizeId,
           code: session.size?.code ?? null,
           displayName: session.size?.displayName ?? "No size",
+          classificationId: session.classificationId ?? null,
+          classificationName: session.classification?.displayName ?? null,
           sortOrder: session.size?.sortOrder ?? Number.MAX_SAFE_INTEGER,
           totalBundles: 0,
           anyMissingBundle: false,
@@ -1431,12 +1555,16 @@ export async function getGovernorateWithdrawalsReport(
   )
     .sort(
       (a, b) =>
-        a.sortOrder - b.sortOrder || a.displayName.localeCompare(b.displayName),
+        a.sortOrder - b.sortOrder ||
+        a.displayName.localeCompare(b.displayName) ||
+        (a.classificationName ?? "").localeCompare(b.classificationName ?? ""),
     )
     .map((acc) => ({
       sizeId: acc.sizeId,
       code: acc.code,
       displayName: acc.displayName,
+      classificationId: acc.classificationId,
+      classificationName: acc.classificationName,
       totalBundles: acc.anyMissingBundle ? null : acc.totalBundles,
       totalTons: round3(acc.totalTons),
       truckCount: acc.truckIds.size,
@@ -1454,6 +1582,7 @@ export async function getGovernorateWithdrawalsReport(
       ...customerFilterMeta,
       ...destinationFilterMeta,
       ...sizeFilterMeta,
+      ...classificationFilterMeta,
     },
     totals: {
       truckCount,

@@ -59,7 +59,18 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
   // Trucks / Logistics
   { code: "truck.register", displayName: "تسجيل شاحنة", displayNameEn: "Register truck", module: "logistics" },
   { code: "truck.edit_queued", displayName: "تعديل شاحنة بالطابور", displayNameEn: "Edit queued truck", module: "logistics" },
-  { code: "truck.edit_approved", displayName: "تعديل طلبية شاحنة معتمدة", displayNameEn: "Edit approved truck request", module: "logistics" },
+  {
+    code: "truck.edit_approved",
+    displayName: "تعديل بيانات الشاحنة المعتمدة",
+    displayNameEn: "Edit approved truck details",
+    module: "logistics",
+  },
+  {
+    code: "truck.edit_request_items",
+    displayName: "تعديل تفاصيل طلبية الشاحنة",
+    displayNameEn: "Edit truck request details",
+    module: "logistics",
+  },
   { code: "truck.view_queue", displayName: "عرض الطابور", displayNameEn: "View queue", module: "logistics" },
   { code: "truck.view_approved", displayName: "عرض المعتمدة فقط", displayNameEn: "View approved only", module: "logistics" },
   {
@@ -138,6 +149,14 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
     code: "stock.location.manage",
     displayName: "إدارة مواقع المخزون (إضافة/تعديل/إيقاف)",
     displayNameEn: "Manage stock locations (add/edit/disable)",
+    module: "stock",
+  },
+  // Mark an occupied first-grade bay as B500B from the live map.
+  // Unassigned to role defaults — grant per user from the permission matrix.
+  {
+    code: "stock.classification.mark",
+    displayName: "تمييز صنف الرك (B500B)",
+    displayNameEn: "Mark bay steel classification (B500B)",
     module: "stock",
   },
   // Production entry is split across two roles by counting unit: one records
@@ -246,6 +265,7 @@ export const RBAC_ROLE_PERMISSIONS: Readonly<Record<string, ReadonlyArray<string
     "truck.register",
     "truck.edit_queued",
     "truck.edit_approved",
+    "truck.edit_request_items",
     "truck.view_queue",
     // Billet receiving: logistics pre-registers inbound trucks. Contract
     // choices are loaded through a receipt-registration-only endpoint.

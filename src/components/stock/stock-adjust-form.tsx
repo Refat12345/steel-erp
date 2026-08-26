@@ -26,11 +26,14 @@ import {
   type Segment,
   type StockUnit,
   type SizeOption,
+  type LocationClassificationRef,
 } from "./stock-shared";
 
 interface BalanceLine {
   sizeId: number | null;
   sizeName: string | null;
+  classificationId: number | null;
+  classificationName: string | null;
   unit: StockUnit;
   quantity: number;
 }
@@ -42,8 +45,10 @@ interface LocationBalance {
   segment: Segment;
   unit: StockUnit;
   isDualUnit: boolean;
+  allowedGrade: "FIRST" | "SECOND" | null;
   isActive: boolean;
   expectedSize: { id: number; displayName: string } | null;
+  expectedClassification: LocationClassificationRef | null;
   lines: BalanceLine[];
   totalQuantity: number;
   totalTons: number | null;
@@ -83,20 +88,25 @@ export function StockAdjustForm() {
         // Merge expectedSize from locations (balances payload already has it,
         // but keep an explicit map so empty bays still lock correctly).
         const expectedById = new Map<number, { id: number; displayName: string } | null>();
+        const classById = new Map<number, LocationClassificationRef | null>();
         for (const y of locJson.data.yards as Array<{
           locations: Array<{
             id: number;
             expectedSize: { id: number; displayName: string } | null;
+            expectedClassification: LocationClassificationRef | null;
           }>;
         }>) {
           for (const l of y.locations) {
             expectedById.set(l.id, l.expectedSize);
+            classById.set(l.id, l.expectedClassification ?? null);
           }
         }
         setBalances(
           (balJson.data as LocationBalance[]).map((b) => ({
             ...b,
             expectedSize: b.expectedSize ?? expectedById.get(b.locationId) ?? null,
+            expectedClassification:
+              b.expectedClassification ?? classById.get(b.locationId) ?? null,
           })),
         );
         setSizes(
@@ -162,7 +172,9 @@ export function StockAdjustForm() {
     () =>
       balances.map((b) => ({
         value: String(b.locationId),
-        label: `${b.yardNameAr} — ${b.nameAr}`,
+        label: `${b.yardNameAr} — ${b.nameAr}${
+          b.expectedClassification ? ` · ${b.expectedClassification.code}` : ""
+        }`,
       })),
     [balances],
   );
@@ -171,7 +183,13 @@ export function StockAdjustForm() {
     [sizes],
   );
 
-  // Current system balance for the chosen (location, size, unit) triple.
+  const lockedClassification = needsSize
+    ? selected?.expectedClassification ?? null
+    : null;
+  const selectedClassificationId: number | null = lockedClassification?.id ?? null;
+
+  // Current system balance for the chosen (location, size, classification,
+  // unit) line — the physical count corrects exactly one line.
   const currentQty = useMemo(() => {
     if (!selected || !effectiveUnit) return null;
     if (!needsSize) {
@@ -180,10 +198,13 @@ export function StockAdjustForm() {
     }
     if (!sizeId) return null;
     const line = selected.lines.find(
-      (l) => l.unit === effectiveUnit && l.sizeId === Number(sizeId),
+      (l) =>
+        l.unit === effectiveUnit &&
+        l.sizeId === Number(sizeId) &&
+        l.classificationId === selectedClassificationId,
     );
     return line?.quantity ?? 0;
-  }, [selected, sizeId, effectiveUnit, needsSize]);
+  }, [selected, sizeId, effectiveUnit, needsSize, selectedClassificationId]);
 
   const parsedActual = actual === "" ? null : Number(actual);
   const delta =
@@ -255,6 +276,7 @@ export function StockAdjustForm() {
           locationId: selected.locationId,
           unit: effectiveUnit,
           sizeId: needsSize ? Number(sizeId) : null,
+          classificationId: needsSize ? selectedClassificationId : null,
           actualQuantity: parsedActual,
           reason,
         }),
@@ -306,6 +328,11 @@ export function StockAdjustForm() {
                         <span className="ms-1 text-xs text-muted-foreground">
                           ({b.yardNameAr})
                         </span>
+                        {b.expectedClassification && (
+                          <span className="ms-1 font-mono text-xs">
+                            {b.expectedClassification.code}
+                          </span>
+                        )}
                       </span>
                       <span className="text-xs tabular-nums text-muted-foreground" dir="ltr">
                         {fmt(b.totalQuantity)} {tEnums(`stockUnit.${b.unit}`)}
@@ -384,6 +411,25 @@ export function StockAdjustForm() {
                   </SelectContent>
                 </Select>
               )}
+            </div>
+          )}
+
+          {needsSize && effectiveUnit && (
+            <div className="space-y-1.5">
+              <Label>{t("classification")}</Label>
+              <div className="flex h-9 items-center justify-between rounded-md border bg-muted/40 px-3 text-sm font-medium">
+                <span>{lockedClassification?.displayName ?? t("noClassification")}</span>
+                {currentQty != null && (
+                  <span className="text-xs tabular-nums text-muted-foreground" dir="ltr">
+                    {fmt(currentQty)}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {lockedClassification
+                  ? t("classificationLockedToLocationHint")
+                  : t("ordinaryRebarLocationHint")}
+              </p>
             </div>
           )}
 

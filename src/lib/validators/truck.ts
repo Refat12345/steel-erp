@@ -1,19 +1,28 @@
 import { z } from "zod";
 import { MIN_WEIGHT_KG, MAX_WEIGHT_KG } from "@/lib/weight-bounds";
 
-const requestItemSchema = z.object({
-  sizeId: z.number().int().positive("sizeRequired"),
-  // Grade per request line: the same size may be requested once per grade
-  // (e.g. 12mm FIRST + 12mm SECOND on one truck).
-  grade: z.enum(["FIRST", "SECOND"]).optional().nullable(),
-  bundleCount: z.number().int().min(1, "bundleCountMinOne").optional().nullable(),
-  requestedTons: z
-    .number()
-    .positive("weightMustBePositive")
-    .max(999_999, "tonsValueTooLarge")
-    .optional()
-    .nullable(),
-});
+const requestItemSchema = z
+  .object({
+    sizeId: z.number().int().positive("sizeRequired"),
+    // Grade per request line: the same size may be requested once per grade
+    // (e.g. 12mm FIRST + 12mm SECOND on one truck).
+    grade: z.enum(["FIRST", "SECOND"]).optional().nullable(),
+    // Technical classification (B500B / B400DWR) for graded rebar lines. The
+    // same size+grade may appear once per classification. Service validates
+    // the classification exists, is active, and matches the line's grade.
+    classificationId: z.number().int().positive().optional().nullable(),
+    bundleCount: z.number().int().min(1, "bundleCountMinOne").optional().nullable(),
+    requestedTons: z
+      .number()
+      .positive("weightMustBePositive")
+      .max(999_999, "tonsValueTooLarge")
+      .optional()
+      .nullable(),
+  })
+  .refine((item) => item.classificationId == null || item.grade != null, {
+    message: "classificationRequiresGrade",
+    path: ["classificationId"],
+  });
 
 export const truckRegisterSchema = z.object({
   customerId: z.number().int().positive("customerRequired").optional().nullable(),
@@ -91,6 +100,9 @@ const weightTonsSchema = z
 
 export const weighSessionSchema = z.object({
   sizeId: z.number().int().positive().optional().nullable(),
+  // Technical classification (B500B / B400DWR) of this weighed batch. Lives on
+  // the session — not the round — because one round may mix classifications.
+  classificationId: z.number().int().positive().optional().nullable(),
   bundleCount: z.number().int().min(1).optional().nullable(),
   weightTons: weightTonsSchema,
   // Stock source location the material was loaded from. Optional at the schema
@@ -105,6 +117,7 @@ export const weighSessionSchema = z.object({
 
 export const weighSessionEditSchema = z.object({
   sizeId: z.number().int().positive().optional().nullable(),
+  classificationId: z.number().int().positive().optional().nullable(),
   bundleCount: z.number().int().min(1).optional().nullable(),
   weightTons: weightTonsSchema.optional(),
   sourceLocationId: z.number().int().positive().optional().nullable(),
@@ -171,6 +184,7 @@ export const completedExternalCorrectionSchema = z.object({
 export const completedSessionAddSchema = z.object({
   roundId: z.number().int().positive("roundInvalid"),
   sizeId: z.number().int().positive().optional().nullable(),
+  classificationId: z.number().int().positive().optional().nullable(),
   bundleCount: z.number().int().min(1).optional().nullable(),
   weightTons: weightTonsSchema,
   reason: correctionReasonSchema,
@@ -178,6 +192,7 @@ export const completedSessionAddSchema = z.object({
 
 export const completedSessionEditSchema = z.object({
   sizeId: z.number().int().positive().optional().nullable(),
+  classificationId: z.number().int().positive().optional().nullable(),
   bundleCount: z.number().int().min(1).optional().nullable(),
   weightTons: weightTonsSchema.optional(),
   reason: correctionReasonSchema,

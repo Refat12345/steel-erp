@@ -200,6 +200,8 @@ describe("getDailyTrucksReport", () => {
       {
         sizeId: 8,
         displayName: "8 مم",
+        classificationId: null,
+        classificationName: null,
         totalTons: 10.5,
         totalBundles: 20,
         truckCount: 1,
@@ -207,6 +209,8 @@ describe("getDailyTrucksReport", () => {
       {
         sizeId: 12,
         displayName: "12 مم",
+        classificationId: null,
+        classificationName: null,
         totalTons: 4.3,
         totalBundles: 8,
         truckCount: 1,
@@ -335,6 +339,8 @@ describe("getDailyTrucksReport", () => {
       {
         sizeId: 8,
         displayName: "8 مم",
+        classificationId: null,
+        classificationName: null,
         totalTons: 12,
         totalBundles: 10,
         truckCount: 1,
@@ -585,6 +591,8 @@ describe("getDailyTrucksReport", () => {
       {
         sizeId: 8,
         displayName: "8 مم",
+        classificationId: null,
+        classificationName: null,
         totalTons: 14.5,
         totalBundles: 20,
         truckCount: 1,
@@ -1034,6 +1042,8 @@ describe("getGovernorateWithdrawalsReport", () => {
         sizeId: 1,
         code: "16",
         displayName: "16 مم",
+        classificationId: null,
+        classificationName: null,
         totalBundles: 8,
         totalTons: 5,
         truckCount: 2,

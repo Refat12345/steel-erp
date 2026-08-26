@@ -66,6 +66,11 @@ export const customerWithdrawalsQuerySchema = z.object({
     (v) => (v === "" || v === null || v === undefined ? undefined : v),
     z.coerce.number().int().positive().optional(),
   ),
+  /** Technical classification (B500B / B400DWR) — session-level, like sizeId. */
+  classificationId: z.preprocess(
+    (v) => (v === "" || v === null || v === undefined ? undefined : v),
+    z.coerce.number().int().positive().optional(),
+  ),
 });
 
 export type CustomerWithdrawalsQuery = z.infer<
@@ -84,6 +89,11 @@ export const governorateWithdrawalsQuerySchema = z.object({
     z.coerce.number().int().positive().optional(),
   ),
   sizeId: z.preprocess(
+    (v) => (v === "" || v === null || v === undefined ? undefined : v),
+    z.coerce.number().int().positive().optional(),
+  ),
+  /** Technical classification (B500B / B400DWR) — session-level, like sizeId. */
+  classificationId: z.preprocess(
     (v) => (v === "" || v === null || v === undefined ? undefined : v),
     z.coerce.number().int().positive().optional(),
   ),
