@@ -114,7 +114,9 @@ export interface LocationClassificationRef {
 
 export type ShiftValue = "MORNING" | "EVENING";
 
-export const SHIFT_GRACE_MINUTES = 30;
+export const SHIFT_GRACE_MINUTES = 60;
+
+export const SHIFT_BOUNDARY_HOURS = [8, 20] as const;
 
 export const SHIFT_VALUES: ShiftValue[] = ["MORNING", "EVENING"];
 
@@ -126,8 +128,11 @@ export function naturalShiftOf(d: Date): ShiftValue {
 
 /** Inside the grace window right after a shift boundary (08:00 / 20:00)? */
 export function inShiftGraceWindow(d: Date): boolean {
-  const h = d.getHours();
-  return (h === 8 || h === 20) && d.getMinutes() < SHIFT_GRACE_MINUTES;
+  const minutesIntoDay = d.getHours() * 60 + d.getMinutes();
+  return SHIFT_BOUNDARY_HOURS.some((boundary) => {
+    const elapsed = minutesIntoDay - boundary * 60;
+    return elapsed >= 0 && elapsed < SHIFT_GRACE_MINUTES;
+  });
 }
 
 export function previousShiftOf(s: ShiftValue): ShiftValue {
