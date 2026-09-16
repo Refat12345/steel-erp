@@ -1265,6 +1265,8 @@
     "todayEntriesTitle": "إدخالات اليوم التشغيلي",
     "todayEntriesSubtitle": "من 8 صباحاً إلى 8 صباحاً — مجمّعة حسب الوردية لتفادي التكرار",
     "todayEntriesCount": "{count} إدخال",
+    "prevNightSectionTitle": "وردية الليل — أمس",
+    "prevNightSectionHint": "تظهر خلال ساعة المهلة بعد بداية وردية الصبح، للمراجعة والتصحيح.",
     "correctEntry": "تصحيح",
     "correctEntryTitle": "تصحيح إدخال إنتاج",
     "correctEntryDesc": "عدّل الكمية و/أو موقع التخزين. الإدخال الأصلي يبقى في السجل للتدقيق؛ الرصيد يتحدث عبر حركة عكسية.",

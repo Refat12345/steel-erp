@@ -76,7 +76,7 @@ export const SHIFT_BOUNDARY_HOURS = [8, 20] as const;
  * Minutes after a shift boundary during which a clerk may assign the entry to
  * the shift that just ended (late recording of the previous shift's output).
  */
-export const SHIFT_GRACE_MINUTES = 30;
+export const SHIFT_GRACE_MINUTES = 60;
 
 /** Shift a timestamp naturally falls in, by wall-clock (server) time. */
 export function naturalShift(d: Date): ShiftValue {
@@ -86,8 +86,11 @@ export function naturalShift(d: Date): ShiftValue {
 
 /** Is `d` inside the grace window right after a boundary (08:00 / 20:00)? */
 export function inShiftGraceWindow(d: Date): boolean {
-  const h = d.getHours();
-  return (h === 8 || h === 20) && d.getMinutes() < SHIFT_GRACE_MINUTES;
+  const minutesIntoDay = d.getHours() * 60 + d.getMinutes();
+  return SHIFT_BOUNDARY_HOURS.some((boundary) => {
+    const elapsed = minutesIntoDay - boundary * 60;
+    return elapsed >= 0 && elapsed < SHIFT_GRACE_MINUTES;
+  });
 }
 
 /** Start of the operational day (the most recent 08:00) containing `d`. */
@@ -1616,18 +1619,32 @@ export async function listMovements(
  * avoid duplicate/conflicting entries. Accessible to production clerks who
  * lack the full movement-log permission.
  *
- * Entries recorded in the morning grace window but assigned to the previous
- * EVENING shift belong to the previous operational day and are excluded.
+ * During the morning grace window the just-ended EVENING shift is included too
+ * (tagged `operationalDay: "previous"`), so an entry recorded at 08:0x and
+ * attributed to that shift stays visible — and correctable — instead of
+ * vanishing the moment it is saved. Outside the grace window the feed is the
+ * current operational day only.
  */
 /** Today's production feed — includes segment/sizeId so the UI can flag
  *  rebar sites that received only one of the two parallel units. */
 export interface TodayProductionItem extends MovementListItem {
   sizeId: number | null;
   segment: StockLocationSegment;
+  /** Which operational day the entry belongs to, relative to right now. */
+  operationalDay: "current" | "previous";
 }
 
+/** How many entries the feed may carry — a busy day fills several hundred. */
+const TODAY_PRODUCTION_FEED_LIMIT = 500;
+
 export async function listTodayProduction(): Promise<TodayProductionItem[]> {
-  const start = operationalDayStart(new Date());
+  const now = new Date();
+  const dayStart = operationalDayStart(now);
+  // Only the morning boundary crosses operational days, so the previous
+  // EVENING shift is surfaced during the 08:00 grace window and nowhere else.
+  const inMorningGrace = inShiftGraceWindow(now) && naturalShift(now) === "MORNING";
+  const from = new Date(dayStart);
+  if (inMorningGrace) from.setHours(from.getHours() - 12);
 
   const rows = await prisma.stockMovement.findMany({
     // Exclude the virtual cross-dock receipts — those are dispatch trail, not
@@ -1635,12 +1652,12 @@ export async function listTodayProduction(): Promise<TodayProductionItem[]> {
     // hidden so a corrected entry does not double-count in the feed.
     where: {
       type: "PRODUCTION_IN",
-      createdAt: { gte: start },
+      createdAt: { gte: from },
       supersededById: null,
       location: { isVirtual: false },
     },
     orderBy: { createdAt: "desc" },
-    take: 100,
+    take: TODAY_PRODUCTION_FEED_LIMIT,
     include: {
       location: { select: { code: true, nameAr: true, segment: true } },
       size: { select: { displayName: true } },
@@ -1649,9 +1666,18 @@ export async function listTodayProduction(): Promise<TodayProductionItem[]> {
     },
   });
 
-  return rows
-    .filter((r) => !belongsToPreviousOperationalDay(r.createdAt, r.shift))
-    .map((r) => ({
+  const items: TodayProductionItem[] = [];
+  for (const r of rows) {
+    // Effective shift: stored value for production rows (always set on new
+    // rows); fall back to the natural shift for rows predating the column.
+    const shift = r.shift ?? naturalShift(r.createdAt);
+    const isPrevious =
+      r.createdAt < dayStart || belongsToPreviousOperationalDay(r.createdAt, r.shift);
+    // Of the previous day only its EVENING shift is under review right now; a
+    // late 20:0x entry back-dated to that day's MORNING is already settled.
+    if (isPrevious && (!inMorningGrace || shift !== "EVENING")) continue;
+
+    items.push({
       id: r.id,
       createdAt: r.createdAt,
       type: r.type,
@@ -1665,12 +1691,13 @@ export async function listTodayProduction(): Promise<TodayProductionItem[]> {
       classificationName: r.classification?.displayName ?? null,
       quantity: new Decimal(r.quantity).toNumber(),
       unit: r.unit,
-      // Effective shift: stored value for production rows (always set on new
-      // rows); fall back to the natural shift for rows predating the column.
-      shift: r.shift ?? naturalShift(r.createdAt),
+      shift,
+      operationalDay: isPrevious ? "previous" : "current",
       reason: r.reason,
       createdBy: r.creator.fullName || r.creator.username,
-    }));
+    });
+  }
+  return items;
 }
 
 /** Active locations (id + code + name + unit + grade) for pickers. */

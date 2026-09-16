@@ -1265,6 +1265,8 @@
     "todayEntriesTitle": "Today’s operational entries",
     "todayEntriesSubtitle": "8am to 8am — grouped by shift to avoid duplicate recording",
     "todayEntriesCount": "{count} entries",
+    "prevNightSectionTitle": "Night shift — yesterday",
+    "prevNightSectionHint": "Shown during the grace hour after the morning shift starts, for review and correction.",
     "correctEntry": "Correct",
     "correctEntryTitle": "Correct production entry",
     "correctEntryDesc": "Change quantity and/or storage location. The original entry stays in the ledger for audit; balances update via a reversing adjustment.",
