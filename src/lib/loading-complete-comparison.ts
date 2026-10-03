@@ -31,9 +31,152 @@ type SessionInput = {
   classificationId?: number | null;
   bundleCount: number | null;
   weightTons: string | number;
-  size: { displayName: string; isBundleType?: boolean } | null;
+  size: { displayName: string; isBundleType?: boolean; code?: string } | null;
   classification?: { displayName: string } | null;
 };
+
+type Grade = "FIRST" | "SECOND";
+
+type RoundSessionInput = {
+  sizeId: number | null;
+  size: { displayName: string; code?: string } | null;
+  classification?: { grade?: Grade | null } | null;
+};
+
+export type RoundGradeIssue = {
+  messageKey:
+    | "roundGradeRequiredForRebar"
+    | "roundGradeNotAllowedForNonRebar"
+    | "roundGradeConflictsWithRequest"
+    | "roundMixesGrades";
+  params: { sizeLabel?: string; grade?: Grade };
+};
+
+export type RoundGradeAnalysis = {
+  hasRebar: boolean;
+  hasNonRebar: boolean;
+  /** Grades consistent with every rebar size weighed in the round. */
+  allowedGrades: Grade[];
+  /**
+   * Default for the loader's grade picker: a grade when exactly one fits the
+   * rebar loaded, null when the round carries only grade-less material
+   * (shortbar / scrap), undefined when there is no basis to choose.
+   */
+  suggestedGrade: Grade | null | undefined;
+};
+
+/** Sessions of grade-less material (shortbar / scrap) never count toward a graded request. */
+function isGradelessSession(session: { size?: { code?: string } | null }): boolean {
+  const code = session.size?.code;
+  return !!code && !sizeCodeSupportsGrade(code);
+}
+
+/**
+ * A truck "declares a grade" when logistics set an operation-level grade or
+ * any request line carries one. Only such trucks must stamp a grade on every
+ * rebar round; fully ungraded visits keep the optional picker.
+ */
+export function truckDeclaresGrade(
+  requestItems: ReadonlyArray<{ grade?: Grade | null }>,
+  operationalGrade: Grade | null | undefined,
+): boolean {
+  return operationalGrade != null || requestItems.some((i) => i.grade != null);
+}
+
+function gradesAllowedForSession(
+  session: RoundSessionInput,
+  requestItems: ReadonlyArray<{ sizeId: number; grade?: Grade | null }>,
+): Set<Grade> {
+  let allowed = new Set<Grade>(["FIRST", "SECOND"]);
+  const classGrade = session.classification?.grade;
+  if (classGrade) allowed = new Set([classGrade]);
+  const lines = requestItems.filter((i) => i.sizeId === session.sizeId);
+  if (lines.length > 0 && lines.every((l) => l.grade != null)) {
+    const lineGrades = new Set(lines.map((l) => l.grade as Grade));
+    allowed = new Set([...allowed].filter((g) => lineGrades.has(g)));
+  }
+  return allowed;
+}
+
+/**
+ * Which grade(s) a bridge round can carry, derived from what was weighed in
+ * it: each rebar size is bound by the grade(s) it has on the request (and by
+ * a session's classification grade). Sizes absent from the request, or with
+ * an ungraded line, accept either grade.
+ */
+export function analyzeRoundGrade(
+  requestItems: ReadonlyArray<{ sizeId: number; grade?: Grade | null }>,
+  roundSessions: ReadonlyArray<RoundSessionInput>,
+): RoundGradeAnalysis {
+  let hasRebar = false;
+  let hasNonRebar = false;
+  let allowed = new Set<Grade>(["FIRST", "SECOND"]);
+
+  for (const session of roundSessions) {
+    const code = session.size?.code;
+    if (session.sizeId == null || !code) continue;
+    if (!sizeCodeSupportsGrade(code)) {
+      hasNonRebar = true;
+      continue;
+    }
+    hasRebar = true;
+    const sessionAllowed = gradesAllowedForSession(session, requestItems);
+    allowed = new Set([...allowed].filter((g) => sessionAllowed.has(g)));
+  }
+
+  const allowedGrades = hasRebar ? [...allowed] : [];
+  let suggestedGrade: Grade | null | undefined;
+  if (hasRebar) suggestedGrade = allowedGrades.length === 1 ? allowedGrades[0] : undefined;
+  else if (hasNonRebar) suggestedGrade = null;
+
+  return { hasRebar, hasNonRebar, allowedGrades, suggestedGrade };
+}
+
+/**
+ * Refuses a round grade that contradicts the material weighed in the round:
+ * rebar on a graded truck needs a grade, grade-less material must stay
+ * grade-less, and a size requested only in one grade cannot be stamped with
+ * the other (one grade per round).
+ */
+export function validateRoundGradeChoice(
+  requestItems: ReadonlyArray<{ sizeId: number; grade?: Grade | null }>,
+  roundSessions: ReadonlyArray<RoundSessionInput>,
+  grade: Grade | null,
+  options: { requireGradeForRebar: boolean },
+): RoundGradeIssue | null {
+  const analysis = analyzeRoundGrade(requestItems, roundSessions);
+
+  if (!analysis.hasRebar) {
+    if (analysis.hasNonRebar && grade != null) {
+      return { messageKey: "roundGradeNotAllowedForNonRebar", params: {} };
+    }
+    return null;
+  }
+
+  if (grade == null) {
+    if (!options.requireGradeForRebar) return null;
+    return analysis.allowedGrades.length === 0
+      ? { messageKey: "roundMixesGrades", params: {} }
+      : { messageKey: "roundGradeRequiredForRebar", params: {} };
+  }
+
+  if (analysis.allowedGrades.length === 0) {
+    return { messageKey: "roundMixesGrades", params: {} };
+  }
+  if (!analysis.allowedGrades.includes(grade)) {
+    const culprit = roundSessions.find((s) => {
+      const code = s.size?.code;
+      if (s.sizeId == null || !code || !sizeCodeSupportsGrade(code)) return false;
+      return !gradesAllowedForSession(s, requestItems).has(grade);
+    });
+    const expected: Grade = grade === "FIRST" ? "SECOND" : "FIRST";
+    return {
+      messageKey: "roundGradeConflictsWithRequest",
+      params: { sizeLabel: culprit?.size?.displayName ?? "", grade: expected },
+    };
+  }
+  return null;
+}
 
 export type FirstGradeMatchIssue = {
   messageKey:
@@ -225,7 +368,9 @@ export function evaluateFirstGradeRequestMatch(
 
   const issues: FirstGradeMatchIssue[] = [];
   const remainders: FirstGradeRemainder[] = [];
-  const loadedRows = aggregateWeighSessionsBySizeAndClassification(sessions);
+  const loadedRows = aggregateWeighSessionsBySizeAndClassification(
+    sessions.filter((s) => !isGradelessSession(s)),
+  );
   const requestedSizeIds = new Set(items.map((i) => i.sizeId));
 
   type ClassAcc = {
@@ -533,6 +678,24 @@ export function evaluateFirstGradeRequestMatch(
   }
 
   return { blocking: issues, remainders };
+}
+
+/**
+ * Close gate: `firstRoundSessions` are the sessions of every round stamped
+ * FIRST. Over-load / extra sizes block as at loading-complete; incompleteness
+ * is only required for lines explicitly requested as FIRST — an ungraded
+ * rebar line declares no grade, so loading it in a non-FIRST round is fine.
+ */
+export function evaluateFirstGradeCloseGate(
+  requestItems: ReadonlyArray<RequestItemInput>,
+  firstRoundSessions: ReadonlyArray<SessionInput>,
+): FirstGradeMatchResult {
+  const { blocking } = evaluateFirstGradeRequestMatch(requestItems, firstRoundSessions);
+  const { remainders } = evaluateFirstGradeRequestMatch(
+    requestItems.filter((i) => i.grade === "FIRST"),
+    firstRoundSessions,
+  );
+  return { blocking, remainders };
 }
 
 /** Blocking first-grade issues only (over-load / extra size / missing counts). */
