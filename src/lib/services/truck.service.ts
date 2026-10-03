@@ -18,8 +18,11 @@ import {
 } from "@/lib/weigh-session-aggregate";
 import { requestSizeCodesExemptFromInternalWeighing } from "@/lib/material-kind";
 import {
+  evaluateFirstGradeCloseGate,
   evaluateFirstGradeRequestMatch,
   shouldEnforceFirstGradeMatch,
+  truckDeclaresGrade,
+  validateRoundGradeChoice,
 } from "@/lib/loading-complete-comparison";
 import { applyLoadOutForClose } from "./stock.service";
 import { clampEventWindow } from "./settings.service";
@@ -1501,7 +1504,12 @@ export async function correctCompletedRoundGrade(
           },
         });
         if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
-        assertCompletedForCorrection(truck.status);
+        // Also allowed between the final weighing and close: a round stamped
+        // with the wrong grade would otherwise block the close gate with no
+        // way out (SecondWeigh can only move to Completed or Cancelled).
+        if (truck.status !== "SecondWeigh") {
+          assertCompletedForCorrection(truck.status);
+        }
 
         const round = await tx.bridgeRound.findUnique({ where: { id: roundId } });
         if (!round || round.truckOperationId !== truckId) {
@@ -1547,7 +1555,10 @@ export async function correctCompletedRoundGrade(
           entityType: "BridgeRound",
           entityId: String(roundId),
           details: {
-            event: "completed_grade_corrected",
+            event:
+              truck.status === "SecondWeigh"
+                ? "pre_close_grade_corrected"
+                : "completed_grade_corrected",
             truckId,
             roundNumber: round.roundNumber,
             oldGrade,
@@ -2222,7 +2233,7 @@ export async function confirmLoadingComplete(
               size: {
                 select: { displayName: true, isBundleType: true, code: true },
               },
-              classification: { select: { displayName: true } },
+              classification: { select: { displayName: true, grade: true } },
             },
           }),
           tx.truckPhoto.count({ where: { bridgeRoundId: openRound.id } }),
@@ -2257,6 +2268,22 @@ export async function confirmLoadingComplete(
           requestedTons:
             item.requestedTons != null ? Number(item.requestedTons) : null,
         }));
+
+        // The round grade drives the close gate and every by-grade report, so
+        // it must agree with what was weighed (e.g. a second round of
+        // first-grade 20mm cannot be stamped "no grade").
+        if (!truck.skipInternalWeighing) {
+          const gradeIssue = validateRoundGradeChoice(requestItems, sessions, nextGrade ?? null, {
+            requireGradeForRebar: truckDeclaresGrade(requestItems, truck.operationalGrade),
+          });
+          if (gradeIssue) {
+            const { sizeLabel, grade } = gradeIssue.params;
+            throw new ServiceError(gradeIssue.messageKey, "BAD_REQUEST", {
+              ...(sizeLabel !== undefined ? { sizeLabel } : {}),
+              ...(grade ? { grade: `@enums.grade.${grade}` } : {}),
+            });
+          }
+        }
 
         // First-grade: over-load / extra size / extra classification block
         // this confirm. Under-load is a later-round remainder (close gate).
@@ -2781,7 +2808,7 @@ export async function closeOperation(
               item.requestedTons != null ? Number(item.requestedTons) : null,
           }));
           if (shouldEnforceFirstGradeMatch(closeRequestForMatch, "FIRST")) {
-            const { blocking, remainders } = evaluateFirstGradeRequestMatch(
+            const { blocking, remainders } = evaluateFirstGradeCloseGate(
               closeRequestForMatch,
               firstGradeSessions.map((s) => ({
                 ...s,
@@ -2977,6 +3004,7 @@ const DETAIL_INCLUDE = {
           code: true,
           displayName: true,
           displayNameEn: true,
+          grade: true,
         },
       },
       sourceLocation: {

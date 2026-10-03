@@ -71,10 +71,13 @@ import {
   aggregateWeighSessionsBySizeAndClassification,
 } from "@/lib/weigh-session-aggregate";
 import {
+  analyzeRoundGrade,
   buildRequestVsLoadedComparison,
   collectFirstGradeSessions,
   evaluateFirstGradeRequestMatch,
   shouldEnforceFirstGradeMatch,
+  truckDeclaresGrade,
+  validateRoundGradeChoice,
 } from "@/lib/loading-complete-comparison";
 import {
   computeWeighbridgeDiscrepancy,
@@ -146,6 +149,7 @@ interface WeighSessionItem {
     id: number;
     code: string;
     displayName: string;
+    grade?: SalesOrderGrade;
   } | null;
   sourceLocation: {
     id: number;
@@ -241,6 +245,8 @@ const statusColors: Record<string, string> = {
 };
 
 const GRADES: SalesOrderGrade[] = ["FIRST", "SECOND"];
+/** Select value for a grade-less round. Empty string is not a Base UI item value. */
+const NO_ROUND_GRADE = "NONE";
 
 export function ScaleOperationView({
   truckId,
@@ -815,14 +821,15 @@ export function ScaleOperationView({
         </div>
       )}
 
-      {truck.status === "Completed" && canCorrectCompleted && (
-        <AdminCorrectionPanel
-          truck={truck}
-          sizes={sizes}
-          classifications={classifications}
-          onChanged={fetchTruck}
-        />
-      )}
+      {(truck.status === "Completed" || truck.status === "SecondWeigh") &&
+        canCorrectCompleted && (
+          <AdminCorrectionPanel
+            truck={truck}
+            sizes={sizes}
+            classifications={classifications}
+            onChanged={fetchTruck}
+          />
+        )}
 
       {/* Sessions Table */}
       <Card>
@@ -1175,6 +1182,10 @@ export function ScaleOperationView({
         roundNumber={openRound?.roundNumber ?? 1}
         initialGrade={openRound?.grade ?? null}
         initialSizeId={openRound?.sizeId ?? null}
+        requireGradeForRebar={truckDeclaresGrade(
+          truck.requestItems,
+          truck.operationalGrade,
+        )}
         showGradeSelect={
           !truck.skipInternalWeighing &&
           (truck.operationalGrade != null ||
@@ -2724,6 +2735,7 @@ function LoadingCompleteDialog({
   roundNumber,
   initialGrade,
   initialSizeId,
+  requireGradeForRebar,
   showGradeSelect,
   onConfirm,
 }: {
@@ -2745,6 +2757,8 @@ function LoadingCompleteDialog({
   initialGrade: SalesOrderGrade | null;
   /** Previously chosen material of the open round (re-confirm after reopen). */
   initialSizeId: number | null;
+  /** Graded trucks must stamp a grade on every rebar round. */
+  requireGradeForRebar: boolean;
   showGradeSelect: boolean;
   onConfirm: (
     grade?: SalesOrderGrade | null,
@@ -2756,7 +2770,12 @@ function LoadingCompleteDialog({
   const locale = useLocale() as Locale;
   const dir = getTextDirection(locale);
   const [saving, setSaving] = useState(false);
-  const [grade, setGrade] = useState<SalesOrderGrade | "">(initialGrade ?? "");
+  // Default the picker to the grade implied by what was weighed this round
+  // (e.g. first-grade 20mm → FIRST, shortbar only → no grade); fall back to
+  // the round's stored grade when the load does not decide it.
+  const { suggestedGrade } = analyzeRoundGrade(requestItems, sessions);
+  const defaultGrade = suggestedGrade !== undefined ? suggestedGrade : initialGrade;
+  const [grade, setGrade] = useState<SalesOrderGrade | "">(defaultGrade ?? "");
   const [sizeId, setSizeId] = useState<number | null>(initialSizeId);
 
   // Exempt trucks carrying more than one material: the loader must declare
@@ -2774,14 +2793,21 @@ function LoadingCompleteDialog({
       })),
     [materialOptions],
   );
+  const gradeSelectItems = useMemo(
+    () => [
+      { value: NO_ROUND_GRADE, label: t("noGradeScrap") },
+      ...GRADES.map((g) => ({ value: g, label: tEnums(`grade.${g}`) })),
+    ],
+    [t, tEnums],
+  );
 
   // Re-sync the defaults whenever the dialog opens for a (possibly new) round.
   useEffect(() => {
     if (open) {
-      setGrade(initialGrade ?? "");
+      setGrade(defaultGrade ?? "");
       setSizeId(initialSizeId);
     }
-  }, [open, initialGrade, initialSizeId]);
+  }, [open, defaultGrade, initialSizeId]);
 
   const bySize = aggregateWeighSessionsBySize(sessions);
   const selectedGrade = showGradeSelect
@@ -2789,22 +2815,31 @@ function LoadingCompleteDialog({
       ? null
       : grade
     : (initialGrade ?? null);
+  const gradeIssue = skipInternalWeighing
+    ? null
+    : validateRoundGradeChoice(requestItems, sessions, selectedGrade, {
+        requireGradeForRebar,
+      });
   const enforceFirstGrade =
     !skipInternalWeighing &&
     shouldEnforceFirstGradeMatch(requestItems, selectedGrade);
   const firstGradeSessions = enforceFirstGrade
     ? collectFirstGradeSessions(allSessions, rounds, currentRoundId)
     : sessions;
+  // A grade-less round (shortbar / scrap) is compared against its own
+  // grade-less request lines using this round's sessions only.
+  const gradelessRound = selectedGrade == null;
   const { rows: requestRows, warnings: requestWarnings } =
     buildRequestVsLoadedComparison(
       requestItems,
-      firstGradeSessions,
+      enforceFirstGrade && !gradelessRound ? firstGradeSessions : sessions,
       showGradeSelect ? selectedGrade : undefined,
     );
   const firstGradeMatch = enforceFirstGrade
     ? evaluateFirstGradeRequestMatch(requestItems, firstGradeSessions)
     : { blocking: [], remainders: [] };
   const firstGradeBlocked = firstGradeMatch.blocking.length > 0;
+  const confirmBlocked = firstGradeBlocked || gradeIssue != null;
   const totalTons = sessions.reduce((sum, s) => sum + Number(s.weightTons), 0);
   const totalBundles =
     bySize.length > 0 && bySize.every((row) => row.totalBundles != null)
@@ -2815,7 +2850,9 @@ function LoadingCompleteDialog({
   // comparison warnings are noise — the round net is recorded at gross.
   // First-grade mismatches are shown as blocking errors, not amber warnings.
   const warnings: string[] =
-    skipInternalWeighing || enforceFirstGrade ? [] : [...requestWarnings];
+    skipInternalWeighing || (enforceFirstGrade && !gradelessRound)
+      ? []
+      : [...requestWarnings];
   if (!skipInternalWeighing && sessions.length === 0) {
     warnings.push(t("warnNoInternalSessions"));
   }
@@ -2831,7 +2868,7 @@ function LoadingCompleteDialog({
   }
 
   const handleConfirm = async () => {
-    if (firstGradeBlocked) return;
+    if (confirmBlocked) return;
     if (showMaterialSelect && sizeId == null) {
       toast.error(t("toastSelectRoundMaterial"));
       return;
@@ -2874,14 +2911,17 @@ function LoadingCompleteDialog({
             <div className="space-y-2">
               <Label>{t("roundGrade")}</Label>
               <Select
-                value={grade}
-                onValueChange={(v) => setGrade((v as SalesOrderGrade | "") ?? "")}
+                items={gradeSelectItems}
+                value={grade === "" ? NO_ROUND_GRADE : grade}
+                onValueChange={(v) =>
+                  setGrade(!v || v === NO_ROUND_GRADE ? "" : (v as SalesOrderGrade))
+                }
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder={t("selectGrade")} />
                 </SelectTrigger>
                 <SelectContent dir={dir}>
-                  <SelectItem value="">{t("noGradeScrap")}</SelectItem>
+                  <SelectItem value={NO_ROUND_GRADE}>{t("noGradeScrap")}</SelectItem>
                   {GRADES.map((g) => (
                     <SelectItem key={g} value={g}>
                       {tEnums(`grade.${g}`)}
@@ -3027,6 +3067,27 @@ function LoadingCompleteDialog({
             })}
           </p>
 
+          {gradeIssue && (
+            <div
+              className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 dark:bg-red-950/30 dark:border-red-700"
+              role="alert"
+            >
+              <p className="text-xs text-red-900 dark:text-red-200 flex gap-2">
+                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
+                <span>
+                  {t(gradeIssue.messageKey, {
+                    ...(gradeIssue.params.sizeLabel !== undefined
+                      ? { sizeLabel: gradeIssue.params.sizeLabel }
+                      : {}),
+                    ...(gradeIssue.params.grade
+                      ? { grade: tEnums(`grade.${gradeIssue.params.grade}`) }
+                      : {}),
+                  })}
+                </span>
+              </p>
+            </div>
+          )}
+
           {firstGradeBlocked && (
             <div
               className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 space-y-1.5 dark:bg-red-950/30 dark:border-red-700"
@@ -3097,7 +3158,7 @@ function LoadingCompleteDialog({
           <Button
             type="button"
             onClick={() => void handleConfirm()}
-            disabled={saving || firstGradeBlocked}
+            disabled={saving || confirmBlocked}
             className="bg-green-600 hover:bg-green-700"
           >
             {saving ? t("confirming") : t("confirmLoadingComplete")}

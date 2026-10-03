@@ -153,6 +153,25 @@ describe("correctCompletedRoundGrade", () => {
       correctCompletedRoundGrade(1, 11, "SECOND", "x", 0, 7),
     ).rejects.toMatchObject({ code: "CONFLICT" });
   });
+
+  it("allows a pre-close correction after the final weighing (SecondWeigh)", async () => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValue({
+      id: 1,
+      status: "SecondWeigh",
+      operationalGrade: "FIRST",
+      salesOrder: null,
+    });
+    mockPrisma.bridgeRound.findMany.mockResolvedValue([{ grade: "FIRST" }]);
+
+    await correctCompletedRoundGrade(1, 11, "FIRST", "الدورة الثانية نخب أول", 0, 7);
+
+    expect(mockPrisma.bridgeRound.updateMany).toHaveBeenCalledWith({
+      where: { id: 11, version: 0 },
+      data: { grade: "FIRST", version: { increment: 1 } },
+    });
+    const audit = mockPrisma.auditLog.create.mock.calls[0][0];
+    expect(audit.data.details.event).toBe("pre_close_grade_corrected");
+  });
 });
 
 // ─── Tare correction ───────────────────────────────────────────

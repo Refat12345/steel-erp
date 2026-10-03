@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  analyzeRoundGrade,
   buildRequestVsLoadedComparison,
   collectFirstGradeSessions,
+  evaluateFirstGradeCloseGate,
   evaluateFirstGradeRequestMatch,
   findFirstGradeRequestMismatches,
   shouldEnforceFirstGradeMatch,
+  truckDeclaresGrade,
+  validateRoundGradeChoice,
 } from "./loading-complete-comparison";
 
 const shortsTonsRequest = [
@@ -604,5 +608,175 @@ describe("collectFirstGradeSessions", () => {
     expect(collectFirstGradeSessions(sessions, rounds, 12).map((s) => s.id)).toEqual([
       1, 3,
     ]);
+  });
+});
+
+// Mixed first-grade + shortbar truck shared by the suites below.
+const rebar20 = { displayName: "20مم", isBundleType: true, code: "20mm" };
+const rebar12 = { displayName: "12مم", isBundleType: true, code: "12mm" };
+const shortbar = { displayName: "قصائر 4-12 م", isBundleType: false, code: "shortbar_4_12m" };
+const line20First = {
+  sizeId: 20,
+  grade: "FIRST" as const,
+  classificationId: null,
+  bundleCount: 16,
+  requestedTons: null,
+  size: rebar20,
+};
+const lineShortbar = {
+  sizeId: 50,
+  grade: null,
+  classificationId: null,
+  bundleCount: null,
+  requestedTons: 5,
+  size: shortbar,
+};
+const session20 = (bundles: number) => ({
+  sizeId: 20,
+  classificationId: null,
+  bundleCount: bundles,
+  weightTons: bundles * 0.9,
+  size: rebar20,
+});
+const sessionShortbar = {
+  sizeId: 50,
+  classificationId: null,
+  bundleCount: null,
+  weightTons: 5,
+  size: shortbar,
+};
+
+describe("evaluateFirstGradeRequestMatch — grade-less material", () => {
+  it("ignores shortbar sessions instead of flagging them as an extra size", () => {
+    const result = evaluateFirstGradeRequestMatch(
+      [line20First, lineShortbar],
+      [session20(16), sessionShortbar],
+    );
+    expect(result.blocking).toEqual([]);
+    expect(result.remainders).toEqual([]);
+  });
+
+  it("still flags an extra rebar size", () => {
+    const result = evaluateFirstGradeRequestMatch(
+      [line20First],
+      [session20(16), { ...session20(4), sizeId: 12, size: rebar12 }],
+    );
+    expect(result.blocking.map((i) => i.messageKey)).toContain("firstGradeLoadedNotInRequest");
+  });
+});
+
+describe("evaluateFirstGradeCloseGate", () => {
+  it("passes when the first-grade lines are complete across FIRST rounds", () => {
+    const result = evaluateFirstGradeCloseGate(
+      [line20First, lineShortbar],
+      [session20(10), session20(6), sessionShortbar],
+    );
+    expect(result).toEqual({ blocking: [], remainders: [] });
+  });
+
+  it("reports the remaining quantity of an explicit first-grade line", () => {
+    const result = evaluateFirstGradeCloseGate([line20First], [session20(10)]);
+    expect(result.blocking).toEqual([]);
+    expect(result.remainders[0].params).toMatchObject({
+      sizeLabel: "20مم",
+      remaining: "6 ربطة",
+    });
+  });
+
+  it("does not require an ungraded rebar line to be loaded in FIRST rounds", () => {
+    const result = evaluateFirstGradeCloseGate([{ ...line20First, grade: null }], []);
+    expect(result).toEqual({ blocking: [], remainders: [] });
+  });
+});
+
+describe("truckDeclaresGrade", () => {
+  it("is true with an operation-level grade or any graded line", () => {
+    expect(truckDeclaresGrade([], "FIRST")).toBe(true);
+    expect(truckDeclaresGrade([line20First], null)).toBe(true);
+    expect(truckDeclaresGrade([{ ...line20First, grade: null }, lineShortbar], null)).toBe(false);
+  });
+});
+
+describe("analyzeRoundGrade", () => {
+  it("suggests FIRST for a round of sizes requested only as first grade", () => {
+    expect(analyzeRoundGrade([line20First, lineShortbar], [session20(16)]).suggestedGrade).toBe(
+      "FIRST",
+    );
+  });
+
+  it("suggests no grade for a shortbar-only round", () => {
+    expect(analyzeRoundGrade([line20First, lineShortbar], [sessionShortbar]).suggestedGrade).toBe(
+      null,
+    );
+  });
+
+  it("has no suggestion when the size is requested in both grades", () => {
+    const items = [line20First, { ...line20First, grade: "SECOND" as const, bundleCount: 4 }];
+    const analysis = analyzeRoundGrade(items, [session20(4)]);
+    expect(analysis.suggestedGrade).toBeUndefined();
+    expect(analysis.allowedGrades.sort()).toEqual(["FIRST", "SECOND"]);
+  });
+
+  it("narrows an ambiguous size by the session's classification grade", () => {
+    const items = [line20First, { ...line20First, grade: "SECOND" as const }];
+    const classified = { ...session20(4), classification: { grade: "FIRST" as const } };
+    expect(analyzeRoundGrade(items, [classified]).suggestedGrade).toBe("FIRST");
+  });
+
+  it("has no suggestion when nothing was weighed", () => {
+    expect(analyzeRoundGrade([line20First], []).suggestedGrade).toBeUndefined();
+  });
+});
+
+describe("validateRoundGradeChoice", () => {
+  const graded = { requireGradeForRebar: true };
+
+  it("refuses 'no grade' for a first-grade rebar round on a graded truck", () => {
+    expect(
+      validateRoundGradeChoice([line20First], [session20(16)], null, graded)?.messageKey,
+    ).toBe("roundGradeRequiredForRebar");
+  });
+
+  it("keeps the grade optional on a fully ungraded truck", () => {
+    const items = [{ ...line20First, grade: null }];
+    expect(
+      validateRoundGradeChoice(items, [session20(16)], null, { requireGradeForRebar: false }),
+    ).toBeNull();
+  });
+
+  it("refuses SECOND for a size requested only as first grade", () => {
+    const issue = validateRoundGradeChoice([line20First], [session20(16)], "SECOND", graded);
+    expect(issue).toEqual({
+      messageKey: "roundGradeConflictsWithRequest",
+      params: { sizeLabel: "20مم", grade: "FIRST" },
+    });
+  });
+
+  it("accepts FIRST for first-grade rebar", () => {
+    expect(validateRoundGradeChoice([line20First], [session20(16)], "FIRST", graded)).toBeNull();
+  });
+
+  it("refuses a grade on a shortbar-only round and accepts 'no grade'", () => {
+    const items = [line20First, lineShortbar];
+    expect(
+      validateRoundGradeChoice(items, [sessionShortbar], "FIRST", graded)?.messageKey,
+    ).toBe("roundGradeNotAllowedForNonRebar");
+    expect(validateRoundGradeChoice(items, [sessionShortbar], null, graded)).toBeNull();
+  });
+
+  it("refuses a round that mixes sizes requested in different grades", () => {
+    const items = [
+      line20First,
+      { ...line20First, sizeId: 12, grade: "SECOND" as const, size: rebar12 },
+    ];
+    const sessions = [session20(16), { ...session20(4), sizeId: 12, size: rebar12 }];
+    expect(validateRoundGradeChoice(items, sessions, "FIRST", graded)?.messageKey).toBe(
+      "roundMixesGrades",
+    );
+  });
+
+  it("accepts either grade for a size that is not on the request", () => {
+    const sessions = [{ ...session20(4), sizeId: 12, size: rebar12 }];
+    expect(validateRoundGradeChoice([line20First], sessions, "SECOND", graded)).toBeNull();
   });
 });

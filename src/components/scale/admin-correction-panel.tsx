@@ -123,7 +123,9 @@ export function AdminCorrectionPanel({
   const [tons, setTons] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  if (truck.status !== "Completed") return null;
+  // Between the final weighing and close only the round grade is correctable.
+  const gradeOnly = truck.status === "SecondWeigh";
+  if (truck.status !== "Completed" && !gradeOnly) return null;
 
   const close = () => {
     setDialog(null);
@@ -290,44 +292,48 @@ export function AdminCorrectionPanel({
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-base text-amber-900">
           <ShieldAlert className="h-4 w-4" />
-          {t("adminTitle")}
+          {gradeOnly ? t("adminPreCloseTitle") : t("adminTitle")}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="flex items-start gap-2 rounded-md bg-amber-100/70 p-2 text-xs text-amber-900">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          {t("adminWarning")}
+          {gradeOnly ? t("adminPreCloseWarning") : t("adminWarning")}
         </p>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background/60 p-2">
-          <div className="text-sm">
-            <span className="text-muted-foreground">{t("tareWeightLabel")}</span>
-            <span className="font-mono font-medium">
-              {truck.tareWeightKg
-                ? t("kgValue", { value: formatKg(truck.tareWeightKg) })
-                : t("emDash")}
-            </span>
-          </div>
-          <Button size="sm" variant="outline" onClick={openTare}>
-            <Pencil className="h-3.5 w-3.5 me-1" />
-            {t("correctTare")}
-          </Button>
-        </div>
+        {!gradeOnly && (
+          <>
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background/60 p-2">
+              <div className="text-sm">
+                <span className="text-muted-foreground">{t("tareWeightLabel")}</span>
+                <span className="font-mono font-medium">
+                  {truck.tareWeightKg
+                    ? t("kgValue", { value: formatKg(truck.tareWeightKg) })
+                    : t("emDash")}
+                </span>
+              </div>
+              <Button size="sm" variant="outline" onClick={openTare}>
+                <Pencil className="h-3.5 w-3.5 me-1" />
+                {t("correctTare")}
+              </Button>
+            </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background/60 p-2">
-          <div className="text-sm">
-            <span className="text-muted-foreground">
-              {t("externalCardNumber")}:{" "}
-            </span>
-            <span className="font-mono font-medium">
-              {truck.externalCardNumber ?? t("emDash")}
-            </span>
-          </div>
-          <Button size="sm" variant="outline" onClick={openCard}>
-            <Pencil className="h-3.5 w-3.5 me-1" />
-            {t("correctCardNumber")}
-          </Button>
-        </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background/60 p-2">
+              <div className="text-sm">
+                <span className="text-muted-foreground">
+                  {t("externalCardNumber")}:{" "}
+                </span>
+                <span className="font-mono font-medium">
+                  {truck.externalCardNumber ?? t("emDash")}
+                </span>
+              </div>
+              <Button size="sm" variant="outline" onClick={openCard}>
+                <Pencil className="h-3.5 w-3.5 me-1" />
+                {t("correctCardNumber")}
+              </Button>
+            </div>
+          </>
+        )}
 
         {sortedRounds.map((round) => {
           const roundSessions = truck.sessions.filter(
@@ -374,13 +380,13 @@ export function AdminCorrectionPanel({
                   <Pencil className="h-3.5 w-3.5 me-1" />
                   {t("correctGrade")}
                 </Button>
-                {round.endWeightKg != null && (
+                {!gradeOnly && round.endWeightKg != null && (
                   <Button size="sm" variant="outline" onClick={() => openExternal(round)}>
                     <Pencil className="h-3.5 w-3.5 me-1" />
                     {t("correctExternalWeight")}
                   </Button>
                 )}
-                {!truck.skipInternalWeighing && (
+                {!gradeOnly && !truck.skipInternalWeighing && (
                   <Button size="sm" variant="outline" onClick={() => openAddSession(round)}>
                     <Plus className="h-3.5 w-3.5 me-1" />
                     {t("addInternalSession")}
@@ -397,7 +403,9 @@ export function AdminCorrectionPanel({
                         <TableHead>{t("size")}</TableHead>
                         <TableHead>{t("bundles")}</TableHead>
                         <TableHead>{t("weightTons")}</TableHead>
-                        <TableHead className="w-[90px]">{t("actions")}</TableHead>
+                        {!gradeOnly && (
+                          <TableHead className="w-[90px]">{t("actions")}</TableHead>
+                        )}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -416,26 +424,28 @@ export function AdminCorrectionPanel({
                           <TableCell className="font-mono tabular-nums text-start">
                             {formatDecimal(s.weightTons, 3)}
                           </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-0.5">
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-7 w-7"
-                                onClick={() => openEditSession(s)}
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-7 w-7 text-destructive"
-                                onClick={() => openDeleteSession(s)}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          </TableCell>
+                          {!gradeOnly && (
+                            <TableCell>
+                              <div className="flex items-center gap-0.5">
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-7 w-7"
+                                  onClick={() => openEditSession(s)}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-7 w-7 text-destructive"
+                                  onClick={() => openDeleteSession(s)}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          )}
                         </TableRow>
                       ))}
                     </TableBody>

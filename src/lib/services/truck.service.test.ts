@@ -1082,6 +1082,89 @@ describe("confirmLoadingComplete", () => {
     await confirmLoadingComplete(1, 99, "SECOND");
     expect(mockPrisma.truckOperation.update).toHaveBeenCalled();
   });
+
+  describe("round grade vs loaded material", () => {
+    const size20 = { displayName: "20مم", isBundleType: true, code: "20mm" };
+    const sizeShort = { displayName: "قصائر 4-12 م", isBundleType: false, code: "shortbar_4_12m" };
+    const line20 = {
+      sizeId: 1,
+      grade: "FIRST",
+      classificationId: null,
+      bundleCount: 16,
+      requestedTons: null,
+      size: size20,
+      classification: null,
+    };
+    const lineShort = {
+      sizeId: 2,
+      grade: null,
+      classificationId: null,
+      bundleCount: null,
+      requestedTons: 5,
+      size: sizeShort,
+      classification: null,
+    };
+    const rebarSession = {
+      weightTons: 14,
+      sizeId: 1,
+      classificationId: null,
+      bundleCount: 16,
+      size: size20,
+      classification: null,
+    };
+    const shortSession = {
+      weightTons: 5,
+      sizeId: 2,
+      classificationId: null,
+      bundleCount: null,
+      size: sizeShort,
+      classification: null,
+    };
+
+    beforeEach(() => {
+      mockRounds({ open: { id: 12, roundNumber: 2, grade: null } });
+      mockPrisma.truckRequestItem.findMany.mockResolvedValue([line20, lineShort]);
+    });
+
+    it("refuses a first-grade rebar round left on 'no grade'", async () => {
+      mockPrisma.weighSession.findMany.mockResolvedValue([rebarSession]);
+      await expect(confirmLoadingComplete(1, 99, null)).rejects.toThrow(
+        "roundGradeRequiredForRebar",
+      );
+      expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
+    });
+
+    it("refuses SECOND for rebar requested only as first grade", async () => {
+      mockPrisma.weighSession.findMany.mockResolvedValue([rebarSession]);
+      await expect(confirmLoadingComplete(1, 99, "SECOND")).rejects.toThrow(
+        "roundGradeConflictsWithRequest",
+      );
+    });
+
+    it("confirms the round as FIRST and stamps it", async () => {
+      mockPrisma.weighSession.findMany.mockResolvedValue([rebarSession]);
+      await confirmLoadingComplete(1, 99, "FIRST");
+      expect(mockPrisma.bridgeRound.update).toHaveBeenCalledWith({
+        where: { id: 12 },
+        data: expect.objectContaining({ grade: "FIRST" }),
+      });
+    });
+
+    it("confirms a shortbar-only round on a first-grade truck without grade", async () => {
+      mockPrisma.weighSession.findMany
+        .mockResolvedValueOnce([shortSession])
+        .mockResolvedValueOnce([rebarSession, shortSession]);
+      await confirmLoadingComplete(1, 99, null);
+      expect(mockPrisma.truckOperation.update).toHaveBeenCalled();
+    });
+
+    it("refuses a grade on a shortbar-only round", async () => {
+      mockPrisma.weighSession.findMany.mockResolvedValue([shortSession]);
+      await expect(confirmLoadingComplete(1, 99, "FIRST")).rejects.toThrow(
+        "roundGradeNotAllowedForNonRebar",
+      );
+    });
+  });
 });
 
 // ─── 3b. Loader confirmation — exempt trucks (scrap / billet wire) ──
@@ -1839,6 +1922,70 @@ describe("closeOperation", () => {
       "firstGradeRequestIncomplete",
     );
     expect(mockPrisma.truckOperation.update).not.toHaveBeenCalled();
+  });
+
+  it("closes a first-grade + shortbar truck when the shortbar sits in a FIRST round", async () => {
+    const size20 = { displayName: "20مم", isBundleType: true, code: "20mm" };
+    const sizeShort = { displayName: "قصائر 4-12 م", isBundleType: false, code: "shortbar_4_12m" };
+    mockPrisma.truckRequestItem.findMany.mockResolvedValue([
+      {
+        sizeId: 1,
+        grade: "FIRST",
+        classificationId: null,
+        bundleCount: 16,
+        requestedTons: null,
+        size: size20,
+        classification: null,
+      },
+      {
+        sizeId: 2,
+        grade: null,
+        classificationId: null,
+        bundleCount: null,
+        requestedTons: 5,
+        size: sizeShort,
+        classification: null,
+      },
+    ]);
+    mockPrisma.weighSession.findMany.mockResolvedValue([
+      {
+        weightTons: 14,
+        sizeId: 1,
+        classificationId: null,
+        bundleCount: 16,
+        size: size20,
+        classification: null,
+      },
+      {
+        weightTons: 5,
+        sizeId: 2,
+        classificationId: null,
+        bundleCount: null,
+        size: sizeShort,
+        classification: null,
+      },
+    ]);
+
+    const result = await closeOperation(1, 7, "WB-1001");
+    expect(result.status).toBe("Completed");
+  });
+
+  it("does not block close on an ungraded rebar line loaded outside FIRST rounds", async () => {
+    mockPrisma.truckRequestItem.findMany.mockResolvedValue([
+      {
+        sizeId: 1,
+        grade: null,
+        classificationId: null,
+        bundleCount: 16,
+        requestedTons: null,
+        size: { displayName: "20مم", isBundleType: true, code: "20mm" },
+        classification: null,
+      },
+    ]);
+    mockPrisma.weighSession.findMany.mockResolvedValue([]);
+
+    const result = await closeOperation(1, 7, "WB-1001");
+    expect(result.status).toBe("Completed");
   });
 });
 
