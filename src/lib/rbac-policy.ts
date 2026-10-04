@@ -70,6 +70,7 @@ const LANDING_PATH_PERMISSIONS: Readonly<Record<string, readonly string[]>> = {
   "/billet-receipts": ["billet.receipt.view"],
   "/billet-contracts": ["billet.contract.view"],
   "/reports": ["reports.view"],
+  "/documents": ["document.view", "document.manage"],
 };
 
 /**
@@ -91,6 +92,7 @@ const LANDING_FALLBACKS: readonly {
   { path: "/billet-receipts" },
   { path: "/billet-contracts" },
   { path: "/reports" },
+  { path: "/documents" },
 ];
 
 function normalizePath(pathname: string): string {
