@@ -116,6 +116,26 @@ describe("resolveLandingPage", () => {
     ).toBe("/trucks");
   });
 
+  it("sends a logistics user who only has document access to /documents", () => {
+    expect(
+      resolveLandingPage({
+        roleCode: "logistics",
+        permissions: ["document.view"],
+        stockModuleEnabled: true,
+      }),
+    ).toBe("/documents");
+  });
+
+  it("accepts document.manage alone as a documents landing", () => {
+    expect(
+      resolveLandingPage({
+        roleCode: "logistics",
+        permissions: ["document.manage"],
+        stockModuleEnabled: false,
+      }),
+    ).toBe("/documents");
+  });
+
   it("returns null when the user has no openable surface", () => {
     expect(
       resolveLandingPage({
