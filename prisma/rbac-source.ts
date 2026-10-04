@@ -216,6 +216,11 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
     displayNameEn: "View sensitive operational metrics",
     module: "analytics",
   },
+  // Shared document library. Not granted to any role by default — admin
+  // inherits both at runtime. Folder membership (plus a document.view grant
+  // written when a member is added) is what opens a specific folder.
+  { code: "document.view", displayName: "عرض الملفات", displayNameEn: "View documents", module: "documents" },
+  { code: "document.manage", displayName: "إدارة مجلدات الملفات", displayNameEn: "Manage document folders", module: "documents" },
 ];
 
 /**

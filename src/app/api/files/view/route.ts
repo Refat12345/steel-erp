@@ -12,6 +12,7 @@ import {
 import { logger } from "@/lib/logger";
 import { getRequestLocale } from "@/lib/i18n/request-locale";
 import { translateError } from "@/lib/i18n/server-messages";
+import { isSharedLibraryRelativePath } from "@/lib/documents/stored-path";
 
 const MIME_MAP: Record<string, string> = {
   ".pdf": "application/pdf",
@@ -49,6 +50,7 @@ function resolveSafeUploadPath(relFromDb: string): { fullPath: string } | null {
     .replace(/^\/+/, "");
   const segments = rel.split("/").filter(Boolean);
   if (segments.length === 0) return null;
+  if (segments[0]?.toLowerCase() === "documents") return null;
 
   for (const seg of segments) {
     if (
@@ -98,6 +100,8 @@ export async function GET(req: NextRequest) {
     } catch {
       return badRequest("invalidPath");
     }
+
+    if (isSharedLibraryRelativePath(relativeUtf8)) return badRequest("invalidPath");
 
     const resolved = resolveSafeUploadPath(relativeUtf8);
     if (!resolved) return badRequest("invalidPath");
