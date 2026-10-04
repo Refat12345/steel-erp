@@ -190,6 +190,10 @@ model User {
   billetReceiptsClosed      BilletReceipt[]              @relation("BilletReceiptCloser")
   billetAttachmentsUploaded BilletReceiptAttachment[]    @relation("BilletAttachmentUploader")
   billetContractAttachments SupplierContractAttachment[] @relation("BilletContractAttachmentUploader")
+  sharedFoldersCreated      SharedFolder[]               @relation("SharedFolderCreator")
+  folderMemberships         FolderMember[]               @relation("FolderMemberUser")
+  folderMembershipsGranted  FolderMember[]               @relation("FolderMemberGranter")
+  sharedDocumentsUploaded   SharedDocument[]             @relation("SharedDocumentUploader")
 
   @@map("users")
 }
@@ -1093,4 +1097,65 @@ model PlcTelemetry {
 
   @@index([createdAt])
   @@map("plc_telemetry")
+}
+
+// ─── Shared document library ──────────────────────────────────────
+// Folders may contain folders. Access is membership on that folder only:
+// a parent member does not see a child unless they are a member of it.
+// `document.manage` sees every folder.
+
+model SharedFolder {
+  id          Int      @id @default(autoincrement())
+  parentId    Int?     @map("parent_id")
+  name        String
+  nameEn      String?  @map("name_en")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdById Int      @map("created_by_id")
+
+  parent    SharedFolder?    @relation("SharedFolderTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children  SharedFolder[]   @relation("SharedFolderTree")
+  creator   User             @relation("SharedFolderCreator", fields: [createdById], references: [id])
+  members   FolderMember[]
+  documents SharedDocument[]
+
+  @@index([createdAt])
+  @@index([parentId])
+  @@map("shared_folders")
+}
+
+model FolderMember {
+  id          Int      @id @default(autoincrement())
+  folderId    Int      @map("folder_id")
+  userId      Int      @map("user_id")
+  canUpload   Boolean  @default(false) @map("can_upload")
+  grantedAt   DateTime @default(now()) @map("granted_at")
+  grantedById Int      @map("granted_by_id")
+
+  folder  SharedFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  user    User         @relation("FolderMemberUser", fields: [userId], references: [id])
+  granter User         @relation("FolderMemberGranter", fields: [grantedById], references: [id])
+
+  @@unique([folderId, userId])
+  @@index([userId])
+  @@map("folder_members")
+}
+
+model SharedDocument {
+  id           Int      @id @default(autoincrement())
+  folderId     Int      @map("folder_id")
+  title        String?
+  notes        String?
+  filePath     String   @map("file_path")
+  fileName     String   @map("file_name")
+  fileSize     Int      @map("file_size")
+  mimeType     String   @map("mime_type")
+  uploadedAt   DateTime @default(now()) @map("uploaded_at")
+  uploadedById Int      @map("uploaded_by_id")
+
+  folder   SharedFolder @relation(fields: [folderId], references: [id])
+  uploader User         @relation("SharedDocumentUploader", fields: [uploadedById], references: [id])
+
+  @@index([folderId, uploadedAt])
+  @@map("shared_documents")
 }

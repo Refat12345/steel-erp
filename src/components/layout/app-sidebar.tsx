@@ -25,6 +25,7 @@ import {
   ArrowLeftRight,
   ClipboardCheck,
   Settings,
+  FolderOpen,
 } from "lucide-react";
 import {
   Sidebar,
@@ -66,6 +67,7 @@ type NavTitleKey =
   | "reports"
   | "admin"
   | "auditLog"
+  | "documents"
   | "settings";
 
 type SectionKey =
@@ -220,6 +222,12 @@ const navSections: NavSection[] = [
   {
     sectionKey: "sectionSystem",
     items: [
+      {
+        titleKey: "documents",
+        url: "/documents",
+        icon: FolderOpen,
+        permission: ["document.view", "document.manage"],
+      },
       {
         titleKey: "admin",
         url: "/admin",
