@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { PDFDocumentLoadingTask } from "pdfjs-dist/legacy/build/pdf.mjs";
 
-const MAX_PAGE_WIDTH = 1000;
+/** CSS width cap. The bitmap is drawn at least twice this, so text stays sharp. */
+const MAX_PAGE_WIDTH = 1600;
 
 /**
  * Renders a PDF into canvases instead of relying on the browser's built-in
@@ -46,8 +47,9 @@ export function PdfCanvasViewer({
 
         loadingTask = pdfjs.getDocument({ data, isEvalSupported: false });
         const pdf = await loadingTask.promise;
-        const targetWidth = Math.min(container.clientWidth - 16, MAX_PAGE_WIDTH);
-        const ratio = window.devicePixelRatio || 1;
+        const targetWidth = Math.min(Math.max(container.clientWidth - 24, 320), MAX_PAGE_WIDTH);
+        // At least 2 device pixels per CSS pixel. A 1:1 canvas turns vector text into soft pixels.
+        const ratio = Math.max(window.devicePixelRatio || 1, 2);
 
         for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
           if (cancelled) return;
@@ -58,9 +60,10 @@ export function PdfCanvasViewer({
           const canvas = document.createElement("canvas");
           canvas.width = Math.floor(viewport.width * ratio);
           canvas.height = Math.floor(viewport.height * ratio);
-          canvas.style.width = `${Math.floor(viewport.width)}px`;
-          canvas.style.height = `${Math.floor(viewport.height)}px`;
-          canvas.className = "mx-auto mb-3 block max-w-full bg-white shadow-sm";
+          canvas.style.width = "100%";
+          canvas.style.maxWidth = `${Math.floor(viewport.width)}px`;
+          canvas.style.height = "auto";
+          canvas.className = "mx-auto mb-3 block bg-white shadow-sm";
           container.appendChild(canvas);
 
           const context = canvas.getContext("2d");
