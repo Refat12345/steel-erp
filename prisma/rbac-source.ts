@@ -216,10 +216,13 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
     displayNameEn: "View sensitive operational metrics",
     module: "analytics",
   },
-  // Shared document library. Not granted to any role by default — admin
-  // inherits both at runtime. Folder membership (plus a document.view grant
-  // written when a member is added) is what opens a specific folder.
+  // Shared document library. `document.view` and `document.manage` are not
+  // granted to any role — admin inherits both at runtime. `document.view_all`
+  // is the factory owner's read-only pass: every folder, no upload unless
+  // they are also a member with canUpload. Folder membership (plus a
+  // document.view grant written when a member is added) opens one folder.
   { code: "document.view", displayName: "عرض الملفات", displayNameEn: "View documents", module: "documents" },
+  { code: "document.view_all", displayName: "عرض كل الملفات", displayNameEn: "View all documents", module: "documents" },
   { code: "document.manage", displayName: "إدارة مجلدات الملفات", displayNameEn: "Manage document folders", module: "documents" },
 ];
 
@@ -333,6 +336,8 @@ export const RBAC_ROLE_PERMISSIONS: Readonly<Record<string, ReadonlyArray<string
     "billet.contract.view",
     "billet.receipt.view",
     "billet.receipt.view_history",
+    // Every folder and file, read-only. Upload still requires folder membership.
+    "document.view_all",
     // Stock (dark-launched): owner will see the yard map/balances (read-only)
     // at release. `stock.view` is NOT a default while STOCK_MODULE_ENABLED is
     // off, and the movements ledger (`stock.movements.view`) is never a

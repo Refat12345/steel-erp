@@ -70,7 +70,7 @@ const LANDING_PATH_PERMISSIONS: Readonly<Record<string, readonly string[]>> = {
   "/billet-receipts": ["billet.receipt.view"],
   "/billet-contracts": ["billet.contract.view"],
   "/reports": ["reports.view"],
-  "/documents": ["document.view", "document.manage"],
+  "/documents": ["document.view", "document.view_all", "document.manage"],
 };
 
 /**

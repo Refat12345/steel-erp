@@ -1102,7 +1102,8 @@ model PlcTelemetry {
 // ─── Shared document library ──────────────────────────────────────
 // Folders may contain folders. Access is membership on that folder only:
 // a parent member does not see a child unless they are a member of it.
-// `document.manage` sees every folder.
+// `document.manage` sees and changes every folder. `document.view_all`
+// sees every folder but uploads only with membership.
 
 model SharedFolder {
   id          Int      @id @default(autoincrement())

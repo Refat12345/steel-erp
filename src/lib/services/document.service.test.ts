@@ -93,6 +93,32 @@ describe("document.service access", () => {
     expect(result.folders.map((folder) => folder.id)).toEqual([2]);
   });
 
+  it("lists every root folder for a reader of all documents, without upload", async () => {
+    mockPrisma.sharedFolder.findMany.mockResolvedValueOnce([
+      { ...row(1, null, 2), members: [] },
+    ]);
+
+    const result = await listFolders({ userId: 4, permissions: ["document.view_all"] });
+
+    expect(result.canManage).toBe(false);
+    expect(result.folders).toEqual([
+      expect.objectContaining({ id: 1, canUpload: false, folderCount: 2 }),
+    ]);
+    expect(mockPrisma.sharedFolder.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { parentId: null } }),
+    );
+  });
+
+  it("lets a reader of all documents upload only where they were added", async () => {
+    mockPrisma.sharedFolder.findMany.mockResolvedValueOnce([
+      { ...row(1, null), members: [{ canUpload: true }] },
+    ]);
+
+    const result = await listFolders({ userId: 4, permissions: ["document.view_all"] });
+
+    expect(result.folders[0]?.canUpload).toBe(true);
+  });
+
   it("lists only child folders the user belongs to", async () => {
     mockPrisma.folderMember.findUnique.mockResolvedValue({
       canUpload: false,

@@ -71,6 +71,15 @@ function canManage(actor: DocumentActor): boolean {
   return actor.permissions.includes("document.manage");
 }
 
+/** Read every folder. Upload still depends on membership. */
+function canViewAll(actor: DocumentActor): boolean {
+  return actor.permissions.includes("document.view_all");
+}
+
+function canSeeEveryFolder(actor: DocumentActor): boolean {
+  return canManage(actor) || canViewAll(actor);
+}
+
 function normalizeRequiredName(name: string): string {
   const trimmed = name.trim().replace(/\s+/g, " ");
   if (!trimmed) throw new ServiceError("documentFolderNameRequired");
@@ -119,6 +128,7 @@ async function resolveFolderAccess(actor: DocumentActor, folderId: number): Prom
     select: { id: true },
   });
   if (!folder) throw new ServiceError("documentFolderNotFound", "NOT_FOUND");
+  if (canViewAll(actor)) return { manage: false, canUpload: false };
   throw new ServiceError("forbidden", "FORBIDDEN");
 }
 
@@ -155,11 +165,11 @@ function toListItem(folder: FolderRow, manage: boolean, folderCount: number): Fo
 async function visibleChildCounts(
   actor: DocumentActor,
   folders: FolderRow[],
-  manage: boolean,
+  seeAll: boolean,
 ): Promise<Map<number, number>> {
   const counts = new Map<number, number>();
   if (folders.length === 0) return counts;
-  if (manage) {
+  if (seeAll) {
     for (const folder of folders) counts.set(folder.id, folder._count.children);
     return counts;
   }
@@ -181,7 +191,7 @@ async function visibleChildCounts(
 /**
  * Root shows a folder the user belongs to when its parent is not also
  * visible to them. Otherwise they reach it by opening the parent.
- * Managers only see true root folders here; they walk down from there.
+ * Managers and view-all readers only see true root folders here; they walk down from there.
  */
 function rootEntriesForMember(folders: FolderRow[]): FolderRow[] {
   const visibleIds = new Set(folders.map((folder) => folder.id));
@@ -198,13 +208,14 @@ export async function listFolders(
   folders: FolderListItem[];
 }> {
   const manage = canManage(actor);
+  const seeAll = canSeeEveryFolder(actor);
 
   if (parentId != null) {
     await resolveFolderAccess(actor, parentId);
   }
 
   const folders = await prisma.sharedFolder.findMany({
-    where: manage
+    where: seeAll
       ? { parentId }
       : parentId == null
         ? { members: { some: { userId: actor.userId } } }
@@ -216,8 +227,8 @@ export async function listFolders(
     },
   });
 
-  const visible = !manage && parentId == null ? rootEntriesForMember(folders) : folders;
-  const childCounts = await visibleChildCounts(actor, visible, manage);
+  const visible = !seeAll && parentId == null ? rootEntriesForMember(folders) : folders;
+  const childCounts = await visibleChildCounts(actor, visible, seeAll);
 
   return {
     canManage: manage,
@@ -271,13 +282,14 @@ export async function getFolder(actor: DocumentActor, folderId: number): Promise
   });
   if (!folder) throw new ServiceError("documentFolderNotFound", "NOT_FOUND");
 
-  const folderCount = access.manage
+  const seeAll = access.manage || canViewAll(actor);
+  const folderCount = seeAll
     ? folder._count.children
     : await prisma.sharedFolder.count({
         where: { parentId: folderId, members: { some: { userId: actor.userId } } },
       });
   const parent =
-    folder.parent && (access.manage || folder.parent.members.length > 0)
+    folder.parent && (seeAll || folder.parent.members.length > 0)
       ? { id: folder.parent.id, name: folder.parent.name, nameEn: folder.parent.nameEn }
       : null;
 

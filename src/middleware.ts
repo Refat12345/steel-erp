@@ -117,8 +117,8 @@ const ROUTE_PERMISSIONS: RouteRule[] = [
   // report permission so shop-floor roles never see it).
   { pattern: /^\/loaded-trucks$/, permissions: ["report.daily_trucks"] },
 
-  { pattern: /^\/documents(\/.*)?$/, permissions: ["document.view", "document.manage"] },
-  { pattern: /^\/api\/documents(\/.*)?$/, permissions: ["document.view", "document.manage"] },
+  { pattern: /^\/documents(\/.*)?$/, permissions: ["document.view", "document.view_all", "document.manage"] },
+  { pattern: /^\/api\/documents(\/.*)?$/, permissions: ["document.view", "document.view_all", "document.manage"] },
 
   { pattern: /^\/scale\/\d+\/print$/, permissions: ["truck.view_approved", "scale.close"] },
   { pattern: /^\/scale\/\d+$/, permissions: ["truck.view_approved", "scale.start"] },
