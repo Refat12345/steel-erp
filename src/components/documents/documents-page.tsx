@@ -77,7 +77,6 @@ export function DocumentsPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-xl font-bold tracking-tight">{t("title")}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{t("subtitle")}</p>
         </div>
         {canManage && (
           <Button onClick={() => setCreateOpen(true)}>

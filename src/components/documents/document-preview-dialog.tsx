@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { FileDown } from "lucide-react";
+import { ArrowLeft, ArrowRight, FileDown } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { getTextDirection, type Locale } from "@/i18n/config";
 import { documentDisplaysInline } from "@/lib/documents/file-signature";
@@ -24,6 +24,7 @@ export function DocumentPreviewDialog({
   const t = useTranslations("documents");
   const locale = useLocale() as Locale;
   const dir = getTextDirection(locale);
+  const BackIcon = dir === "rtl" ? ArrowRight : ArrowLeft;
 
   useEffect(() => {
     if (!file) return;
@@ -42,6 +43,9 @@ export function DocumentPreviewDialog({
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background" dir={dir}>
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-3">
+        <Button variant="ghost" size="icon-sm" aria-label={t("back")} onClick={onClose}>
+          <BackIcon className="size-4" />
+        </Button>
         <h2 className="min-w-0 flex-1 truncate text-base font-medium">{file.fileName}</h2>
         <Button
           nativeButton={false}

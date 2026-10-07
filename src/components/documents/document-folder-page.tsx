@@ -35,7 +35,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { FileKindBadge } from "@/components/documents/file-kind-badge";
-import { FolderLinkCard } from "@/components/documents/folder-link-card";
 import { FolderFormDialog } from "@/components/documents/folder-form-dialog";
 import {
   DropdownMenu,
@@ -192,6 +191,15 @@ export function DocumentFolderPage({ folderId }: { folderId: string }) {
     if (child.folderCount <= 0) return filesLabel;
     return `${filesLabel} · ${t("folderCount", { count: formatInteger(child.folderCount) })}`;
   };
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleChildren = normalizedQuery
+    ? children.filter((child) => {
+        const arabic = child.name.toLowerCase();
+        const english = (child.nameEn ?? "").toLowerCase();
+        return arabic.includes(normalizedQuery) || english.includes(normalizedQuery);
+      })
+    : children;
+  const listEmpty = visibleChildren.length === 0 && files.length === 0;
 
   const createChild = async (input: { name: string; nameEn: string }) => {
     const response = await fetch("/api/documents/folders", {
@@ -339,22 +347,6 @@ export function DocumentFolderPage({ folderId }: { folderId: string }) {
         )}
       </div>
 
-      {children.length > 0 && (
-        <section className="space-y-2">
-          <h2 className="text-sm font-medium text-muted-foreground">{t("innerFolders")}</h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {children.map((child) => (
-              <FolderLinkCard
-                key={child.id}
-                href={`/documents/${child.id}`}
-                name={pickLocalizedName(locale, child.name, child.nameEn)}
-                detail={folderDetail(child)}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-
       {folder?.canUpload && (
         <div
           className={`rounded-xl border border-dashed p-4 ${dragging ? "border-foreground/30 bg-muted/50" : "bg-muted/20"}`}
@@ -437,15 +429,14 @@ export function DocumentFolderPage({ folderId }: { folderId: string }) {
       )}
 
       <form
-        className="flex flex-wrap items-center gap-2"
+        className="flex flex-wrap gap-2"
         onSubmit={(event) => {
           event.preventDefault();
           setPage(1);
           setQuery(search.trim());
         }}
       >
-        <h2 className="me-auto text-sm font-medium text-muted-foreground">{t("filesHeading")}</h2>
-        <div className="relative min-w-0 w-full sm:w-64">
+        <div className="relative min-w-0 w-full sm:max-w-xs">
           <Search className="pointer-events-none absolute start-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={search}
@@ -466,7 +457,7 @@ export function DocumentFolderPage({ folderId }: { folderId: string }) {
           <Table className="min-w-[640px]">
             <TableHeader>
               <TableRow>
-                <TableHead>{t("columnFile")}</TableHead>
+                <TableHead>{t("columnName")}</TableHead>
                 <TableHead>{t("columnSize")}</TableHead>
                 <TableHead>{t("columnUploader")}</TableHead>
                 <TableHead>{t("columnDate")}</TableHead>
@@ -474,14 +465,42 @@ export function DocumentFolderPage({ folderId }: { folderId: string }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {files.length === 0 ? (
+              {listEmpty ? (
                 <TableRow>
                   <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-                    {t("noFiles")}
+                    {normalizedQuery ? t("noMatches") : t("noFiles")}
                   </TableCell>
                 </TableRow>
               ) : (
-                files.map((file) => (
+                <>
+                  {visibleChildren.map((child) => (
+                    <TableRow
+                      key={`folder-${child.id}`}
+                      className="cursor-pointer"
+                      onClick={() => router.push(`/documents/${child.id}`)}
+                    >
+                      <TableCell className="max-w-[280px]">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-amber-500/10">
+                            <Folder className="size-4 fill-amber-400 text-amber-500" />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block truncate font-medium">
+                              {pickLocalizedName(locale, child.name, child.nameEn)}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {folderDetail(child)}
+                            </span>
+                          </span>
+                        </span>
+                      </TableCell>
+                      <TableCell />
+                      <TableCell />
+                      <TableCell />
+                      <TableCell />
+                    </TableRow>
+                  ))}
+                  {files.map((file) => (
                   <TableRow
                     key={file.id}
                     className="cursor-pointer"
@@ -537,7 +556,8 @@ export function DocumentFolderPage({ folderId }: { folderId: string }) {
                       )}
                     </TableCell>
                   </TableRow>
-                ))
+                  ))}
+                </>
               )}
             </TableBody>
           </Table>
