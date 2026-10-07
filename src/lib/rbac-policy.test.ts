@@ -136,6 +136,16 @@ describe("resolveLandingPage", () => {
     ).toBe("/documents");
   });
 
+  it("accepts document.view_all alone as a documents landing", () => {
+    expect(
+      resolveLandingPage({
+        roleCode: "manager",
+        permissions: ["document.view_all"],
+        stockModuleEnabled: false,
+      }),
+    ).toBe("/documents");
+  });
+
   it("returns null when the user has no openable surface", () => {
     expect(
       resolveLandingPage({

@@ -6,7 +6,6 @@ import {
   forbidden,
   badRequest,
   ok,
-  hasPermission,
   handleServiceError,
 } from "@/lib/api-utils";
 import { getRequestLocale } from "@/lib/i18n/request-locale";
@@ -15,6 +14,7 @@ import { logger } from "@/lib/logger";
 import { buildContentDisposition } from "@/lib/documents/content-disposition";
 import { documentDisplaysInline } from "@/lib/documents/file-signature";
 import { parsePositiveInt } from "@/lib/validators/document";
+import { hasDocumentReadAccess } from "@/lib/documents/access";
 import { deleteSharedDocument, getSharedDocumentFile } from "@/lib/services/document.service";
 
 export const runtime = "nodejs";
@@ -31,9 +31,7 @@ export async function GET(
   try {
     const session = await getApiSession();
     if (!session) return unauthorized();
-    if (!hasPermission(session, "document.view") && !hasPermission(session, "document.manage")) {
-      return forbidden();
-    }
+    if (!hasDocumentReadAccess(session.permissions)) return forbidden();
 
     const { id } = await params;
     const documentId = parsePositiveInt(id);
@@ -100,9 +98,7 @@ export async function DELETE(
 ) {
   const session = await getApiSession();
   if (!session) return unauthorized();
-  if (!hasPermission(session, "document.view") && !hasPermission(session, "document.manage")) {
-    return forbidden();
-  }
+  if (!hasDocumentReadAccess(session.permissions)) return forbidden();
 
   const { id } = await params;
   const documentId = parsePositiveInt(id);

@@ -5,6 +5,6 @@ export default async function DocumentsLayout({
 }: {
   children: React.ReactNode;
 }) {
-  await requirePagePermission("document.view", "document.manage");
+  await requirePagePermission("document.view", "document.view_all", "document.manage");
   return <>{children}</>;
 }

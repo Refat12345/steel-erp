@@ -9,6 +9,7 @@ import {
   handleServiceError,
 } from "@/lib/api-utils";
 import { folderCreateSchema, parsePositiveInt } from "@/lib/validators/document";
+import { hasDocumentReadAccess } from "@/lib/documents/access";
 import { createFolder, listFolders } from "@/lib/services/document.service";
 
 function actorFrom(session: { userId: number; permissions: string[] }) {
@@ -18,9 +19,7 @@ function actorFrom(session: { userId: number; permissions: string[] }) {
 export async function GET(req: NextRequest) {
   const session = await getApiSession();
   if (!session) return unauthorized();
-  if (!hasPermission(session, "document.view") && !hasPermission(session, "document.manage")) {
-    return forbidden();
-  }
+  if (!hasDocumentReadAccess(session.permissions)) return forbidden();
 
   const parentRaw = req.nextUrl.searchParams.get("parentId");
   let parentId: number | null = null;

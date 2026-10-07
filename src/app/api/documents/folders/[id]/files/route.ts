@@ -8,11 +8,11 @@ import {
   forbidden,
   badRequest,
   ok,
-  hasPermission,
   handleServiceError,
   parsePagination,
 } from "@/lib/api-utils";
 import { documentMetaSchema, parsePositiveInt } from "@/lib/validators/document";
+import { hasDocumentReadAccess } from "@/lib/documents/access";
 import {
   DOCUMENT_UPLOAD_MAX_BYTES,
   detectDocumentFile,
@@ -33,9 +33,7 @@ export async function GET(
 ) {
   const session = await getApiSession();
   if (!session) return unauthorized();
-  if (!hasPermission(session, "document.view") && !hasPermission(session, "document.manage")) {
-    return forbidden();
-  }
+  if (!hasDocumentReadAccess(session.permissions)) return forbidden();
 
   const { id } = await params;
   const folderId = parsePositiveInt(id);
@@ -59,9 +57,7 @@ export async function POST(
 ) {
   const session = await getApiSession();
   if (!session) return unauthorized();
-  if (!hasPermission(session, "document.view") && !hasPermission(session, "document.manage")) {
-    return forbidden();
-  }
+  if (!hasDocumentReadAccess(session.permissions)) return forbidden();
 
   const { id } = await params;
   const folderId = parsePositiveInt(id);

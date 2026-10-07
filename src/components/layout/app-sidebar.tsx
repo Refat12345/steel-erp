@@ -226,7 +226,7 @@ const navSections: NavSection[] = [
         titleKey: "documents",
         url: "/documents",
         icon: FolderOpen,
-        permission: ["document.view", "document.manage"],
+        permission: ["document.view", "document.view_all", "document.manage"],
       },
       {
         titleKey: "admin",
