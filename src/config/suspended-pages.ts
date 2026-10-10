@@ -7,9 +7,13 @@
 export const SUSPEND_SALES_ORDERS_UI = true;
 export const SUSPEND_FINANCE_UI = true;
 
+/** إخفاء رابط الإعدادات من القائمة فقط. الصفحة وواجهة البرمجة تبقى على /admin/settings. */
+export const HIDE_SETTINGS_NAV = true;
+
 /** لاستخدامها في القائمة الجانبية — يخفى الرابط عند التعليق */
 export function isNavUrlSuspended(url: string): boolean {
   if (SUSPEND_SALES_ORDERS_UI && url.startsWith("/sales-orders")) return true;
   if (SUSPEND_FINANCE_UI && url.startsWith("/finance")) return true;
+  if (HIDE_SETTINGS_NAV && url === "/admin/settings") return true;
   return false;
 }
