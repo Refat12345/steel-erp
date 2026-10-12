@@ -2152,12 +2152,10 @@ export async function uploadPhoto(truckId: number, filePath: string, userId: num
         // close cannot race a photo upload.
         const truck = await tx.truckOperation.findUnique({ where: { id: truckId } });
         if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
-        if (truck.status === "Completed" || truck.status === "Cancelled") {
-          throw new ServiceError("cannotUploadPhotoForClosedOrCancelled");
+        if (truck.status !== "FirstWeigh" && truck.status !== "OnScale") {
+          throw new ServiceError("cannotUploadPhotoInCurrentStatus");
         }
 
-        // Attach to the open round when one exists; pre-tare photos stay
-        // unassigned and are adopted by round 1 in enterTare.
         const openRound = await getOpenRound(tx, truckId);
 
         const created = await tx.truckPhoto.create({
@@ -2183,6 +2181,71 @@ export async function uploadPhoto(truckId: number, filePath: string, userId: num
   );
 
   logger.info({ truckId, photoId: photo.id }, "photo uploaded");
+  return photo;
+}
+
+// ─── Delete Photo ─────────────────────────────────────────────────
+
+/**
+ * Deletes a photo of the open round while the truck is still loading. Returns
+ * the deleted row; removing the file from disk is the caller's job.
+ */
+export async function deleteTruckPhoto(truckId: number, photoId: number, userId: number) {
+  const photo = await withRetry(() =>
+    prisma.$transaction(
+      async (tx: TxClient) => {
+        // Same row lock as confirmLoadingComplete so its photo count cannot
+        // race this delete.
+        const locked = await tx.$queryRaw<{ id: number }[]>`
+          SELECT id FROM truck_operations WHERE id = ${truckId} FOR UPDATE
+        `;
+        if (locked.length === 0) {
+          throw new ServiceError("operationNotFound", "NOT_FOUND");
+        }
+
+        const truck = await tx.truckOperation.findUnique({
+          where: { id: truckId },
+          select: { id: true, status: true },
+        });
+        if (!truck) throw new ServiceError("operationNotFound", "NOT_FOUND");
+        if (truck.status !== "FirstWeigh" && truck.status !== "OnScale") {
+          throw new ServiceError("cannotDeletePhotoInCurrentStatus");
+        }
+
+        const existing = await tx.truckPhoto.findUnique({ where: { id: photoId } });
+        if (!existing || existing.truckOperationId !== truckId) {
+          throw new ServiceError("photoNotFound", "NOT_FOUND");
+        }
+
+        const openRound = await getOpenRound(tx, truckId);
+        if (!openRound || existing.bridgeRoundId !== openRound.id) {
+          throw new ServiceError("cannotDeletePhotoOfPreviousRound");
+        }
+
+        const result = await tx.truckPhoto.deleteMany({ where: { id: photoId } });
+        if (result.count === 0) {
+          throw new ServiceError("photoNotFound", "NOT_FOUND");
+        }
+
+        await logAudit(tx, {
+          userId,
+          action: "delete",
+          entityType: "TruckPhoto",
+          entityId: String(photoId),
+          details: {
+            truckId,
+            roundNumber: openRound.roundNumber,
+            filePath: existing.filePath,
+          },
+        });
+
+        return existing;
+      },
+      { isolationLevel: "ReadCommitted" },
+    ),
+  );
+
+  logger.info({ truckId, photoId }, "photo deleted");
   return photo;
 }
 

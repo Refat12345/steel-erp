@@ -291,6 +291,8 @@ export function ScaleOperationView({
     (canEditSession || canDeleteSession) &&
     (truck?.status === "OnScale" || truck?.status === "FirstWeigh");
   const canPhoto = sessionHasPermission(session, "scale.upload_photo");
+  const canManagePhoto =
+    canPhoto && (truck?.status === "OnScale" || truck?.status === "FirstWeigh");
   const canLoadingComplete = sessionHasPermission(session, "scale.loading_complete");
   const canReopen = sessionHasPermission(session, "scale.reopen_before_gross");
   const canClose = sessionHasPermission(session, "scale.close");
@@ -1010,20 +1012,28 @@ export function ScaleOperationView({
           <CardContent>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
               {truck.photos.map((p) => (
-                <a
-                  key={p.id}
-                  href={buildFileViewUrl(p.filePath)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="aspect-square rounded-lg overflow-hidden border bg-muted hover:opacity-80 transition-opacity"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={buildFileViewUrl(p.filePath)}
-                    alt={t("photoAlt", { id: p.id })}
-                    className="w-full h-full object-cover"
-                  />
-                </a>
+                <div key={p.id} className="relative">
+                  <a
+                    href={buildFileViewUrl(p.filePath)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block aspect-square rounded-lg overflow-hidden border bg-muted hover:opacity-80 transition-opacity"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={buildFileViewUrl(p.filePath)}
+                      alt={t("photoAlt", { id: p.id })}
+                      className="w-full h-full object-cover"
+                    />
+                  </a>
+                  {canManagePhoto && openRound && p.bridgeRoundId === openRound.id && (
+                    <DeletePhotoButton
+                      truckId={truck.id}
+                      photo={p}
+                      onDeleted={fetchTruck}
+                    />
+                  )}
+                </div>
               ))}
             </div>
           </CardContent>
@@ -2636,6 +2646,95 @@ function DeleteSessionButton({
                 {s.size.displayName}
               </p>
             )}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={saving}>
+              {t("cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void handleConfirm()}
+              disabled={saving}
+            >
+              {saving ? t("deleting") : t("confirmDelete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ─── Delete Photo Button ──────────────────────────────────────────
+
+function DeletePhotoButton({
+  truckId,
+  photo,
+  onDeleted,
+}: {
+  truckId: number;
+  photo: TruckPhoto;
+  onDeleted: () => void;
+}) {
+  const t = useTranslations("scale");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const handleConfirm = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/trucks/${truckId}/photo/${photo.id}`, {
+        method: "DELETE",
+      });
+      // 404 means it is already gone (double click / retry): just refresh.
+      if (res.status === 404) {
+        setOpen(false);
+        onDeleted();
+        return;
+      }
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error);
+      toast.success(t("photoDeleted"));
+      setOpen(false);
+      onDeleted();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("errorShort"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <Button
+        variant="outline"
+        size="icon"
+        className="absolute top-1 end-1 bg-background/90 text-destructive shadow hover:text-destructive"
+        onClick={() => setOpen(true)}
+        aria-label={t("deletePhotoAria", { id: photo.id })}
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent dir={dir} className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{t("deletePhotoTitle")}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="mx-auto aspect-square w-40 overflow-hidden rounded-lg border bg-muted">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={buildFileViewUrl(photo.filePath)}
+                alt={t("photoAlt", { id: photo.id })}
+                className="h-full w-full object-cover"
+              />
+            </div>
+            <p className="text-center text-sm text-muted-foreground">
+              {t("deletePhotoPrompt")}
+            </p>
           </div>
           <DialogFooter className="gap-2">
             <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={saving}>
