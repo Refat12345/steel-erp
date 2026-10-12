@@ -321,7 +321,9 @@ export function formatAuditDetails(
   const topTruckId = asNumber(value.truckId);
   const topFilePath = typeof value.filePath === "string" ? value.filePath : null;
   if (topFilePath && topTruckId !== null && /uploads[\\/]+trucks/i.test(topFilePath)) {
-    return t("details.photoUploaded", { truckId: formatInteger(topTruckId) });
+    return t(action === "delete" ? "details.photoDeleted" : "details.photoUploaded", {
+      truckId: formatInteger(topTruckId),
+    });
   }
 
   const topSessionNumber = asNumber(value.sessionNumber);

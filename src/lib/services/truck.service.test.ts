@@ -53,7 +53,13 @@ const mockPrisma = vi.hoisted(() => ({
     create: vi.fn(),
     deleteMany: vi.fn(),
   },
-  truckPhoto: { count: vi.fn(), updateMany: vi.fn() },
+  truckPhoto: {
+    count: vi.fn(),
+    updateMany: vi.fn(),
+    create: vi.fn(),
+    findUnique: vi.fn(),
+    deleteMany: vi.fn(),
+  },
   bridgeRound: {
     findFirst: vi.fn(),
     create: vi.fn(),
@@ -106,6 +112,8 @@ import {
   reopenBeforeGross,
   editWeighSession,
   deleteWeighSession,
+  uploadPhoto,
+  deleteTruckPhoto,
 } from "./truck.service";
 import { ServiceError } from "./errors";
 import { getOperationalDayWindow } from "@/lib/operational-day";
@@ -2152,5 +2160,103 @@ describe("deleteWeighSession", () => {
     await expect(deleteWeighSession(1, 10, 1, 7)).rejects.toThrow(
       "weighModifiedByAnotherUser",
     );
+  });
+});
+
+// ─── Truck photos ──────────────────────────────────────────────
+
+describe("uploadPhoto", () => {
+  beforeEach(() => {
+    mockRounds({ open: { id: 11, roundNumber: 1 } });
+    mockPrisma.truckPhoto.create.mockResolvedValue({ id: 50 });
+  });
+
+  it.each(["FirstWeigh", "OnScale"])("attaches the photo to the open round on %s", async (status) => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValue({ id: 1, status });
+
+    await uploadPhoto(1, "uploads/trucks/a.jpg", 7);
+
+    expect(mockPrisma.truckPhoto.create).toHaveBeenCalledWith({
+      data: { truckOperationId: 1, bridgeRoundId: 11, filePath: "uploads/trucks/a.jpg" },
+    });
+  });
+
+  it.each(["Queued", "LoadingComplete", "Completed", "Cancelled"])(
+    "rejects upload on %s",
+    async (status) => {
+      mockPrisma.truckOperation.findUnique.mockResolvedValue({ id: 1, status });
+
+      await expect(uploadPhoto(1, "uploads/trucks/a.jpg", 7)).rejects.toThrow(
+        "cannotUploadPhotoInCurrentStatus",
+      );
+      expect(mockPrisma.truckPhoto.create).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("deleteTruckPhoto", () => {
+  const photoRow = {
+    id: 50,
+    truckOperationId: 1,
+    bridgeRoundId: 11,
+    filePath: "uploads/trucks/a.jpg",
+    capturedAt: new Date(),
+  };
+
+  beforeEach(() => {
+    mockPrisma.truckOperation.findUnique.mockResolvedValue({ id: 1, status: "OnScale" });
+    mockRounds({ open: { id: 11, roundNumber: 2 } });
+    mockPrisma.truckPhoto.findUnique.mockResolvedValue(photoRow);
+    mockPrisma.truckPhoto.deleteMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("deletes a photo of the open round and writes audit", async () => {
+    const result = await deleteTruckPhoto(1, 50, 7);
+
+    expect(result.filePath).toBe("uploads/trucks/a.jpg");
+    expect(mockPrisma.truckPhoto.deleteMany).toHaveBeenCalledWith({ where: { id: 50 } });
+    const audit = mockPrisma.auditLog.create.mock.calls[0][0];
+    expect(audit.data.action).toBe("delete");
+    expect(audit.data.entityType).toBe("TruckPhoto");
+    expect(audit.data.details).toEqual({
+      truckId: 1,
+      roundNumber: 2,
+      filePath: "uploads/trucks/a.jpg",
+    });
+  });
+
+  it.each(["Queued", "LoadingComplete", "Completed", "Cancelled"])(
+    "rejects delete on %s",
+    async (status) => {
+      mockPrisma.truckOperation.findUnique.mockResolvedValue({ id: 1, status });
+
+      await expect(deleteTruckPhoto(1, 50, 7)).rejects.toThrow(
+        "cannotDeletePhotoInCurrentStatus",
+      );
+      expect(mockPrisma.truckPhoto.deleteMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects a photo of a previous round", async () => {
+    mockPrisma.truckPhoto.findUnique.mockResolvedValue({ ...photoRow, bridgeRoundId: 10 });
+
+    await expect(deleteTruckPhoto(1, 50, 7)).rejects.toThrow(
+      "cannotDeletePhotoOfPreviousRound",
+    );
+    expect(mockPrisma.truckPhoto.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a photo belonging to another truck", async () => {
+    mockPrisma.truckPhoto.findUnique.mockResolvedValue({ ...photoRow, truckOperationId: 2 });
+
+    await expect(deleteTruckPhoto(1, 50, 7)).rejects.toThrow("photoNotFound");
+    expect(mockPrisma.truckPhoto.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("reports not found when a concurrent delete already removed it", async () => {
+    mockPrisma.truckPhoto.deleteMany.mockResolvedValue({ count: 0 });
+
+    await expect(deleteTruckPhoto(1, 50, 7)).rejects.toThrow("photoNotFound");
+    expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
   });
 });
