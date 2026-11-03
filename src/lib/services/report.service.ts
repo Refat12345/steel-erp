@@ -2092,3 +2092,168 @@ async function loadContractWeightBalances(
 
   return result;
 }
+
+// ─── Loader trucks (confirmed loading rounds per employee) ───────────
+// Counts loading confirmations stamped on bridge rounds, not the operation's
+// loaderId. A return trip keeps each round's confirmer; the operation column
+// only remembers the latest one. Cancelled visits are excluded. A reopen
+// clears the open round's confirmation, so only the confirmation still stored
+// on the round is counted.
+
+export interface LoaderTrucksReportParams {
+  fromDate: string;
+  toDate: string;
+}
+
+export interface LoaderTruckRoundRow {
+  truckOperationId: number;
+  plateNumber: string;
+  roundNumber: number;
+  loadingConfirmedAt: string;
+}
+
+export interface LoaderTruckEmployeeRow {
+  userId: number;
+  fullName: string;
+  truckCount: number;
+  roundCount: number;
+  rounds: LoaderTruckRoundRow[];
+}
+
+export interface LoaderTrucksReport {
+  /** Effective from date — already raised to the analytics start when clamped. */
+  fromDate: string;
+  toDate: string;
+  windowFrom: string;
+  windowTo: string;
+  windowLabel: string;
+  generatedAt: string;
+  analyticsStartDate: string | null;
+  windowClamped: boolean;
+  totals: {
+    loaderCount: number;
+    /** Distinct visits in the period. A visit confirmed by two people counts once. */
+    truckCount: number;
+    roundCount: number;
+  };
+  loaders: LoaderTruckEmployeeRow[];
+}
+
+export async function getLoaderTrucksReport(
+  params: LoaderTrucksReportParams,
+): Promise<LoaderTrucksReport> {
+  let window;
+  try {
+    window = getReportRangeWindow(params.fromDate, params.toDate);
+  } catch (err) {
+    const code = err instanceof Error ? err.message : "";
+    if (code === "INVALID_RANGE_ORDER") {
+      throw new ServiceError("fromDateAfterToDate", "BAD_REQUEST");
+    }
+    if (code === "RANGE_TOO_LARGE") {
+      throw new ServiceError("dateRangeExceedsOneYear", "BAD_REQUEST");
+    }
+    throw new ServiceError("invalidDate", "BAD_REQUEST");
+  }
+  const clampMeta = await clampReportWindow(window);
+  window = clampMeta.window;
+  const effectiveFromDate = clampMeta.windowClamped
+    ? formatLocalDateInput(window.from)
+    : params.fromDate;
+
+  const rounds = await prisma.bridgeRound.findMany({
+    where: {
+      loaderId: { not: null },
+      loadingConfirmedAt: {
+        not: null,
+        gte: window.from,
+        lt: window.to,
+      },
+      truckOperation: { status: { not: "Cancelled" } },
+    },
+    select: {
+      roundNumber: true,
+      loadingConfirmedAt: true,
+      loaderId: true,
+      loader: { select: { id: true, fullName: true } },
+      truckOperation: { select: { id: true, plateNumber: true } },
+    },
+    orderBy: { loadingConfirmedAt: "asc" },
+  });
+
+  type Bucket = {
+    userId: number;
+    fullName: string;
+    truckIds: Set<number>;
+    rounds: LoaderTruckRoundRow[];
+  };
+  const byLoader = new Map<number, Bucket>();
+  const allTruckIds = new Set<number>();
+
+  for (const round of rounds) {
+    if (
+      round.loaderId == null ||
+      round.loader == null ||
+      round.loadingConfirmedAt == null
+    ) {
+      continue;
+    }
+    const row: LoaderTruckRoundRow = {
+      truckOperationId: round.truckOperation.id,
+      plateNumber: round.truckOperation.plateNumber,
+      roundNumber: round.roundNumber,
+      loadingConfirmedAt: round.loadingConfirmedAt.toISOString(),
+    };
+    let bucket = byLoader.get(round.loader.id);
+    if (!bucket) {
+      bucket = {
+        userId: round.loader.id,
+        fullName: round.loader.fullName,
+        truckIds: new Set<number>(),
+        rounds: [],
+      };
+      byLoader.set(round.loader.id, bucket);
+    }
+    bucket.truckIds.add(round.truckOperation.id);
+    bucket.rounds.push(row);
+    allTruckIds.add(round.truckOperation.id);
+  }
+
+  const loaders: LoaderTruckEmployeeRow[] = [...byLoader.values()]
+    .map((bucket) => {
+      const employeeRounds = [...bucket.rounds].sort((a, b) => {
+        const byTime = a.loadingConfirmedAt.localeCompare(b.loadingConfirmedAt);
+        if (byTime !== 0) return byTime;
+        return a.roundNumber - b.roundNumber;
+      });
+      return {
+        userId: bucket.userId,
+        fullName: bucket.fullName,
+        truckCount: bucket.truckIds.size,
+        roundCount: employeeRounds.length,
+        rounds: employeeRounds,
+      };
+    })
+    .sort((a, b) => {
+      const byTrucks = b.truckCount - a.truckCount;
+      if (byTrucks !== 0) return byTrucks;
+      return a.fullName.localeCompare(b.fullName, "ar");
+    });
+
+  return {
+    fromDate: effectiveFromDate,
+    toDate: params.toDate,
+    windowFrom: window.from.toISOString(),
+    windowTo: window.to.toISOString(),
+    windowLabel: formatOperationalWindowLabel(window),
+    generatedAt: new Date().toISOString(),
+    analyticsStartDate: clampMeta.analyticsStartDate,
+    windowClamped: clampMeta.windowClamped,
+    totals: {
+      loaderCount: loaders.length,
+      truckCount: allTruckIds.size,
+      roundCount: loaders.reduce((sum, row) => sum + row.roundCount, 0),
+    },
+    loaders,
+  };
+}
