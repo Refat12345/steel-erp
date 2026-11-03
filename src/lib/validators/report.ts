@@ -129,3 +129,10 @@ export const dailyBilletReportQuerySchema = z.object({
 });
 
 export type DailyBilletReportQuery = z.infer<typeof dailyBilletReportQuerySchema>;
+
+export const loaderTrucksQuerySchema = z.object({
+  from: dateInputSchema,
+  to: dateInputSchema,
+});
+
+export type LoaderTrucksQuery = z.infer<typeof loaderTrucksQuerySchema>;

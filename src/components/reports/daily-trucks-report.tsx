@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
   ArrowLeft,
@@ -17,7 +18,9 @@ import {
   Printer,
   RefreshCw,
   Truck,
+  Users,
 } from "lucide-react";
+import { getTextDirection, type Locale } from "@/i18n/config";
 import { sessionHasPermission } from "@/lib/client-permissions";
 import { formatDateTime } from "@/lib/date-format";
 import { formatDurationCompactEn } from "@/lib/format-duration";
@@ -826,7 +829,11 @@ function DailyTrucksPrintable({
 
 export function ReportsIndexView() {
   const { data: session } = useSession();
+  const tLoader = useTranslations("reports.loaderTrucks");
+  const locale = useLocale() as Locale;
+  const dir = getTextDirection(locale);
   const canDailyTrucks = sessionHasPermission(session, "report.daily_trucks");
+  const canLoaderTrucks = sessionHasPermission(session, "report.loader_trucks");
   const canReports = sessionHasPermission(session, "reports.view");
 
   return (
@@ -910,6 +917,23 @@ export function ReportsIndexView() {
                   <h2 className="font-semibold">Governorate Withdrawals</h2>
                   <p className="text-sm text-muted-foreground mt-1">
                     Internal weigh tons and bundles withdrawn per governorate over a date range
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+        ) : null}
+        {canLoaderTrucks ? (
+          <Link href="/reports/loader-trucks" dir={dir} className="block min-w-0">
+            <Card className="h-full shadow-sm transition-colors hover:bg-muted/40">
+              <CardContent className="flex items-start gap-4 p-5">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                  <Users className="h-5 w-5 text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="font-semibold">{tLoader("cardTitle")}</h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {tLoader("cardDescription")}
                   </p>
                 </div>
               </CardContent>

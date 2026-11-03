@@ -2252,5 +2252,39 @@
     "cannotPreviewTitle": "This file can't be shown here",
     "cannotPreview": "Download it to open it in Excel or Word.",
     "downloadFile": "Download"
+  },
+  "reports": {
+    "loaderTrucks": {
+      "cardTitle": "Loader trucks by employee",
+      "cardDescription": "Trucks and loading rounds each employee confirmed in the period",
+      "title": "Loader trucks by employee",
+      "subtitle": "Each confirmed loading round, counted for the employee who confirmed it.",
+      "back": "Reports",
+      "from": "From",
+      "to": "To",
+      "export": "Excel",
+      "employee": "Employee",
+      "trucks": "Trucks",
+      "rounds": "Rounds",
+      "plate": "Plate",
+      "round": "Round",
+      "confirmedAt": "Confirmed at",
+      "loaders": "Employees",
+      "distinctTrucks": "Distinct trucks",
+      "distinctTrucksHint": "A truck confirmed by more than one employee is counted once here",
+      "totalRounds": "Loading rounds",
+      "empty": "No confirmed loadings in this period.",
+      "loadFailed": "Could not load the report",
+      "selectRange": "Select the date range",
+      "window": "Window",
+      "windowClamped": "Reports start on {date}. Results begin on that date.",
+      "showTrucks": "Show trucks for {name}",
+      "hideTrucks": "Hide trucks for {name}",
+      "excelTitle": "Loader trucks by employee",
+      "excelGenerated": "Generated",
+      "excelWindow": "Window",
+      "excelSummarySheet": "Summary",
+      "excelDetailSheet": "Details"
+    }
   }
 }

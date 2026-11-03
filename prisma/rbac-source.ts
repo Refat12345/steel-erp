@@ -203,6 +203,14 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
   { code: "report.customer_balance", displayName: "تقرير رصيد زبون", displayNameEn: "Customer balance report", module: "reports" },
   { code: "report.salesorder_status", displayName: "تقرير حالة أمر بيع", displayNameEn: "Sales order status report", module: "reports" },
   { code: "report.audit", displayName: "تقرير التدقيق", displayNameEn: "Audit report", module: "reports" },
+  // Confirmed loading rounds per employee. Not a role default: admin receives
+  // every catalog code at runtime, and any other user needs an explicit grant.
+  {
+    code: "report.loader_trucks",
+    displayName: "تقرير سيارات التحميل حسب الموظف",
+    displayNameEn: "Loader trucks by employee",
+    module: "reports",
+  },
   // Analytics / Dashboard
   { code: "dashboard.view", displayName: "عرض لوحة المؤشرات والإحصاءات", displayNameEn: "View dashboard and statistics", module: "analytics" },
   // Stricter add-on permission: when present in addition to `dashboard.view`,

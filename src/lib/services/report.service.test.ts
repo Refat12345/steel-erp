@@ -5,6 +5,7 @@ const mockPrisma = vi.hoisted(() => ({
   destination: { findUnique: vi.fn() },
   sizeLookup: { findUnique: vi.fn() },
   truckOperation: { findMany: vi.fn() },
+  bridgeRound: { findMany: vi.fn() },
   billetReceipt: { findMany: vi.fn() },
   supplierContract: { findUnique: vi.fn(), findMany: vi.fn() },
 }));
@@ -31,6 +32,7 @@ import {
   getCustomerWithdrawalsReport,
   getGovernorateWithdrawalsReport,
   getDailyBilletReport,
+  getLoaderTrucksReport,
 } from "./report.service";
 import { ServiceError } from "./errors";
 
@@ -1599,5 +1601,261 @@ describe("getDailyBilletReport", () => {
       }),
     ]);
     expect(report.summary.totalRemainingTons).toBe(60);
+  });
+});
+
+describe("getLoaderTrucksReport", () => {
+  const juneWindow = {
+    gte: new Date(2026, 5, 1, 8, 0, 0, 0),
+    lt: new Date(2026, 5, 11, 8, 0, 0, 0),
+  };
+
+  function round(overrides: {
+    roundNumber: number;
+    at: Date;
+    loaderId: number;
+    loaderName: string | null;
+    truckId: number;
+    plate: string;
+  }) {
+    return {
+      roundNumber: overrides.roundNumber,
+      loadingConfirmedAt: overrides.at,
+      loaderId: overrides.loaderName == null ? null : overrides.loaderId,
+      loader:
+        overrides.loaderName == null
+          ? null
+          : { id: overrides.loaderId, fullName: overrides.loaderName },
+      truckOperation: {
+        id: overrides.truckId,
+        plateNumber: overrides.plate,
+      },
+    };
+  }
+
+  it("counts two rounds on one truck as one truck and two rounds", async () => {
+    mockPrisma.bridgeRound.findMany.mockResolvedValue([
+      round({
+        roundNumber: 2,
+        at: new Date(2026, 5, 2, 14, 0, 0),
+        loaderId: 7,
+        loaderName: "أحمد",
+        truckId: 10,
+        plate: "12345",
+      }),
+      round({
+        roundNumber: 1,
+        at: new Date(2026, 5, 2, 10, 0, 0),
+        loaderId: 7,
+        loaderName: "أحمد",
+        truckId: 10,
+        plate: "12345",
+      }),
+    ]);
+
+    const report = await getLoaderTrucksReport({
+      fromDate: "2026-06-01",
+      toDate: "2026-06-10",
+    });
+
+    expect(mockPrisma.bridgeRound.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          loaderId: { not: null },
+          loadingConfirmedAt: { not: null, ...juneWindow },
+          truckOperation: { status: { not: "Cancelled" } },
+        },
+      }),
+    );
+    expect(report.loaders).toEqual([
+      {
+        userId: 7,
+        fullName: "أحمد",
+        truckCount: 1,
+        roundCount: 2,
+        rounds: [
+          {
+            truckOperationId: 10,
+            plateNumber: "12345",
+            roundNumber: 1,
+            loadingConfirmedAt: new Date(2026, 5, 2, 10, 0, 0).toISOString(),
+          },
+          {
+            truckOperationId: 10,
+            plateNumber: "12345",
+            roundNumber: 2,
+            loadingConfirmedAt: new Date(2026, 5, 2, 14, 0, 0).toISOString(),
+          },
+        ],
+      },
+    ]);
+    expect(report.totals).toEqual({
+      loaderCount: 1,
+      truckCount: 1,
+      roundCount: 2,
+    });
+  });
+
+  it("credits one truck to each confirmer and counts it once in the total", async () => {
+    mockPrisma.bridgeRound.findMany.mockResolvedValue([
+      round({
+        roundNumber: 1,
+        at: new Date(2026, 5, 3, 9, 0, 0),
+        loaderId: 7,
+        loaderName: "أحمد",
+        truckId: 10,
+        plate: "12345",
+      }),
+      round({
+        roundNumber: 2,
+        at: new Date(2026, 5, 3, 12, 0, 0),
+        loaderId: 8,
+        loaderName: "سامي",
+        truckId: 10,
+        plate: "12345",
+      }),
+    ]);
+
+    const report = await getLoaderTrucksReport({
+      fromDate: "2026-06-01",
+      toDate: "2026-06-10",
+    });
+
+    expect(report.loaders).toEqual([
+      expect.objectContaining({ userId: 7, truckCount: 1, roundCount: 1 }),
+      expect.objectContaining({ userId: 8, truckCount: 1, roundCount: 1 }),
+    ]);
+    expect(report.totals).toEqual({
+      loaderCount: 2,
+      truckCount: 1,
+      roundCount: 2,
+    });
+  });
+
+  it("sorts employees by truck count, then name", async () => {
+    mockPrisma.bridgeRound.findMany.mockResolvedValue([
+      round({
+        roundNumber: 1,
+        at: new Date(2026, 5, 4, 9, 0, 0),
+        loaderId: 2,
+        loaderName: "Bassel",
+        truckId: 1,
+        plate: "1",
+      }),
+      round({
+        roundNumber: 1,
+        at: new Date(2026, 5, 4, 10, 0, 0),
+        loaderId: 1,
+        loaderName: "Ahmad",
+        truckId: 2,
+        plate: "2",
+      }),
+      round({
+        roundNumber: 1,
+        at: new Date(2026, 5, 4, 11, 0, 0),
+        loaderId: 1,
+        loaderName: "Ahmad",
+        truckId: 3,
+        plate: "3",
+      }),
+      round({
+        roundNumber: 1,
+        at: new Date(2026, 5, 4, 12, 0, 0),
+        loaderId: 3,
+        loaderName: "Sami",
+        truckId: 4,
+        plate: "4",
+      }),
+    ]);
+
+    const report = await getLoaderTrucksReport({
+      fromDate: "2026-06-01",
+      toDate: "2026-06-10",
+    });
+
+    expect(report.loaders.map((row) => row.fullName)).toEqual([
+      "Ahmad",
+      "Bassel",
+      "Sami",
+    ]);
+    expect(report.loaders[0].truckCount).toBe(2);
+  });
+
+  it("drops a round whose loader row is missing", async () => {
+    mockPrisma.bridgeRound.findMany.mockResolvedValue([
+      round({
+        roundNumber: 1,
+        at: new Date(2026, 5, 2, 10, 0, 0),
+        loaderId: 7,
+        loaderName: null,
+        truckId: 10,
+        plate: "12345",
+      }),
+      round({
+        roundNumber: 1,
+        at: new Date(2026, 5, 2, 11, 0, 0),
+        loaderId: 8,
+        loaderName: "سامي",
+        truckId: 11,
+        plate: "999",
+      }),
+    ]);
+
+    const report = await getLoaderTrucksReport({
+      fromDate: "2026-06-01",
+      toDate: "2026-06-10",
+    });
+
+    expect(report.loaders.map((row) => row.userId)).toEqual([8]);
+    expect(report.totals.truckCount).toBe(1);
+  });
+
+  it("rejects inverted and oversized date ranges", async () => {
+    await expect(
+      getLoaderTrucksReport({
+        fromDate: "2026-06-10",
+        toDate: "2026-06-01",
+      }),
+    ).rejects.toMatchObject({ messageKey: "fromDateAfterToDate" });
+
+    await expect(
+      getLoaderTrucksReport({
+        fromDate: "2025-01-01",
+        toDate: "2026-06-01",
+      }),
+    ).rejects.toMatchObject({ messageKey: "dateRangeExceedsOneYear" });
+
+    expect(mockPrisma.bridgeRound.findMany).not.toHaveBeenCalled();
+  });
+
+  it("clamps the window to the analytics start and flags the report", async () => {
+    mockPrisma.bridgeRound.findMany.mockResolvedValue([]);
+    const analyticsStart = new Date(2026, 5, 5, 8, 0, 0, 0);
+    mockClampEventWindow.mockResolvedValueOnce({
+      from: analyticsStart,
+      to: new Date(2026, 5, 11, 8, 0, 0, 0),
+      clamped: true,
+      analyticsStartDate: "2026-06-05",
+    });
+
+    const report = await getLoaderTrucksReport({
+      fromDate: "2026-06-01",
+      toDate: "2026-06-10",
+    });
+
+    expect(report.windowClamped).toBe(true);
+    expect(report.analyticsStartDate).toBe("2026-06-05");
+    expect(report.fromDate).toBe("2026-06-05");
+    expect(mockPrisma.bridgeRound.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          loadingConfirmedAt: {
+            not: null,
+            gte: analyticsStart,
+            lt: new Date(2026, 5, 11, 8, 0, 0, 0),
+          },
+        }),
+      }),
+    );
   });
 });

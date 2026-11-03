@@ -2252,5 +2252,39 @@
     "cannotPreviewTitle": "هذا الملف ما بينعرض هون",
     "cannotPreview": "نزّل الملف حتى تفتحه ببرنامج Excel أو Word.",
     "downloadFile": "تنزيل"
+  },
+  "reports": {
+    "loaderTrucks": {
+      "cardTitle": "سيارات التحميل حسب الموظف",
+      "cardDescription": "عدد السيارات وجولات التحميل التي أكّدها كل موظف خلال الفترة",
+      "title": "سيارات التحميل حسب الموظف",
+      "subtitle": "كل جولة تحميل مؤكّدة، محسوبة للموظف الذي أكّدها.",
+      "back": "التقارير",
+      "from": "من",
+      "to": "إلى",
+      "export": "إكسل",
+      "employee": "الموظف",
+      "trucks": "السيارات",
+      "rounds": "الجولات",
+      "plate": "اللوحة",
+      "round": "الجولة",
+      "confirmedAt": "وقت التأكيد",
+      "loaders": "الموظفون",
+      "distinctTrucks": "سيارات مميزة",
+      "distinctTrucksHint": "السيارة التي أكّدها أكثر من موظف تُحسب مرة واحدة هنا",
+      "totalRounds": "جولات التحميل",
+      "empty": "ما في تأكيد تحميل خلال هذه الفترة.",
+      "loadFailed": "تعذر تحميل التقرير",
+      "selectRange": "اختر الفترة",
+      "window": "الفترة",
+      "windowClamped": "بداية التقارير {date}، والنتائج من هذا التاريخ.",
+      "showTrucks": "عرض سيارات {name}",
+      "hideTrucks": "إخفاء سيارات {name}",
+      "excelTitle": "سيارات التحميل حسب الموظف",
+      "excelGenerated": "تاريخ التوليد",
+      "excelWindow": "النافذة",
+      "excelSummarySheet": "الملخص",
+      "excelDetailSheet": "التفاصيل"
+    }
   }
 }
